@@ -6,18 +6,28 @@ pub enum Whitespace<'input> {
     /// 空格
     Space,
     /// 换行
-    NewLine,
+    NewLine(&'input str),
     /// 制表符
     Tab,
     /// 注释, use `%%` symbol (inline, comment)
     Comment(&'input str),
+}
+impl Whitespace<'_> {
+    pub fn len(&self) -> usize {
+        match self {
+            Whitespace::Space => 1,
+            Whitespace::Tab => 1,
+            Whitespace::NewLine(s) => s.len(),
+            Whitespace::Comment(c) => c.len() + 4,
+        }
+    }
 }
 
 impl fmt::Display for Whitespace<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Whitespace::Space => f.write_str(" "),
-            Whitespace::NewLine => f.write_str("\n"),
+            Whitespace::NewLine(s) => f.write_str(s),
             Whitespace::Tab => f.write_str("\t"),
             Whitespace::Comment(str) => write!(f, "%%{str}%%"),
         }
@@ -94,6 +104,35 @@ pub enum Token<'input> {
     Slash,
     /// Escaped
     Escaped(char),
+}
+
+impl Token<'_> {
+    pub fn len(&self) -> usize {
+        match self {
+            Token::Text(s) => s.len(),
+            Token::Number(s) => s.len(),
+            Token::Whitespace(ws) => ws.len(),
+            Token::DoubleLBracket
+            | Token::DoubleRBracket
+            | Token::BlockReference
+            | Token::Escaped(_) => 2,
+            Token::Ordered(n) => get_digit_count(*n) + 1,
+            _ => 1,
+        }
+    }
+}
+
+fn get_digit_count(mut num: u32) -> usize {
+    if num == 0 {
+        return 1;
+    }
+
+    let mut count = 0usize;
+    while num > 0 {
+        num /= 10;
+        count += 1;
+    }
+    count
 }
 
 impl fmt::Display for Token<'_> {
@@ -176,6 +215,9 @@ impl TokenWithLocation<'_> {
             self.token,
             Token::Whitespace(Whitespace::Space | Whitespace::Tab)
         )
+    }
+    pub fn len(&self) -> usize {
+        self.token.len()
     }
 }
 
@@ -263,13 +305,15 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
     match ch {
         ' ' => consume_and_return(chars, Token::Whitespace(Whitespace::Space)),
         '\t' => consume_and_return(chars, Token::Whitespace(Whitespace::Tab)),
-        '\n' => consume_and_return(chars, Token::Whitespace(Whitespace::NewLine)),
+        '\n' => consume_and_return(chars, Token::Whitespace(Whitespace::NewLine("\n"))),
         '\r' => {
             chars.next();
             if let Some('\n') = chars.peek() {
                 chars.next();
+                consume_and_return(chars, Token::Whitespace(Whitespace::NewLine("\r\n")))
+            } else {
+                consume_and_return(chars, Token::Whitespace(Whitespace::NewLine("\r")))
             }
-            consume_and_return(chars, Token::Whitespace(Whitespace::NewLine))
         }
         '#' => {
             chars.next();

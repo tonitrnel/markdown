@@ -93,6 +93,10 @@ impl<T> Tree<T> {
     //         self.append(node);
     //     }
     // }
+    /// 替换指定位置的节点为传入的节点
+    ///
+    /// 返回值:
+    /// 被替换的节点
     pub fn replace(&mut self, idx: usize, item: T) -> Option<TreeNode<T>> {
         if idx >= self.nodes.len() {
             return None;
@@ -181,31 +185,41 @@ impl<T> Tree<T> {
     }
 
     #[allow(unused)]
+    /// 将指针移动到指定节点的下一个节点
     pub fn move_next_sibling(&mut self, index: usize) -> Option<usize> {
         self.cur = self.nodes[index].next;
         self.cur
     }
 
-    ///查看父节点
+    /// 查看当前节点的父节点的 ID
     #[allow(unused)]
     pub fn peek_up(&self) -> Option<usize> {
         self.forks.last().copied()
     }
 
     #[allow(unused)]
+    /// 清空分叉，这将丢失“当前节点”的指针，清空后当前的指针将指向根节点
     pub fn reset(&mut self) {
         self.cur = if self.is_empty() { None } else { Some(0) };
         self.forks.clear();
     }
 
     #[allow(unused)]
+    /// 节点数量是否为空
+    ///
+    /// 类似：`len() == 0`
     pub fn is_empty(&self) -> bool {
         self.nodes.len() <= 1
     }
+
+    /// 获取节点数量
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
+    /// 获取上级节点的位置
+    ///
+    /// 注：查询节点为 Root 时会返回其自身
     pub fn get_parent(&self, index: usize) -> usize {
         self.nodes[index].parent
     }

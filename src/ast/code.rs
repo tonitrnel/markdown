@@ -1,6 +1,7 @@
+use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CodeVariant{
+pub enum CodeVariant {
     Inline,
     Fenced,
     Indented,
@@ -10,4 +11,6 @@ pub enum CodeVariant{
 pub struct Code {
     pub variant: CodeVariant,
     pub language: Option<String>,
+    pub length: usize,
+    pub mark: Token<'static>,
 }

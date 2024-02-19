@@ -1,10 +1,15 @@
+use crate::parser::{Node, Parser};
 use crate::tokenizer::{Token, TokenIterator, TokenWithLocation, Whitespace};
 use std::fmt::{Display, Formatter};
-use std::ops::Index;
+use std::ops::{Index, Range};
 
 mod block_quote;
-mod code_block;
+mod code;
 mod heading;
+
+pub use block_quote::*;
+pub use code::*;
+pub use heading::*;
 
 pub enum BlockMatching {
     Unmatched = 0,
@@ -28,7 +33,7 @@ impl<'input> Line<'input> {
         let mut tokens = Vec::new();
         for it in iter {
             match &it.token {
-                Token::Whitespace(Whitespace::NewLine) => return Some(Line::new(tokens)),
+                Token::Whitespace(Whitespace::NewLine(_)) => return Some(Line::new(tokens)),
                 _ => tokens.push(it),
             }
         }
@@ -177,11 +182,14 @@ impl<'input> Line<'input> {
         self.indent >= 4
     }
     pub fn slice(&self, start: usize, end: usize) -> Line<'input> {
+        self.slice_range(Range { start, end })
+    }
+    pub fn slice_range(&self, range: Range<usize>) -> Line<'input> {
         Line::new(
             self.inner
                 .iter()
-                .skip(start)
-                .take(end - start)
+                .skip(range.start)
+                .take(range.end - range.start)
                 .cloned()
                 .collect::<Vec<_>>(),
         )
@@ -206,4 +214,28 @@ impl<'input> Index<usize> for Line<'input> {
     fn index(&self, index: usize) -> &Self::Output {
         self.inner.index(self.start_offset + index)
     }
+}
+
+pub trait BlockProcessStage {
+    /// 初始化容器
+    ///
+    /// 该函数将检查 Line 是否符合当前 Block 定义，如果符合则向 Parser Tree 上创建当前 Block
+    ///
+    /// 返回值:
+    /// - `BlockMatching::Unmatched` 不匹配该 Block 定义
+    /// - `BlockMatching::MatchedLeaf` 已匹配并且创建了 Block，该 Block 不支持嵌套其他 Block
+    /// - `BlockMatching::MatchedContainer` 已匹配并且创建了 Block，该 Block 支持嵌套其他 Block，需要进一步拆分
+    fn initiate<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching;
+
+    /// 继续处理
+    ///
+    /// 该函数将为未关闭的 Block 进行处理
+    ///
+    /// 返回值：
+    /// - `BlockProcessing::Unprocessed` 未处理，后续步骤应该退出当前容器
+    /// - `BlockProcessing::Processed` 已处理，后续步骤也应该退出当前容器
+    /// - `BlockProcessing::Further` 可以继续处理
+    fn process<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockProcessing;
+    #[allow(unused_variables)]
+    fn finalize(parser: &mut Parser, node: Node) {}
 }

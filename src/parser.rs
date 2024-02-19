@@ -26,6 +26,7 @@ pub struct Parser<'input> {
     tree: Tree<Node>,
     inlines: HashMap<usize, Vec<Line<'input>>>,
     doc: usize,
+    curr_node: usize,
     prev_node: usize,
     node: usize,
     all_closed: bool,
@@ -42,6 +43,7 @@ impl<'input> Parser<'input> {
             tree,
             doc,
             node: doc,
+            curr_node: doc,
             prev_node: doc,
             all_closed: true,
             last_matched_node: doc,
@@ -98,6 +100,7 @@ impl<'input> Parser<'input> {
     fn incorporate_line(&mut self, line: Line) {
         let all_closed = self.prev_node == self.doc;
         let last_matched_node = self.doc;
+        while let Some(container) = self.tree.pop() {}
         // non indented code and common block start token
         // if line.indent < 4 && !line.starts_with_matches(Parser::is_special_token, 1) {}
     }
@@ -148,7 +151,7 @@ impl<'input> Parser<'input> {
         let idx = self.tree.peek_up().unwrap_or(self.doc);
         &self.tree[idx]
     }
-    pub fn interrupt_block(&mut self) {
+    pub fn close_unmatched_blocks(&mut self) {
         if !self.all_closed {
             loop {
                 if self.prev_node == self.last_matched_node {
@@ -161,11 +164,13 @@ impl<'input> Parser<'input> {
             self.all_closed = true;
         }
     }
+    /// 调用指定节点的 finalize 方法处理并关闭该节点，将当前节点指针移动至父节点
     fn finalize(&mut self, node_id: usize) {
+        let parent = self.tree.get_parent(node_id);
         let node = &mut self.tree[node_id];
         node.open = false;
         // todo: call node finalize
-        self.tree.pop();
+        self.curr_node = parent;
     }
 }
 
