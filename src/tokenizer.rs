@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fmt::Write;
 use std::iter::Peekable;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
@@ -104,6 +105,7 @@ pub enum Token<'input> {
     Slash,
     /// Escaped
     Escaped(char),
+    Invalid(char),
 }
 
 impl Token<'_> {
@@ -172,6 +174,7 @@ impl fmt::Display for Token<'_> {
             Token::Ordered(u) => write!(f, "{u}."),
             Token::Slash => write!(f, "/"),
             Token::Escaped(ch) => write!(f, "\\{ch}"),
+            Token::Invalid(_) => f.write_char('\u{FFFD}'),
         }
     }
 }
@@ -210,10 +213,33 @@ impl TokenWithLocation<'_> {
     pub fn is_column_start(&self) -> bool {
         self.location.is_column_start()
     }
+    /// 是空白或制表符
     pub fn is_space_or_tab(&self) -> bool {
         matches!(
             self.token,
             Token::Whitespace(Whitespace::Space | Whitespace::Tab)
+        )
+    }
+    /// 是用于 Markdown Block 相关的 Token
+    pub fn is_special_token(&self) -> bool {
+        matches!(
+            self.token,
+            // ATX Heading
+            Token::Crosshatch
+                // Fenced code
+                | Token::Backtick
+                | Token::Tilde
+                // Thematic breaks
+                | Token::Asterisk
+                | Token::Underscore
+                | Token::Plus
+                | Token::Eq
+                // HTML Tag
+                | Token::Lt
+                | Token::Gt
+                // Ordered Task or Task
+                | Token::Ordered(..)
+                | Token::Hyphen
         )
     }
     pub fn len(&self) -> usize {
@@ -224,6 +250,12 @@ impl TokenWithLocation<'_> {
 impl fmt::Display for TokenWithLocation<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.token.fmt(f)
+    }
+}
+
+impl<'input> PartialEq<Token<'input>> for TokenWithLocation<'input> {
+    fn eq(&self, other: &Token) -> bool {
+        &self.token == other
     }
 }
 
@@ -414,6 +446,10 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
                 Some(Token::Text("%"))
             }
         }
+        '\u{0000}' => {
+            chars.next();
+            Some(Token::Invalid(ch))
+        }
         ch => {
             let ch_len = ch.len_utf8();
             let start = chars.pos;
@@ -498,6 +534,20 @@ mod tests {
                 .tokenize()
                 .count(),
             16
+        )
+    }
+
+    #[test]
+    fn other() {
+        let t1 = "**(Test)**WithoutSpace";
+        let t2 = "**（测试）**不加空格";
+        println!(
+            "t1:\n{:#?}",
+            Tokenizer::new(t1).tokenize().collect::<Vec<_>>()
+        );
+        println!(
+            "t2:\n{:#?}",
+            Tokenizer::new(t2).tokenize().collect::<Vec<_>>()
         )
     }
 }

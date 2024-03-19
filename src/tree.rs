@@ -6,16 +6,10 @@ pub struct TreeNode<T> {
     #[allow(unused)]
     pub item: T,
     parent: usize,
-    child: Option<usize>,
+    first_child: Option<usize>,
+    last_child: Option<usize>,
     next: Option<usize>,
 }
-
-impl<T> TreeNode<T> {
-    pub(crate) fn get_parent(&self) -> usize {
-        self.parent
-    }
-}
-
 impl<T: PartialEq> PartialEq<T> for TreeNode<T> {
     fn eq(&self, other: &T) -> bool {
         self.item.eq(other)
@@ -46,11 +40,7 @@ impl<T> IndexMut<usize> for Tree<T> {
 
 impl<T> Tree<T> {
     pub fn new() -> Tree<T> {
-        Tree {
-            nodes: Vec::new(),
-            forks: Vec::new(),
-            cur: None,
-        }
+        Tree::default()
     }
     #[allow(unused)]
     pub fn with_capacity(cap: usize) -> Tree<T> {
@@ -79,11 +69,17 @@ impl<T> Tree<T> {
         let index = self.create_node(node);
         // 如果当前索引存在则进行顺序追加
         if let Some(idx) = self.cur {
+            let parent = self.get_parent(idx);
             self.nodes[idx].next = Some(index);
+            self.nodes[parent].last_child = Some(index);
         }
         // 如果当前索引不存在则意味着存在分叉，为最后一个分叉位置创建一个子节点
         else if let Some(&parent) = self.forks.last() {
-            self.nodes[parent].child = Some(index);
+            let parent = &mut self.nodes[parent];
+            if parent.first_child.is_none() {
+                parent.first_child = Some(index)
+            }
+            parent.last_child = Some(index);
         }
         self.cur = Some(index);
         index
@@ -104,10 +100,11 @@ impl<T> Tree<T> {
         let node = TreeNode {
             item,
             parent: self.nodes[idx].parent,
-            child: self.nodes[idx].child,
+            first_child: self.nodes[idx].first_child,
+            last_child: self.nodes[idx].last_child,
             next: self.nodes[idx].next,
         };
-        return Some(std::mem::replace(&mut self.nodes[idx], node));
+        Some(std::mem::replace(&mut self.nodes[idx], node))
     }
 
     /// 进入当前索引所在的分支，并返回当前分叉点的索引。
@@ -121,7 +118,7 @@ impl<T> Tree<T> {
     pub fn push(&mut self) -> usize {
         let cur_ix = self.cur.unwrap();
         self.forks.push(cur_ix);
-        self.cur = self.nodes[cur_ix].child;
+        self.cur = self.nodes[cur_ix].first_child;
         cur_ix
     }
     /// 退出当前分支，并返回退出后的当前节点索引。
@@ -145,7 +142,8 @@ impl<T> Tree<T> {
         self.nodes.push(TreeNode {
             item,
             parent: self.peek_up().unwrap_or(0),
-            child: None,
+            first_child: None,
+            last_child: None,
             next: None,
         });
         index
@@ -223,6 +221,25 @@ impl<T> Tree<T> {
     pub fn get_parent(&self, index: usize) -> usize {
         self.nodes[index].parent
     }
+    pub fn get_first_child(&self, index: usize) -> Option<usize> {
+        self.nodes[index].first_child
+    }
+    pub fn get_last_child(&self, index: usize) -> Option<usize> {
+        self.nodes[index].last_child
+    }
+    pub fn get_next(&self, index: usize) -> Option<usize> {
+        self.nodes[index].next
+    }
+}
+
+impl<T> Default for Tree<T> {
+    fn default() -> Self {
+        Self {
+            nodes: Vec::new(),
+            forks: Vec::new(),
+            cur: None,
+        }
+    }
 }
 impl<T> Debug for Tree<T>
 where
@@ -242,7 +259,7 @@ where
                 write!(f, "  ")?;
             }
             writeln!(f, "{:?}", &tree.nodes[cur].item)?;
-            if let Some(child_ix) = tree.nodes[cur].child {
+            if let Some(child_ix) = tree.nodes[cur].first_child {
                 debug_tree(tree, child_ix, indent + 1, f)?;
             }
             if let Some(next_ix) = tree.nodes[cur].next {

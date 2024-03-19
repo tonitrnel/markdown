@@ -98,6 +98,7 @@ impl MarkdownNode {
                 | MarkdownNode::Table
         )
     }
+    /// 是否接受目标节点
     pub fn can_contain(&self, target: &MarkdownNode) -> bool {
         match self {
             MarkdownNode::List(..) => matches!(target, MarkdownNode::ListItem(..)),
@@ -113,6 +114,7 @@ impl MarkdownNode {
             _ => false,
         }
     }
+    /// 是否接受纯文本行
     pub fn accepts_lines(&self) -> bool {
         matches!(
             self,
