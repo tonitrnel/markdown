@@ -113,12 +113,13 @@ impl<'input> Line<'input> {
         Line::find_next_nonspace(self.inner.iter().skip(self.start_offset)).unwrap_or(0)
     }
 
-    pub fn peek(&self) -> Option<&TokenWithLocation> {
-        self.inner.get(self.start_offset)
+    pub fn peek(&self) -> Option<&Token<'input>> {
+        self.inner.get(self.start_offset).map(|it| &it.token)
     }
-    pub fn next(&mut self) -> Option<&TokenWithLocation> {
+    pub fn next(&mut self) -> Option<Token<'input>> {
+        let val = self.peek().cloned();
         self.start_offset += 1;
-        self.peek()
+        val
     }
     /// 跳过连续相同的 Tokens
     pub fn skip_consecutive_tokens(&mut self, token: &Token) {
@@ -148,9 +149,9 @@ impl<'input> Line<'input> {
         self
     }
     /// 如果下一个 Token 断定为 true 则消费，否则什么也不做
-    pub fn consume(&mut self, predicate: impl FnOnce(&TokenWithLocation) -> bool) -> bool {
+    pub fn consume<P: ConsumePredicate<'input>>(&mut self, predicate: P) -> bool {
         if let Some(next) = self.peek() {
-            if predicate(next) {
+            if predicate.evaluate(next) {
                 self.start_offset += 1;
                 true
             } else {
@@ -159,6 +160,11 @@ impl<'input> Line<'input> {
         } else {
             false
         }
+    }
+    pub fn validate<P: ConsumePredicate<'input>>(&self, index: usize, predicate: P) -> bool {
+        self.get(index)
+            .map(|it| predicate.evaluate(it))
+            .unwrap_or(false)
     }
     /// 前进到下一个非空白的 token 字符
     pub fn advance_next_nonspace(&mut self) -> &Self {
@@ -225,9 +231,10 @@ impl<'input> Line<'input> {
         })
     }
     /// 从快照恢复到之前的位置
-    pub fn resume(&mut self, snapshot: &LineSnapshot) -> &mut Self {
-        self.start_offset = snapshot.0.start;
-        self.end_offset = snapshot.0.end;
+    pub fn resume(&mut self, snapshot: impl AsRef<LineSnapshot>) -> &mut Self {
+        let range = &snapshot.as_ref().0;
+        self.start_offset = range.start;
+        self.end_offset = range.end;
         self
     }
     /// 获取当前位置
@@ -236,8 +243,8 @@ impl<'input> Line<'input> {
     }
 
     /// 从原始 vector 安全的获取引用，等同于 vector 的 `get`
-    pub fn get(&self, index: usize) -> Option<&TokenWithLocation<'input>> {
-        self.inner.get(index)
+    pub fn get(&self, index: usize) -> Option<&Token<'input>> {
+        self.inner.get(index).map(|it| &it.token)
     }
 }
 impl Display for Line<'_> {
@@ -254,13 +261,44 @@ impl Display for Line<'_> {
     }
 }
 
+impl Debug for Line<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", &self.inner[self.start_offset..self.end_offset])
+    }
+}
+
+pub trait ConsumePredicate<'input> {
+    fn evaluate(self, token: impl AsRef<Token<'input>>) -> bool;
+}
+
+impl<'input> ConsumePredicate<'input> for Token<'input> {
+    fn evaluate(self, token: impl AsRef<Token<'input>>) -> bool {
+        &self == token.as_ref()
+    }
+}
+
+impl<'input, F> ConsumePredicate<'input> for F
+where
+    F: FnOnce(&Token<'input>) -> bool,
+{
+    fn evaluate(self, token: impl AsRef<Token<'input>>) -> bool {
+        let token = token.as_ref();
+        self(token)
+    }
+}
+
+impl AsRef<LineSnapshot> for LineSnapshot {
+    fn as_ref(&self) -> &LineSnapshot {
+        self
+    }
+}
 impl<'input> Index<usize> for Line<'input> {
     type Output = TokenWithLocation<'input>;
     fn index(&self, index: usize) -> &Self::Output {
         self.inner.index(self.start_offset + index)
     }
 }
-
+#[derive(Clone)]
 pub struct LineSnapshot(Range<usize>);
 impl Debug for LineSnapshot {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -317,34 +355,10 @@ mod tests {
             while let Some(line) = guard.line() {
                 i += 1;
                 match i {
-                    1 => assert!(matches!(
-                        line.peek(),
-                        Some(TokenWithLocation {
-                            token: Token::Text("abcdefgh"),
-                            ..
-                        })
-                    )),
-                    2 => assert!(matches!(
-                        line.peek(),
-                        Some(TokenWithLocation {
-                            token: Token::Number("1256648483541"),
-                            ..
-                        })
-                    )),
-                    3 => assert!(matches!(
-                        line.peek(),
-                        Some(TokenWithLocation {
-                            token: Token::Crosshatch,
-                            ..
-                        })
-                    )),
-                    4 => assert!(matches!(
-                        line.peek(),
-                        Some(TokenWithLocation {
-                            token: Token::Text("sadfrasg"),
-                            ..
-                        })
-                    )),
+                    1 => assert!(matches!(line.peek(), Some(Token::Text("abcdefgh")))),
+                    2 => assert!(matches!(line.peek(), Some(Token::Number("1256648483541")))),
+                    3 => assert!(matches!(line.peek(), Some(Token::Crosshatch))),
+                    4 => assert!(matches!(line.peek(), Some(Token::Text("sadfrasg")))),
                     _ => panic!("unexpected line"),
                 }
             }
@@ -363,27 +377,9 @@ mod tests {
                 i += 1;
                 match i {
                     1 => assert!(line.is_blank()),
-                    2 => assert!(matches!(
-                        line.peek(),
-                        Some(TokenWithLocation {
-                            token: Token::Number("1256648483541"),
-                            ..
-                        })
-                    )),
-                    3 => assert!(matches!(
-                        line.peek(),
-                        Some(TokenWithLocation {
-                            token: Token::Crosshatch,
-                            ..
-                        })
-                    )),
-                    4 => assert!(matches!(
-                        line.peek(),
-                        Some(TokenWithLocation {
-                            token: Token::Text("sadfrasg"),
-                            ..
-                        })
-                    )),
+                    2 => assert!(matches!(line.peek(), Some(Token::Number("1256648483541")))),
+                    3 => assert!(matches!(line.peek(), Some(Token::Crosshatch))),
+                    4 => assert!(matches!(line.peek(), Some(Token::Text("sadfrasg")))),
                     _ => panic!("unexpected line"),
                 }
             }
@@ -407,5 +403,17 @@ mod tests {
         assert_eq!(cp2.len(), 3);
         assert_eq!(cp2[0].token, Token::Number("5"));
         assert_eq!(cp2[2].token, Token::Crosshatch);
+    }
+
+    #[test]
+    fn test_peek_and_next() {
+        let mut tokens = Tokenizer::new("r12你5%#").tokenize();
+        let mut line = Line::extract(&mut tokens).unwrap();
+        assert_eq!(line.peek(), Some(&Token::Text("r")));
+        assert_eq!(line.next(), Some(Token::Text("r")));
+        assert_eq!(line.peek(), Some(&Token::Number("12")));
+        assert_eq!(line.peek(), Some(&Token::Number("12")));
+        assert_eq!(line.next(), Some(Token::Number("12")));
+        assert_eq!(line.peek(), Some(&Token::Text("你")));
     }
 }

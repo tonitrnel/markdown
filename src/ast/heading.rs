@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HeadingLevel {
     H1 = 1,
@@ -10,14 +9,18 @@ pub enum HeadingLevel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HeadingVariant{
-    ATX,
-    SETEXT
+pub enum Heading {
+    ATX(ATXHeading),
+    SETEXT(SetextHeading),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Heading {
-    pub variant: HeadingVariant,
+pub struct ATXHeading {
+    pub level: HeadingLevel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetextHeading {
     pub level: HeadingLevel,
 }
 

@@ -1,10 +1,3 @@
-pub use block_quote::*;
-pub use code::*;
-pub use heading::*;
-pub use html::*;
-pub use list::*;
-pub use thematic_break::*;
-
 use crate::ast::{self, MarkdownNode};
 use crate::line::Line;
 use crate::parser::Parser;
@@ -58,23 +51,24 @@ pub fn process<'input>(
     let node = &parser.tree[id].body;
     match node {
         MarkdownNode::Document => BlockProcessing::Further,
-        MarkdownNode::Heading(ast::heading::Heading {
-            variant: ast::heading::HeadingVariant::ATX,
-            ..
-        }) => ATXHeading::process(parser, line),
-        MarkdownNode::Heading(ast::heading::Heading {
-            variant: ast::heading::HeadingVariant::SETEXT,
-            ..
-        }) => SetextHeading::process(parser, line),
-        MarkdownNode::BlockQuote => BlockQuote::process(parser, line),
-        MarkdownNode::Code(ast::code::Code {
-            variant: ast::code::CodeVariant::Fenced,
-            ..
-        }) => FencedCode::process(parser, line),
-        MarkdownNode::Code(ast::code::Code {
-            variant: ast::code::CodeVariant::Indented,
-            ..
-        }) => IndentedCode::process(parser, line),
+        MarkdownNode::Heading(ast::heading::Heading::ATX(..)) => {
+            ast::heading::ATXHeading::process(parser, line)
+        }
+        MarkdownNode::Heading(ast::heading::Heading::SETEXT(..)) => {
+            ast::heading::SetextHeading::process(parser, line)
+        }
+        MarkdownNode::BlockQuote(ast::block_quote::BlockQuote {}) => {
+            ast::block_quote::BlockQuote::process(parser, line)
+        }
+        MarkdownNode::Code(ast::code::Code::Fenced(..)) => {
+            ast::code::FencedCode::process(parser, line)
+        }
+        MarkdownNode::Code(ast::code::Code::Indented(..)) => {
+            ast::code::IndentedCode::process(parser, line)
+        }
+        MarkdownNode::Html(..) => ast::html::Html::process(parser, line),
+        MarkdownNode::List(..) => ast::list::List::process(parser, line),
+        MarkdownNode::ListItem(..) => ast::list::ListItem::process(parser, line),
         _ => BlockProcessing::Unprocessed,
     }
 }
@@ -82,37 +76,33 @@ pub fn process<'input>(
 pub fn after(id: usize, parser: &mut Parser) {
     let node = &parser.tree[id];
     match node.body {
-        MarkdownNode::Heading(ast::heading::Heading {
-            variant: ast::heading::HeadingVariant::ATX,
-            ..
-        }) => ATXHeading::after(id, parser),
-        MarkdownNode::Heading(ast::heading::Heading {
-            variant: ast::heading::HeadingVariant::SETEXT,
-            ..
-        }) => SetextHeading::after(id, parser),
-        MarkdownNode::BlockQuote => BlockQuote::after(id, parser),
-        MarkdownNode::Code(ast::code::Code {
-            variant: ast::code::CodeVariant::Fenced,
-            ..
-        }) => FencedCode::after(id, parser),
-        MarkdownNode::Code(ast::code::Code {
-            variant: ast::code::CodeVariant::Indented,
-            ..
-        }) => IndentedCode::after(id, parser),
+        MarkdownNode::Heading(ast::heading::Heading::ATX(..)) => {
+            ast::heading::ATXHeading::after(id, parser)
+        }
+        MarkdownNode::Heading(ast::heading::Heading::SETEXT(..)) => {
+            ast::heading::SetextHeading::after(id, parser)
+        }
+        MarkdownNode::BlockQuote(ast::block_quote::BlockQuote {}) => {
+            ast::block_quote::BlockQuote::after(id, parser)
+        }
+        MarkdownNode::Code(ast::code::Code::Fenced(..)) => ast::code::FencedCode::after(id, parser),
+        MarkdownNode::Code(ast::code::Code::Indented(..)) => {
+            ast::code::IndentedCode::after(id, parser)
+        }
         _ => (),
     }
 }
 
 pub fn matcher<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
     let matchers = [
-        BlockQuote::before,
-        ATXHeading::before,
-        FencedCode::before,
-        HTML::before,
-        SetextHeading::before,
-        ThematicBreak::before,
-        Item::before,
-        IndentedCode::before,
+        ast::block_quote::BlockQuote::before,
+        ast::heading::ATXHeading::before,
+        ast::code::FencedCode::before,
+        ast::html::Html::before,
+        ast::heading::SetextHeading::before,
+        ast::thematic_break::ThematicBreak::before,
+        ast::list::ListItem::before,
+        ast::code::IndentedCode::before,
     ];
     let snapshot = line.snapshot();
     for matcher in matchers {

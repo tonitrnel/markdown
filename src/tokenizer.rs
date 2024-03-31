@@ -30,7 +30,7 @@ impl fmt::Display for Whitespace<'_> {
             Whitespace::Space => f.write_str(" "),
             Whitespace::NewLine(s) => f.write_str(s),
             Whitespace::Tab => f.write_str("\t"),
-            Whitespace::Comment(str) => write!(f, "%%{str}%%"),
+            Whitespace::Comment(_str) => write!(f, ""),
         }
     }
 }
@@ -100,7 +100,7 @@ pub enum Token<'input> {
     /// BlockReference `#^`
     BlockReference,
     /// Ordered, like: `1. `, `2. `
-    Ordered(u32),
+    Ordered(u64, char),
     /// Slash `/`
     Slash,
     /// Escaped
@@ -118,13 +118,44 @@ impl Token<'_> {
             | Token::DoubleRBracket
             | Token::BlockReference
             | Token::Escaped(_) => 2,
-            Token::Ordered(n) => get_digit_count(*n) + 1,
+            Token::Ordered(n, _) => get_digit_count(*n) + 1,
             _ => 1,
         }
     }
+    pub fn is_space_or_tab(&self) -> bool {
+        matches!(self, Token::Whitespace(Whitespace::Space | Whitespace::Tab))
+    }
+    /// 是用于 Markdown Block 相关的 Token
+    pub fn is_special_token(&self) -> bool {
+        matches!(
+            self,
+            // ATX Heading
+            Token::Crosshatch
+                // Fenced code
+                | Token::Backtick
+                | Token::Tilde
+                // Thematic breaks
+                | Token::Asterisk
+                | Token::Underscore
+                | Token::Plus
+                | Token::Eq
+                // HTML Tag
+                | Token::Lt
+                | Token::Gt
+                // Ordered Task or Task
+                | Token::Ordered(..)
+                | Token::Hyphen
+        )
+    }
 }
 
-fn get_digit_count(mut num: u32) -> usize {
+impl<'input> AsRef<Token<'input>> for Token<'input> {
+    fn as_ref(&self) -> &Token<'input> {
+        self
+    }
+}
+
+fn get_digit_count(mut num: u64) -> usize {
     if num == 0 {
         return 1;
     }
@@ -171,7 +202,7 @@ impl fmt::Display for Token<'_> {
             Token::Question => f.write_str("?"),
             Token::Semicolon => f.write_str(";"),
             Token::BlockReference => f.write_str("#^"),
-            Token::Ordered(u) => write!(f, "{u}."),
+            Token::Ordered(u, d) => write!(f, "{u}{d}"),
             Token::Slash => write!(f, "/"),
             Token::Escaped(ch) => write!(f, "\\{ch}"),
             Token::Invalid(_) => f.write_char('\u{FFFD}'),
@@ -215,32 +246,10 @@ impl TokenWithLocation<'_> {
     }
     /// 是空白或制表符
     pub fn is_space_or_tab(&self) -> bool {
-        matches!(
-            self.token,
-            Token::Whitespace(Whitespace::Space | Whitespace::Tab)
-        )
+        self.token.is_space_or_tab()
     }
-    /// 是用于 Markdown Block 相关的 Token
     pub fn is_special_token(&self) -> bool {
-        matches!(
-            self.token,
-            // ATX Heading
-            Token::Crosshatch
-                // Fenced code
-                | Token::Backtick
-                | Token::Tilde
-                // Thematic breaks
-                | Token::Asterisk
-                | Token::Underscore
-                | Token::Plus
-                | Token::Eq
-                // HTML Tag
-                | Token::Lt
-                | Token::Gt
-                // Ordered Task or Task
-                | Token::Ordered(..)
-                | Token::Hyphen
-        )
+        self.token.is_special_token()
     }
     pub fn len(&self) -> usize {
         self.token.len()
@@ -410,12 +419,15 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
             let s = peeking_take_while(chars, |ch| ch.is_ascii_digit(), None);
             let mut end = chars.pos;
             match chars.peek() {
-                Some('.') => {
+                Some(d @ '.' | d @ ')') => {
+                    let d = *d;
                     chars.next();
                     end += 1;
                     match chars.peek() {
-                        Some(' ') => Some(Token::Ordered(s.parse::<u32>().unwrap())),
-                        Some(ch) if ch.is_ascii_digit() => {
+                        Some(' ') if s.len() < 10 => {
+                            Some(Token::Ordered(s.parse::<u64>().unwrap(), d))
+                        }
+                        Some(ch) if d == '.' && ch.is_ascii_digit() => {
                             chars.next();
                             peeking_take_while(chars, |ch| ch.is_ascii_digit(), None);
                             Some(Token::Number(&chars.content[start..chars.pos]))
@@ -549,5 +561,24 @@ mod tests {
             "t2:\n{:#?}",
             Tokenizer::new(t2).tokenize().collect::<Vec<_>>()
         )
+    }
+
+    #[test]
+    fn case_3() {
+        let tokens = Tokenizer::new("- hello world")
+            .tokenize()
+            .collect::<Vec<_>>();
+        assert_eq!(tokens[1].token, Token::Whitespace(Whitespace::Space))
+    }
+    #[test]
+    fn case_4() {
+        let tokens = Tokenizer::new("2) hello world")
+            .tokenize()
+            .collect::<Vec<_>>();
+        assert_eq!(tokens[0].token, Token::Ordered(2, ')'));
+        let tokens = Tokenizer::new("1234567890) hello world")
+            .tokenize()
+            .collect::<Vec<_>>();
+        assert_eq!(tokens[0].token, Token::Text("1234567890)"));
     }
 }

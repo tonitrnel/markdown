@@ -125,7 +125,7 @@ impl<'input> Parser<'input> {
         while !matched_leaf {
             if !line.is_indented()
                 && !line
-                    .get(line.indent + 1)
+                    .get(line.indent)
                     .map(|it| it.is_special_token())
                     .unwrap_or(false)
             {
@@ -152,17 +152,24 @@ impl<'input> Parser<'input> {
             && matches!(self.tree[self.curr_proc_node].body, MarkdownNode::Paragraph)
         {
             println!("当前行未结束，存储至之前的 Paragraph");
-            self.inlines
-                .entry(self.curr_proc_node)
-                .or_default()
-                .push(line)
+            self.append_inline(self.curr_proc_node, line);
         } else {
             self.close_unmatched_blocks();
             // 判断是否支持接收纯文本行，只有 Paragraph 、HTML Block、Code Block 支持，部分容器是支持存储空白行
-            if self.tree[container].body.accepts_lines() && !line.is_end() {
+            let cur_container = &self.tree[container].body;
+            if cur_container.accepts_lines() && !line.is_end() {
                 println!("存储当前行剩余内容");
-                self.inlines.entry(container).or_default().push(line);
-                // todo: process html
+                if let MarkdownNode::Html(html) = cur_container {
+                    let sn = line.snapshot();
+                    let is_end = html.is_end(&mut line);
+                    line.resume(sn);
+                    self.append_inline(container, line);
+                    if is_end {
+                        self.finalize(container)
+                    }
+                } else {
+                    self.append_inline(container, line);
+                }
             }
             // 判断行是否已全部消费或者该行是空白行
             else if !line.is_end() && !line.is_blank() {
@@ -181,7 +188,7 @@ impl<'input> Parser<'input> {
     }
     pub fn append_block(&mut self, node: MarkdownNode, loc: Location) -> usize {
         // 如果当前处理中的节点无法容纳插入的节点则退回当上一层
-        while (!self.tree[self.curr_proc_node].body.can_contain(&node)) {
+        while !self.tree[self.curr_proc_node].body.can_contain(&node) {
             self.finalize(self.curr_proc_node)
         }
         let idx = self.tree.append(Node::new(node, loc));
@@ -214,6 +221,9 @@ impl<'input> Parser<'input> {
     pub fn current_container(&self) -> &Node {
         let idx = self.tree.peek_up().unwrap_or(self.doc);
         &self.tree[idx]
+    }
+    pub fn current_proc(&self) -> &Node {
+        &self.tree[self.curr_proc_node]
     }
     pub fn close_unmatched_blocks(&mut self) {
         if self.all_closed {

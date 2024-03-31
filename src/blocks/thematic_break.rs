@@ -1,25 +1,23 @@
-use crate::ast::MarkdownNode;
+use crate::ast::{thematic_break, MarkdownNode};
 use crate::blocks::{BlockMatching, BlockProcessing, BlockStrategy, Line};
 use crate::parser::Parser;
 use crate::tokenizer::Token;
 
-pub struct ThematicBreak {}
-
-impl BlockStrategy for ThematicBreak {
+impl BlockStrategy for thematic_break::ThematicBreak {
     fn before<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
         if line.is_indented() {
             return BlockMatching::Unmatched;
         }
         let location = line.location();
         line.skip_indent();
-        let marker = match line.next().map(|it| it.token) {
+        let marker = match line.next() {
             Some(Token::Hyphen) => Token::Hyphen,
             Some(Token::Underscore) => Token::Underscore,
             Some(Token::Asterisk) => Token::Asterisk,
             _ => return BlockMatching::Unmatched,
         };
         while let Some(next) = line.next() {
-            if next.token == marker || next.is_space_or_tab() {
+            if next == marker || next.is_space_or_tab() {
                 continue;
             }
             return BlockMatching::Unmatched;

@@ -1,20 +1,18 @@
 use std::fmt::Write;
 use std::ops::Range;
 
-use crate::ast::{self, MarkdownNode};
+use crate::ast::{code, MarkdownNode};
 use crate::blocks::{BlockMatching, BlockProcessing, BlockStrategy, Line};
 use crate::parser::Parser;
-use crate::tokenizer::{Token, Whitespace};
+use crate::tokenizer::Token;
 
-pub struct FencedCode {}
-
-impl FencedCode {
+impl code::FencedCode {
     fn try_match(line: &mut Line) -> Option<(Token<'static>, usize, Range<usize>)> {
         if line.is_indented() {
             return None;
         }
         line.skip_indent();
-        let mark = match line.next().map(|it| it.token) {
+        let mark = match line.next() {
             Some(Token::Backtick) => Token::Backtick,
             Some(Token::Tilde) => Token::Tilde,
             _ => return None,
@@ -33,7 +31,7 @@ impl FencedCode {
         while let Some(&next) = line.peek() {
             state = match state {
                 State::Start => {
-                    if next.token == mark {
+                    if next == mark {
                         count += 1;
                         line.next();
                         State::Start
@@ -51,7 +49,7 @@ impl FencedCode {
                 }
                 State::LooseLanguageStatement => State::End,
                 State::StrictLanguageStatement => {
-                    if next.token == Token::Backtick {
+                    if next == Token::Backtick {
                         return None;
                     } else {
                         line.next();
@@ -65,19 +63,18 @@ impl FencedCode {
         Some((mark, count, language_range))
     }
 }
-impl BlockStrategy for FencedCode {
+impl BlockStrategy for code::FencedCode {
     fn before<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
         let location = line[0].location;
         if let Some((marker, length, range)) = Self::try_match(line) {
             parser.close_unmatched_blocks();
             parser.append_block(
-                MarkdownNode::Code(ast::code::Code {
-                    variant: ast::code::CodeVariant::Fenced,
+                MarkdownNode::Code(code::Code::Fenced(code::FencedCode {
                     language: Some(line.slice_raw(range.start, range.end).to_string()),
                     length,
                     indent: line.indent,
                     marker,
-                }),
+                })),
                 location,
             );
             BlockMatching::MatchedLeaf
@@ -88,7 +85,9 @@ impl BlockStrategy for FencedCode {
     fn process<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockProcessing {
         let snapshot = line.snapshot();
         // 尝试提取当前处理节点的代码块，如果不是代码块直接返回 Unprocessed
-        let container = if let MarkdownNode::Code(code) = &parser.tree[parser.curr_proc_node].body {
+        let container = if let MarkdownNode::Code(code::Code::Fenced(code)) =
+            &parser.tree[parser.curr_proc_node].body
+        {
             code
         } else {
             return BlockProcessing::Unprocessed;
@@ -100,7 +99,7 @@ impl BlockStrategy for FencedCode {
             return BlockProcessing::Processed;
         }
         // 回滚到初始状态并删除等效的缩进
-        line.resume(&snapshot).skip_spaces(container.indent);
+        line.resume(snapshot).skip_spaces(container.indent);
         BlockProcessing::Further
     }
     fn after(id: usize, parser: &mut Parser) {
@@ -115,9 +114,7 @@ impl BlockStrategy for FencedCode {
     }
 }
 
-pub struct IndentedCode {}
-
-impl BlockStrategy for IndentedCode {
+impl BlockStrategy for code::IndentedCode {
     fn before<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
         // 没有缩进 或者 是段落（ 缩进代码块不能中止段落 ）或者该行是空的
         if !line.is_indented()
@@ -130,13 +127,7 @@ impl BlockStrategy for IndentedCode {
         line.skip(4);
         parser.close_unmatched_blocks();
         parser.append_block(
-            MarkdownNode::Code(ast::code::Code {
-                variant: ast::code::CodeVariant::Indented,
-                language: None,
-                length: 4,
-                indent: 0,
-                marker: Token::Whitespace(Whitespace::Space),
-            }),
+            MarkdownNode::Code(code::Code::Indented(code::IndentedCode {})),
             location,
         );
         BlockMatching::MatchedLeaf
@@ -169,10 +160,9 @@ impl BlockStrategy for IndentedCode {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast;
-    use crate::ast::MarkdownNode;
+    use crate::ast::{code, MarkdownNode};
     use crate::parser::Parser;
-    use crate::tokenizer::{Token, Whitespace};
+    use crate::tokenizer::Token;
 
     #[test]
     fn test_fenced_code() {
@@ -186,13 +176,12 @@ mod tests {
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,
-            MarkdownNode::Code(ast::code::Code {
-                variant: ast::code::CodeVariant::Fenced,
+            MarkdownNode::Code(code::Code::Fenced(code::FencedCode {
                 language: Some("text".to_string()),
                 length: 3,
                 indent: 3,
                 marker: Token::Backtick
-            })
+            }))
         );
         if let MarkdownNode::Text(text) = &ast[2].body {
             assert_eq!(text, "aaa\n aaa\naaa\n");
@@ -217,13 +206,7 @@ mod tests {
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,
-            MarkdownNode::Code(ast::code::Code {
-                variant: ast::code::CodeVariant::Indented,
-                language: None,
-                length: 4,
-                indent: 0,
-                marker: Token::Whitespace(Whitespace::Space)
-            })
+            MarkdownNode::Code(code::Code::Indented(code::IndentedCode {}))
         );
         if let MarkdownNode::Text(text) = &ast[2].body {
             assert!(text.starts_with("a simple"));

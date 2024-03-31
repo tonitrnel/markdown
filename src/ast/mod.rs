@@ -1,3 +1,4 @@
+pub mod block_quote;
 pub mod callout;
 pub mod code;
 pub mod embed;
@@ -10,6 +11,7 @@ pub mod list;
 pub mod math;
 pub mod reference;
 pub mod table;
+pub mod thematic_break;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MarkdownNode {
@@ -42,7 +44,7 @@ pub enum MarkdownNode {
     // 标签
     Tag,
     // 块引用
-    BlockQuote,
+    BlockQuote(block_quote::BlockQuote),
     // 代码
     Code(code::Code),
     // 表格
@@ -64,15 +66,15 @@ pub enum MarkdownNode {
     Math(math::Math),
     // 标注
     Callout(callout::Callout),
-    // HTML 元素
-    HTMLElement(html::HTMLElement),
+    // HTML
+    Html(html::Html),
 }
 
 impl MarkdownNode {
     pub fn is_container(&self) -> bool {
         matches!(
             self,
-            MarkdownNode::BlockQuote
+            MarkdownNode::BlockQuote(..)
                 | MarkdownNode::List(..)
                 | MarkdownNode::ListItem(..)
                 | MarkdownNode::Paragraph
@@ -89,11 +91,8 @@ impl MarkdownNode {
             self,
             MarkdownNode::ThematicBreak
                 | MarkdownNode::Heading(..)
-                | MarkdownNode::Code(code::Code {
-                    variant: code::CodeVariant::Inline,
-                    ..
-                })
-                | MarkdownNode::HTMLElement(html::HTMLElement { inline: false, .. })
+                | MarkdownNode::Code(..)
+                | MarkdownNode::Html(..)
                 | MarkdownNode::Paragraph
                 | MarkdownNode::Table
         )
@@ -102,7 +101,7 @@ impl MarkdownNode {
     pub fn can_contain(&self, target: &MarkdownNode) -> bool {
         match self {
             MarkdownNode::List(..) => matches!(target, MarkdownNode::ListItem(..)),
-            MarkdownNode::Document | MarkdownNode::BlockQuote | MarkdownNode::ListItem(..) => {
+            MarkdownNode::Document | MarkdownNode::BlockQuote(..) | MarkdownNode::ListItem(..) => {
                 !matches!(target, MarkdownNode::ListItem(..))
             }
             MarkdownNode::Table => {
@@ -118,17 +117,14 @@ impl MarkdownNode {
     pub fn accepts_lines(&self) -> bool {
         matches!(
             self,
-            MarkdownNode::Code(..) | MarkdownNode::HTMLElement(..) | MarkdownNode::Paragraph
+            MarkdownNode::Code(..) | MarkdownNode::Html(..) | MarkdownNode::Paragraph
         )
     }
 }
 
 impl From<heading::HeadingLevel> for MarkdownNode {
     fn from(value: heading::HeadingLevel) -> Self {
-        MarkdownNode::Heading(heading::Heading {
-            level: value,
-            variant: heading::HeadingVariant::ATX,
-        })
+        MarkdownNode::Heading(heading::Heading::ATX(heading::ATXHeading { level: value }))
     }
 }
 impl From<math::Math> for MarkdownNode {

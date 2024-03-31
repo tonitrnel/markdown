@@ -1,27 +1,21 @@
-use crate::ast::MarkdownNode;
+use crate::ast::{block_quote, MarkdownNode};
 use crate::blocks::{BlockMatching, BlockProcessing, BlockStrategy, Line};
 use crate::parser::Parser;
 use crate::tokenizer::Token;
 
-/// BlockQuote example:
-///
-/// ```markdown
-/// > #Foo
-/// > bar
-/// > baz
-/// ```
-pub struct BlockQuote {}
-
-impl BlockStrategy for BlockQuote {
+impl BlockStrategy for block_quote::BlockQuote {
     fn before(parser: &mut Parser, line: &mut Line) -> BlockMatching {
         let location = line.location();
         if !line.is_indented() && line.advance_next_nonspace().starts_with(&Token::Gt, 1) {
             // skip '>' token.
             line.next();
             // optional following space.
-            line.consume(|it| it.is_space_or_tab());
+            line.consume(|it: &Token| it.is_space_or_tab());
             parser.close_unmatched_blocks();
-            parser.append_block(MarkdownNode::BlockQuote, location);
+            parser.append_block(
+                MarkdownNode::BlockQuote(block_quote::BlockQuote {}),
+                location,
+            );
             return BlockMatching::MatchedContainer;
         }
         BlockMatching::Unmatched
@@ -31,7 +25,7 @@ impl BlockStrategy for BlockQuote {
             // skip '>' token.
             line.next();
             // optional following space.
-            line.consume(|it| it.is_space_or_tab());
+            line.consume(|it: &Token| it.is_space_or_tab());
             return BlockProcessing::Further;
         }
         BlockProcessing::Unprocessed
@@ -53,13 +47,15 @@ mod tests {
         .trim();
         let ast = Parser::new(text).parse();
         assert_eq!(ast[0].body, MarkdownNode::Document);
-        assert_eq!(ast[1].body, MarkdownNode::BlockQuote);
+        assert_eq!(
+            ast[1].body,
+            MarkdownNode::BlockQuote(block_quote::BlockQuote {})
+        );
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Heading(ast::heading::Heading {
-                variant: ast::heading::HeadingVariant::ATX,
+            MarkdownNode::Heading(ast::heading::Heading::ATX(ast::heading::ATXHeading {
                 level: ast::heading::HeadingLevel::H1
-            })
+            }))
         );
         assert_eq!(ast[3].body, MarkdownNode::Paragraph);
         assert_eq!(ast.get_first_child(1), Some(2));
