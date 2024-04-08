@@ -1,6 +1,5 @@
 use crate::ast::{html, MarkdownNode};
-use crate::blocks::{BlockMatching, BlockProcessing, BlockStrategy, Line};
-use crate::parser::Parser;
+use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, Line, ProcessCtx};
 use crate::tokenizer::{Token, Whitespace};
 
 macro_rules! check_or_return {
@@ -33,14 +32,14 @@ const HTML_TAGS: [&str; 62] = [
 /// example: `<pre`、`<script` ...
 fn is_begin_type_1(line: &Line) -> bool {
     static BEGIN_TAGS: &[&str; 4] = &["pre", "style", "script", "textarea"];
-    if let Some(Token::Text(text)) = line.get(1) {
+    if let Some(Token::Text(text)) = line.get_raw(1) {
         if !BEGIN_TAGS.iter().any(|it| it.eq_ignore_ascii_case(text)) {
             return false;
         }
     } else {
         return false;
     }
-    return match line.get(2) {
+    return match line.get_raw(2) {
         Some(Token::Gt) => true,
         Some(token) if token.is_space_or_tab() => true,
         None => true,
@@ -100,14 +99,14 @@ fn is_end_type_5(line: &mut Line) -> bool {
 
 /// example: `<address>`, `<br/>`
 fn is_begin_type_6(line: &Line) -> bool {
-    if let Some(Token::Text(text)) = line.get(1) {
+    if let Some(Token::Text(text)) = line.get_raw(1) {
         if !is_html_tag(text.as_bytes()) {
             return false;
         }
     } else {
         return false;
     }
-    return match line.get(2) {
+    return match line.get_raw(2) {
         Some(token) if token.is_space_or_tab() => true,
         Some(Token::Gt) => true,
         // self-closing tag
@@ -168,7 +167,6 @@ fn is_begin_type_7(line: &mut Line) -> bool {
                 _ => break,
             },
             TagState::PropName => match next {
-                Token::Text(_) => consume_and_return(line, TagState::PropName),
                 Token::Number(str) if !str.contains('.') => {
                     consume_and_return(line, TagState::PropName)
                 }
@@ -234,7 +232,7 @@ fn is_end_type_7(line: &Line) -> bool {
     }));
     let mut i = 3;
     let mut is_end = false;
-    while let Some(token) = line.get(i) {
+    while let Some(token) = line.get_raw(i) {
         let r = match token {
             Token::Text(str) if !is_end => str.chars().all(|char| char.is_ascii_alphabetic()),
             Token::Number(str) if !is_end => !str.contains('.'),
@@ -289,18 +287,24 @@ impl html::Html {
 }
 
 impl BlockStrategy for html::Html {
-    fn before<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
-        let location = line.location();
+    fn before(
+        BeforeCtx {
+            line,
+            parser,
+            container,
+        }: BeforeCtx,
+    ) -> BlockMatching {
+        let location = line.start_location();
         if line.is_indented() {
             return BlockMatching::Unmatched;
         }
         if !line.skip_indent().validate(0, Token::Lt) {
             return BlockMatching::Unmatched;
         }
-        let block_type = match line.get(1) {
+        let block_type = match line.get_raw(1) {
             // type 2, 4, 5
             Some(Token::ExclamationMark) => {
-                let b = match line.get(2) {
+                let b = match line.get_raw(2) {
                     Some(Token::Hyphen) => {
                         if is_begin_type_2(line) {
                             Some(html::BlockType::Type2)
@@ -359,7 +363,7 @@ impl BlockStrategy for html::Html {
             }
         };
         if block_type != html::BlockType::Type7
-            || (parser.current_container().body != MarkdownNode::Paragraph
+            || (parser.tree[container].body != MarkdownNode::Paragraph
                 && !(!parser.all_closed
                     && !line.is_blank()
                     && parser.current_proc().body == MarkdownNode::Paragraph))
@@ -372,12 +376,10 @@ impl BlockStrategy for html::Html {
         }
     }
 
-    fn process<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockProcessing {
-        let container = parser.current_container();
-        println!("is_blank {}\nline:{line:?}", line.is_blank());
+    fn process(ProcessCtx { line, parser, id }: ProcessCtx) -> BlockProcessing {
         if line.is_blank()
             && matches!(
-                container.body,
+                parser.tree[id].body,
                 MarkdownNode::Html(html::Html::Block(
                     html::BlockType::Type6 | html::BlockType::Type7
                 ))

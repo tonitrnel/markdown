@@ -1,6 +1,7 @@
 use crate::ast::{self, MarkdownNode};
 use crate::line::Line;
 use crate::parser::Parser;
+use crate::tokenizer::Location;
 
 mod block_quote;
 mod code;
@@ -20,6 +21,17 @@ pub enum BlockProcessing {
     Further,
 }
 
+pub struct BeforeCtx<'a, 'input> {
+    pub container: usize,
+    pub parser: &'a mut Parser<'input>,
+    pub line: &'a mut Line<'input>,
+}
+pub struct ProcessCtx<'a, 'input> {
+    pub id: usize,
+    pub parser: &'a mut Parser<'input>,
+    pub line: &'a mut Line<'input>,
+}
+
 pub trait BlockStrategy {
     /// 初始化容器
     ///
@@ -29,7 +41,7 @@ pub trait BlockStrategy {
     /// - `BlockMatching::Unmatched` 不匹配该 Block 定义
     /// - `BlockMatching::MatchedLeaf` 已匹配并且创建了 Block，该 Block 不支持嵌套其他 Block
     /// - `BlockMatching::MatchedContainer` 已匹配并且创建了 Block，该 Block 支持嵌套其他 Block，需要进一步拆分
-    fn before<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching;
+    fn before(ctx: BeforeCtx) -> BlockMatching;
 
     /// 继续处理
     ///
@@ -39,7 +51,7 @@ pub trait BlockStrategy {
     /// - `BlockProcessing::Unprocessed` 未处理，后续步骤应该退出当前容器
     /// - `BlockProcessing::Processed` 已处理，后续步骤也应该退出当前容器
     /// - `BlockProcessing::Further` 可以继续处理
-    fn process<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockProcessing;
+    fn process(ctx: ProcessCtx) -> BlockProcessing;
     fn after(_id: usize, _parser: &mut Parser) {}
 }
 
@@ -48,33 +60,30 @@ pub fn process<'input>(
     parser: &mut Parser<'input>,
     line: &mut Line<'input>,
 ) -> BlockProcessing {
-    let node = &parser.tree[id].body;
-    match node {
+    let ctx = ProcessCtx { id, parser, line };
+    match ctx.parser.tree[id].body {
         MarkdownNode::Document => BlockProcessing::Further,
         MarkdownNode::Heading(ast::heading::Heading::ATX(..)) => {
-            ast::heading::ATXHeading::process(parser, line)
+            ast::heading::ATXHeading::process(ctx)
         }
         MarkdownNode::Heading(ast::heading::Heading::SETEXT(..)) => {
-            ast::heading::SetextHeading::process(parser, line)
+            ast::heading::SetextHeading::process(ctx)
         }
         MarkdownNode::BlockQuote(ast::block_quote::BlockQuote {}) => {
-            ast::block_quote::BlockQuote::process(parser, line)
+            ast::block_quote::BlockQuote::process(ctx)
         }
-        MarkdownNode::Code(ast::code::Code::Fenced(..)) => {
-            ast::code::FencedCode::process(parser, line)
-        }
-        MarkdownNode::Code(ast::code::Code::Indented(..)) => {
-            ast::code::IndentedCode::process(parser, line)
-        }
-        MarkdownNode::Html(..) => ast::html::Html::process(parser, line),
-        MarkdownNode::List(..) => ast::list::List::process(parser, line),
-        MarkdownNode::ListItem(..) => ast::list::ListItem::process(parser, line),
+        MarkdownNode::Code(ast::code::Code::Fenced(..)) => ast::code::FencedCode::process(ctx),
+        MarkdownNode::Code(ast::code::Code::Indented(..)) => ast::code::IndentedCode::process(ctx),
+        MarkdownNode::Html(..) => ast::html::Html::process(ctx),
+        MarkdownNode::List(..) => ast::list::List::process(ctx),
+        MarkdownNode::ListItem(..) => ast::list::ListItem::process(ctx),
         _ => BlockProcessing::Unprocessed,
     }
 }
 
-pub fn after(id: usize, parser: &mut Parser) {
-    let node = &parser.tree[id];
+pub fn after(id: usize, parser: &mut Parser, location: Location) {
+    let node = &mut parser.tree[id];
+    node.end = location;
     match node.body {
         MarkdownNode::Heading(ast::heading::Heading::ATX(..)) => {
             ast::heading::ATXHeading::after(id, parser)
@@ -89,11 +98,16 @@ pub fn after(id: usize, parser: &mut Parser) {
         MarkdownNode::Code(ast::code::Code::Indented(..)) => {
             ast::code::IndentedCode::after(id, parser)
         }
+        MarkdownNode::List(..) => ast::list::List::after(id, parser),
         _ => (),
     }
 }
 
-pub fn matcher<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
+pub fn matcher<'input>(
+    container: usize,
+    parser: &mut Parser<'input>,
+    line: &mut Line<'input>,
+) -> BlockMatching {
     let matchers = [
         ast::block_quote::BlockQuote::before,
         ast::heading::ATXHeading::before,
@@ -107,7 +121,12 @@ pub fn matcher<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> 
     let snapshot = line.snapshot();
     for matcher in matchers {
         line.resume(&snapshot);
-        match matcher(parser, line) {
+        let ctx = BeforeCtx {
+            container,
+            parser,
+            line,
+        };
+        match matcher(ctx) {
             BlockMatching::Unmatched => continue,
             r => return r,
         }

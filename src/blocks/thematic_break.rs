@@ -1,14 +1,13 @@
 use crate::ast::{thematic_break, MarkdownNode};
-use crate::blocks::{BlockMatching, BlockProcessing, BlockStrategy, Line};
-use crate::parser::Parser;
+use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
 use crate::tokenizer::Token;
 
 impl BlockStrategy for thematic_break::ThematicBreak {
-    fn before<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
+    fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         if line.is_indented() {
             return BlockMatching::Unmatched;
         }
-        let location = line.location();
+        let location = line.start_location();
         line.skip_indent();
         let marker = match line.next() {
             Some(Token::Hyphen) => Token::Hyphen,
@@ -27,7 +26,7 @@ impl BlockStrategy for thematic_break::ThematicBreak {
         BlockMatching::MatchedLeaf
     }
 
-    fn process<'input>(_parser: &mut Parser<'input>, _line: &mut Line<'input>) -> BlockProcessing {
+    fn process(_ctx: ProcessCtx) -> BlockProcessing {
         BlockProcessing::Unprocessed
     }
 }
@@ -35,6 +34,7 @@ impl BlockStrategy for thematic_break::ThematicBreak {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::Parser;
 
     #[test]
     fn it_works() {

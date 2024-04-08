@@ -1,11 +1,10 @@
 use crate::ast::{block_quote, MarkdownNode};
-use crate::blocks::{BlockMatching, BlockProcessing, BlockStrategy, Line};
-use crate::parser::Parser;
+use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
 use crate::tokenizer::Token;
 
 impl BlockStrategy for block_quote::BlockQuote {
-    fn before(parser: &mut Parser, line: &mut Line) -> BlockMatching {
-        let location = line.location();
+    fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
+        let location = line.start_location();
         if !line.is_indented() && line.advance_next_nonspace().starts_with(&Token::Gt, 1) {
             // skip '>' token.
             line.next();
@@ -20,12 +19,12 @@ impl BlockStrategy for block_quote::BlockQuote {
         }
         BlockMatching::Unmatched
     }
-    fn process(_parser: &mut Parser, line: &mut Line) -> BlockProcessing {
-        if !line.is_indented() && line.advance_next_nonspace().starts_with(&Token::Gt, 1) {
+    fn process(ctx: ProcessCtx) -> BlockProcessing {
+        if !ctx.line.is_indented() && ctx.line.advance_next_nonspace().starts_with(&Token::Gt, 1) {
             // skip '>' token.
-            line.next();
+            ctx.line.next();
             // optional following space.
-            line.consume(|it: &Token| it.is_space_or_tab());
+            ctx.line.consume(|it: &Token| it.is_space_or_tab());
             return BlockProcessing::Further;
         }
         BlockProcessing::Unprocessed
@@ -34,8 +33,10 @@ impl BlockStrategy for block_quote::BlockQuote {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::ast;
+    use crate::parser::Parser;
+
+    use super::*;
 
     #[test]
     fn it_works() {
@@ -60,5 +61,6 @@ mod tests {
         assert_eq!(ast[3].body, MarkdownNode::Paragraph);
         assert_eq!(ast.get_first_child(1), Some(2));
         assert_eq!(ast.get_last_child(1), Some(3));
+        println!("{ast:?}")
     }
 }

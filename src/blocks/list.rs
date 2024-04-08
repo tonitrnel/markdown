@@ -1,65 +1,105 @@
 use crate::ast::{list, MarkdownNode};
-use crate::blocks::{BlockMatching, BlockProcessing, BlockStrategy, Line};
+use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
 use crate::parser::Parser;
 use crate::tokenizer::{Token, Whitespace};
 
 impl BlockStrategy for list::ListItem {
-    fn before<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
+    fn before(
+        BeforeCtx {
+            line,
+            parser,
+            container,
+        }: BeforeCtx,
+    ) -> BlockMatching {
         let location = line[0].location;
-        if line.is_indented() && !matches!(parser.current_container().body, MarkdownNode::List(..))
-        {
+        if line.is_indented() && !matches!(parser.tree[container].body, MarkdownNode::List(..)) {
             return BlockMatching::Unmatched;
         }
         line.skip_indent();
-        let mut need_detect_task_list = false;
         let mut cur_list = match line.next() {
-            Some(Token::Hyphen) => {
-                need_detect_task_list = true;
-                list::List::Bullet(list::BulletList {
-                    marker: Token::Hyphen,
-                })
-            }
+            Some(Token::Hyphen) => list::List::Bullet(list::BulletList {
+                marker: Token::Hyphen,
+                padding: 1,
+                marker_offset: line.indent,
+                tight: true,
+            }),
             Some(Token::Plus) => list::List::Bullet(list::BulletList {
                 marker: Token::Plus,
+                padding: 1,
+                marker_offset: line.indent,
+                tight: true,
             }),
             Some(Token::Asterisk) => list::List::Bullet(list::BulletList {
                 marker: Token::Asterisk,
+                padding: 1,
+                marker_offset: line.indent,
+                tight: true,
             }),
-            Some(Token::Ordered(ordered, d)) => list::List::Ordered(list::OrderedList {
+            Some(it @ Token::Ordered(ordered, d)) => list::List::Ordered(list::OrderedList {
                 start: ordered,
                 delimiter: d,
+                padding: it.len(),
+                marker_offset: line.indent,
+                tight: true,
             }),
             _ => return BlockMatching::Unmatched,
         };
-        if !line.consume(|it: &Token| it.is_space_or_tab()) {
+        // 必需后跟空格
+        if !(line.consume(|it: &Token| it.is_space_or_tab()) || line.is_end()) {
             return BlockMatching::Unmatched;
         }
+        let spaces_after_marker = 1 + line.starts_count_matches(|it| it.is_space_or_tab());
+        // 计算 padding (W + space + rest spaces)
+        line.skip(spaces_after_marker - 1);
+        if !(1..5).contains(&spaces_after_marker) || line.is_end() {
+            cur_list.set_padding(cur_list.padding() + 1)
+        } else {
+            cur_list.set_padding(cur_list.padding() + spaces_after_marker)
+        }
         let sn = line.snapshot();
-        if need_detect_task_list && line.consume(|it: &Token| it == &Token::LBracket) {
+        if matches!(cur_list, list::List::Bullet(..))
+            && spaces_after_marker <= 4
+            && line.consume(|it: &Token| it == &Token::LBracket)
+        {
+            // - [x] task item
+            let padding = cur_list.padding() + 4;
             let task_list = match line.next() {
                 Some(Token::Whitespace(Whitespace::Space)) => Some(list::TaskList {
                     checked: false,
                     quested: false,
+                    padding,
+                    marker_offset: line.indent,
+                    tight: true,
                 }),
                 Some(Token::Text("?")) => Some(list::TaskList {
                     checked: false,
                     quested: true,
+                    padding,
+                    marker_offset: line.indent,
+                    tight: true,
                 }),
                 Some(Token::Text(s)) if s.chars().count() == 1 => Some(list::TaskList {
                     checked: true,
                     quested: false,
+                    padding,
+                    marker_offset: line.indent,
+                    tight: true,
                 }),
                 _ => None,
             };
-            if !line.consume(Token::RBracket) || task_list.is_none() {
-                line.resume(sn);
-            } else {
+            // 后跟 ] 和 空格
+            if task_list.is_some()
+                && line.consume(Token::RBracket)
+                && line.consume(|it: &Token| it.is_space_or_tab())
+            {
                 cur_list = list::List::Task(task_list.unwrap())
+            } else {
+                line.resume(sn);
             }
         }
         // 空白列表不能打断段落
         if line.only_spaces_to_end()
-            && matches!(parser.current_container().body, MarkdownNode::Paragraph)
+            && matches!(parser.tree[container].body, MarkdownNode::Paragraph)
         {
             return BlockMatching::Unmatched;
         }
@@ -81,8 +121,14 @@ impl BlockStrategy for list::ListItem {
             },
         };
         let cur_list_node = MarkdownNode::List(cur_list);
+        parser.close_unmatched_blocks();
+        println!(
+            "@@@ {:?} -> {:?}",
+            parser.current_proc().body,
+            parser.tree[container].body
+        );
         if !matches!(parser.current_proc().body, MarkdownNode::List(..))
-            || match_list_node(&cur_list_node, &parser.current_container().body)
+            || !match_list_node(&cur_list_node, &parser.tree[container].body)
         {
             parser.append_block(cur_list_node, location);
         }
@@ -90,21 +136,79 @@ impl BlockStrategy for list::ListItem {
         BlockMatching::MatchedContainer
     }
 
-    fn process<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockProcessing {
-        BlockProcessing::Unprocessed
+    fn process<'input>(ProcessCtx { line, parser, id }: ProcessCtx) -> BlockProcessing {
+        // 尝试提取处理当前节点的 List，如果不是 List 直接返回 Unprocessed
+        let list_idx = parser.tree.get_parent(id);
+        let list = if let MarkdownNode::List(list) = &parser.tree[list_idx].body {
+            list
+        } else {
+            return BlockProcessing::Unprocessed;
+        };
+
+        if line.is_blank() {
+            // 如果当前容器存在子节点则跳过空白，否则返回 BlockProcessing::Unprocessed
+            if parser.tree.get_first_child(list_idx).is_none() {
+                return BlockProcessing::Unprocessed;
+            }
+            line.advance_next_nonspace();
+        } else if line.indent >= list.padding() + list.marker_offset() {
+            line.skip(list.padding() + list.marker_offset());
+            line.re_find_nonspace();
+            println!("line = '{line}' {:?}", line.get_raw(0));
+        } else {
+            return BlockProcessing::Unprocessed;
+        }
+        BlockProcessing::Further
     }
 }
 
 impl BlockStrategy for list::List {
-    fn before<'input>(_parser: &mut Parser<'input>, _line: &mut Line<'input>) -> BlockMatching {
+    fn before(_ctx: BeforeCtx) -> BlockMatching {
         BlockMatching::Unmatched
     }
 
-    fn process<'input>(_parser: &mut Parser<'input>, _line: &mut Line<'input>) -> BlockProcessing {
+    fn process<'input>(_ctx: ProcessCtx) -> BlockProcessing {
         BlockProcessing::Further
     }
-    fn after(_id: usize, _parser: &mut Parser) {
-        todo!()
+    fn after(id: usize, parser: &mut Parser) {
+        let mut tight = match &mut parser.tree[id].body {
+            MarkdownNode::List(list) => list.tight(),
+            _ => return,
+        };
+        // 定义一个闭包来检查tight条件
+        // 检测 list 下面所有 item 是否行数相差大于 1
+        // 检查 item 下面所有 node 是否行数相差大于 1
+        let check_tight = |curr, next| -> bool {
+            parser.tree[next]
+                .start
+                .line
+                .saturating_sub(parser.tree[curr].end.line)
+                <= 1
+        };
+        let mut item = parser.tree.get_first_child(id);
+        while let Some(curr) = item {
+            if !tight {
+                break;
+            }
+            let next = parser.tree.get_next(curr);
+            if next.is_some() && !check_tight(curr, next.unwrap()) {
+                tight = false;
+                break;
+            }
+            let mut sub_item = parser.tree.get_first_child(curr);
+            while let Some(curr) = sub_item {
+                let next = parser.tree.get_next(curr);
+                if next.is_some() && !check_tight(curr, next.unwrap()) {
+                    tight = false;
+                    break;
+                }
+                sub_item = next
+            }
+            item = next;
+        }
+        if let MarkdownNode::List(list) = &mut parser.tree[id].body {
+            list.set_tight(tight);
+        }
     }
 }
 
@@ -112,5 +216,111 @@ fn match_list_node(a: &MarkdownNode, b: &MarkdownNode) -> bool {
     match (a, b) {
         (MarkdownNode::List(a), MarkdownNode::List(b)) => a.like(b),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{list, MarkdownNode};
+    use crate::parser::Parser;
+    use crate::tokenizer::Location;
+
+    #[test]
+    fn case_1() {
+        let text = r#"1.  A paragraph
+    with two lines.
+
+        indented code
+
+    > A block quote."#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(ast[0].body, MarkdownNode::Document);
+        assert_eq!(
+            ast[1].body,
+            MarkdownNode::List(list::List::Ordered(list::OrderedList {
+                start: 1,
+                delimiter: '.',
+                padding: 4,
+                marker_offset: 0,
+                tight: false,
+            }))
+        );
+        assert_eq!(ast[1].start, Location::new(1, 1));
+        assert_eq!(ast[1].end, Location::new(6, 21));
+        println!("{:?}", ast);
+    }
+    #[test]
+    fn case_2() {
+        let text = r#"123456789. ok"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(ast[0].body, MarkdownNode::Document);
+        assert_eq!(
+            ast[1].body,
+            MarkdownNode::List(list::List::Ordered(list::OrderedList {
+                start: 123456789,
+                delimiter: '.',
+                padding: 11,
+                marker_offset: 0,
+                tight: true,
+            }))
+        );
+        let text = r#"1234567890. not ok"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(ast[0].body, MarkdownNode::Document);
+        assert_eq!(ast[1].body, MarkdownNode::Paragraph);
+    }
+    #[test]
+    fn case_3() {
+        let text = r#"1. foo
+2.
+3. bar"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(ast[0].body, MarkdownNode::Document);
+        assert_eq!(
+            ast[1].body,
+            MarkdownNode::List(list::List::Ordered(list::OrderedList {
+                start: 1,
+                delimiter: '.',
+                padding: 3,
+                marker_offset: 0,
+                tight: true
+            }))
+        );
+        assert_eq!(
+            ast[2].body,
+            MarkdownNode::ListItem(list::ListItem {
+                order: Some(1),
+                checked: None,
+                quested: None
+            })
+        );
+        assert_eq!(ast[2].start, Location::new(1, 1));
+        assert_eq!(ast[2].end, Location::new(1, 7));
+        assert_eq!(ast[3].body, MarkdownNode::Paragraph);
+        assert_eq!(ast[3].start, Location::new(1, 4));
+        assert_eq!(ast[3].end, Location::new(1, 7));
+        assert_eq!(
+            ast[4].body,
+            MarkdownNode::ListItem(list::ListItem {
+                order: Some(2),
+                checked: None,
+                quested: None
+            })
+        );
+        assert_eq!(ast[4].start, Location::new(2, 1));
+        assert_eq!(ast[4].end, Location::new(2, 3));
+        assert_eq!(
+            ast[5].body,
+            MarkdownNode::ListItem(list::ListItem {
+                order: Some(3),
+                checked: None,
+                quested: None
+            })
+        );
+        assert_eq!(ast[5].start, Location::new(3, 1));
+        assert_eq!(ast[5].end, Location::new(3, 7));
+        assert_eq!(ast[6].body, MarkdownNode::Paragraph);
+        assert_eq!(ast[6].start, Location::new(3, 4));
+        assert_eq!(ast[6].end, Location::new(3, 7));
     }
 }

@@ -2,7 +2,7 @@ use std::fmt::Write;
 use std::ops::Range;
 
 use crate::ast::{code, MarkdownNode};
-use crate::blocks::{BlockMatching, BlockProcessing, BlockStrategy, Line};
+use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, Line, ProcessCtx};
 use crate::parser::Parser;
 use crate::tokenizer::Token;
 
@@ -64,7 +64,7 @@ impl code::FencedCode {
     }
 }
 impl BlockStrategy for code::FencedCode {
-    fn before<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
+    fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         let location = line[0].location;
         if let Some((marker, length, range)) = Self::try_match(line) {
             parser.close_unmatched_blocks();
@@ -82,7 +82,7 @@ impl BlockStrategy for code::FencedCode {
             BlockMatching::Unmatched
         }
     }
-    fn process<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockProcessing {
+    fn process(ProcessCtx { line, parser, .. }: ProcessCtx) -> BlockProcessing {
         let snapshot = line.snapshot();
         // 尝试提取当前处理节点的代码块，如果不是代码块直接返回 Unprocessed
         let container = if let MarkdownNode::Code(code::Code::Fenced(code)) =
@@ -93,9 +93,10 @@ impl BlockStrategy for code::FencedCode {
             return BlockProcessing::Unprocessed;
         };
         // 检查当前行是否满足结束代码块的条件
+        let location = line.start_location();
         let length = line.skip_indent().starts_count(&container.marker);
         if length >= container.length && line.skip(length).only_spaces_to_end() {
-            parser.finalize(parser.curr_proc_node);
+            parser.finalize(parser.curr_proc_node, location);
             return BlockProcessing::Processed;
         }
         // 回滚到初始状态并删除等效的缩进
@@ -104,18 +105,19 @@ impl BlockStrategy for code::FencedCode {
     }
     fn after(id: usize, parser: &mut Parser) {
         if let Some(lines) = parser.inlines.remove(&id) {
-            let location = lines[0].location();
+            let start = lines[0].start_location();
+            let end = lines.last().map(|it| it.last_token_end_location()).unwrap();
             let literal = lines.into_iter().fold(String::new(), |mut str, it| {
                 let _ = writeln!(str, "{}", it);
                 str
             });
-            parser.append_text(literal, location);
+            parser.append_text(literal, (start, end));
         }
     }
 }
 
 impl BlockStrategy for code::IndentedCode {
-    fn before<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
+    fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         // 没有缩进 或者 是段落（ 缩进代码块不能中止段落 ）或者该行是空的
         if !line.is_indented()
             || parser.tree[parser.curr_proc_node].body == MarkdownNode::Paragraph
@@ -123,7 +125,7 @@ impl BlockStrategy for code::IndentedCode {
         {
             return BlockMatching::Unmatched;
         };
-        let location = line.location();
+        let location = line.start_location();
         line.skip(4);
         parser.close_unmatched_blocks();
         parser.append_block(
@@ -133,7 +135,7 @@ impl BlockStrategy for code::IndentedCode {
         BlockMatching::MatchedLeaf
     }
 
-    fn process<'input>(_parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockProcessing {
+    fn process(ProcessCtx { line, .. }: ProcessCtx) -> BlockProcessing {
         if line.is_indented() {
             line.skip(4);
             BlockProcessing::Further
@@ -148,12 +150,13 @@ impl BlockStrategy for code::IndentedCode {
             while let Some(true) = lines.last().map(|it| it.is_blank()) {
                 lines.pop();
             }
-            let location = lines[0].location();
+            let start = lines[0].start_location();
+            let end = lines.last().map(|it| it.last_token_end_location()).unwrap();
             let literal = lines.into_iter().fold(String::new(), |mut str, it| {
                 let _ = writeln!(str, "{}", it);
                 str
             });
-            parser.append_text(literal, location);
+            parser.append_text(literal, (start, end));
         }
     }
 }
@@ -183,6 +186,7 @@ mod tests {
                 marker: Token::Backtick
             }))
         );
+        println!("{ast:?}");
         if let MarkdownNode::Text(text) = &ast[2].body {
             assert_eq!(text, "aaa\n aaa\naaa\n");
         } else {
@@ -214,5 +218,6 @@ mod tests {
         } else {
             panic!()
         }
+        println!("{ast:?}")
     }
 }

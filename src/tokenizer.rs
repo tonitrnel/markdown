@@ -1,5 +1,4 @@
-use std::fmt;
-use std::fmt::Write;
+use std::fmt::{self, Write};
 use std::iter::Peekable;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
@@ -111,7 +110,7 @@ pub enum Token<'input> {
 impl Token<'_> {
     pub fn len(&self) -> usize {
         match self {
-            Token::Text(s) => s.len(),
+            Token::Text(s) => s.chars().count(),
             Token::Number(s) => s.len(),
             Token::Whitespace(ws) => ws.len(),
             Token::DoubleLBracket
@@ -215,12 +214,18 @@ impl<'input> From<Whitespace<'input>> for Token<'input> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Eq, PartialEq, Clone, Copy)]
 pub struct Location {
     /// Line number, starting from 1
     pub line: u64,
     /// Line column, starting from 1
     pub column: u64,
+}
+
+impl fmt::Debug for Location {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.line, self.column)
+    }
 }
 impl Default for Location {
     fn default() -> Self {
@@ -228,6 +233,9 @@ impl Default for Location {
     }
 }
 impl Location {
+    pub fn new(line: u64, column: u64) -> Self {
+        Self { line, column }
+    }
     pub fn is_column_start(&self) -> bool {
         self.column == 1
     }
@@ -253,6 +261,15 @@ impl TokenWithLocation<'_> {
     }
     pub fn len(&self) -> usize {
         self.token.len()
+    }
+    pub fn start_location(&self) -> Location {
+        self.location
+    }
+    pub fn end_location(&self) -> Location {
+        Location {
+            line: self.location.line,
+            column: self.location.column + self.token.len() as u64,
+        }
     }
 }
 
@@ -424,13 +441,13 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
                     chars.next();
                     end += 1;
                     match chars.peek() {
-                        Some(' ') if s.len() < 10 => {
-                            Some(Token::Ordered(s.parse::<u64>().unwrap(), d))
-                        }
                         Some(ch) if d == '.' && ch.is_ascii_digit() => {
                             chars.next();
                             peeking_take_while(chars, |ch| ch.is_ascii_digit(), None);
                             Some(Token::Number(&chars.content[start..chars.pos]))
+                        }
+                        Some(' ' | '\n') if s.len() < 10 => {
+                            Some(Token::Ordered(s.parse::<u64>().unwrap(), d))
                         }
                         _ => Some(Token::Text(&chars.content[start..end])),
                     }

@@ -34,6 +34,12 @@ impl<'input> Line<'input> {
             inner: tokens,
         }
     }
+    /// 该函数将更新 indent
+    ///
+    /// 用于容器嵌套时
+    pub fn re_find_nonspace(&mut self) {
+        self.indent = self.starts_count_matches(|it| it.is_space_or_tab());
+    }
     /// 当前行长度
     pub fn len(&self) -> usize {
         self.end_offset.saturating_sub(self.start_offset)
@@ -51,6 +57,16 @@ impl<'input> Line<'input> {
             .skip(self.end_offset - len)
             .take(len)
             .all(|it| &it.token == token)
+    }
+    pub fn starts_count_matches<P>(&self, pat: P) -> usize
+    where
+        P: Fn(&Token) -> bool,
+    {
+        self.inner
+            .iter()
+            .skip(self.start_offset)
+            .take_while(|it| pat(&it.token))
+            .count()
     }
     pub fn starts_with_matches<P>(&self, pat: P, len: usize) -> bool
     where
@@ -140,7 +156,11 @@ impl<'input> Line<'input> {
     /// 跳过指定长度的空白 Tokens，如果长度不足则将忽略
     pub fn skip_spaces(&mut self, len: usize) -> &mut Self {
         for i in self.start_offset..self.start_offset + len {
-            if self.get(i).map(|it| it.is_space_or_tab()).unwrap_or(false) {
+            if self
+                .get_raw(i)
+                .map(|it| it.is_space_or_tab())
+                .unwrap_or(false)
+            {
                 self.start_offset = i + 1;
             } else {
                 break;
@@ -162,7 +182,7 @@ impl<'input> Line<'input> {
         }
     }
     pub fn validate<P: ConsumePredicate<'input>>(&self, index: usize, predicate: P) -> bool {
-        self.get(index)
+        self.get_raw(index)
             .map(|it| predicate.evaluate(it))
             .unwrap_or(false)
     }
@@ -237,14 +257,28 @@ impl<'input> Line<'input> {
         self.end_offset = range.end;
         self
     }
-    /// 获取当前位置
-    pub fn location(&self) -> Location {
-        self.inner[self.start_offset].location
+    /// 安全的获取引用
+    pub fn get(&self, index: usize) -> Option<&Token<'input>> {
+        self.inner
+            .get(self.start_offset + index)
+            .map(|it| &it.token)
+    }
+    /// 从原始 vector 安全的获取引用，等同于 vector 的 `get`
+    pub fn get_raw(&self, index: usize) -> Option<&Token<'input>> {
+        self.inner.get(index).map(|it| &it.token)
     }
 
-    /// 从原始 vector 安全的获取引用，等同于 vector 的 `get`
-    pub fn get(&self, index: usize) -> Option<&Token<'input>> {
-        self.inner.get(index).map(|it| &it.token)
+    /// 获取当前Token的开始位置
+    pub fn start_location(&self) -> Location {
+        self.inner[self.start_offset.min(self.inner.len() - 1)].start_location()
+    }
+    /// 获取当前Token的结束位置
+    pub fn end_location(&self) -> Location {
+        self.inner[self.start_offset.min(self.inner.len() - 1)].end_location()
+    }
+    /// 获取当前行最后一个 Token 的结束位置
+    pub fn last_token_end_location(&self) -> Location {
+        self.inner[self.end_offset - 1].end_location()
     }
 }
 impl Display for Line<'_> {

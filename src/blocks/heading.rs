@@ -1,6 +1,5 @@
 use crate::ast::{heading, MarkdownNode};
-use crate::blocks::{BlockMatching, BlockProcessing, BlockStrategy, Line};
-use crate::parser::Parser;
+use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, Line, ProcessCtx};
 use crate::tokenizer::Token;
 use std::ops::Range;
 
@@ -103,7 +102,7 @@ impl BlockStrategy for heading::ATXHeading {
     ///  ###### foo
     ///  ## foo ## ## #
     /// ```
-    fn before<'input>(parser: &mut Parser<'input>, line: &mut Line<'input>) -> BlockMatching {
+    fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         let location = line[0].location;
         if let Some((hash_count, range)) = Self::try_match(line) {
             parser.close_unmatched_blocks();
@@ -119,15 +118,15 @@ impl BlockStrategy for heading::ATXHeading {
             BlockMatching::Unmatched
         }
     }
-    fn process(_parser: &mut Parser, _line: &mut Line) -> BlockProcessing {
+    fn process(_ctx: ProcessCtx) -> BlockProcessing {
         BlockProcessing::Unprocessed
     }
 }
 
 impl BlockStrategy for heading::SetextHeading {
-    fn before(parser: &mut Parser, line: &mut Line) -> BlockMatching {
+    fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         if !line.is_indented()
-            && parser.current_container().body == MarkdownNode::Paragraph
+            && parser.current_proc().body == MarkdownNode::Paragraph
             && line
                 .skip_indent()
                 .starts_with_matches(|it| matches!(it, Token::Eq | Token::Hyphen), 1)
@@ -142,14 +141,15 @@ impl BlockStrategy for heading::SetextHeading {
             if !line.only_spaces_to_end() {
                 return BlockMatching::Unmatched;
             }
-            parser.replace_block(MarkdownNode::Heading(heading::Heading::SETEXT(
-                heading::SetextHeading { level },
-            )));
+            parser.replace_block(
+                MarkdownNode::Heading(heading::Heading::SETEXT(heading::SetextHeading { level })),
+                line.end_location(),
+            );
             return BlockMatching::MatchedLeaf;
         }
         BlockMatching::Unmatched
     }
-    fn process(_parser: &mut Parser, _line: &mut Line) -> BlockProcessing {
+    fn process(_ctx: ProcessCtx) -> BlockProcessing {
         BlockProcessing::Unprocessed
     }
 }
@@ -158,6 +158,7 @@ impl BlockStrategy for heading::SetextHeading {
 mod tests {
     use crate::ast::{heading, MarkdownNode};
     use crate::parser::Parser;
+    use crate::tokenizer::Location;
 
     #[test]
     fn test_atx_heading() {
@@ -174,16 +175,34 @@ mod tests {
         .trim();
         let ast = Parser::new(text).parse();
         assert_eq!(ast[0].body, MarkdownNode::Document);
-        for i in 1..7 {
-            assert_eq!(
-                ast[i].body,
-                MarkdownNode::Heading(heading::Heading::ATX(heading::ATXHeading {
-                    level: heading::HeadingLevel::try_from(i).unwrap(),
-                }))
-            );
-            assert_eq!(ast.get_next(i), Some(i + 1));
+        // 为每个标题定义预期的开始和结束位置
+        let expected_locations = [
+            (Location::new(1, 1), Location::new(1, 6)),
+            (Location::new(2, 1), Location::new(2, 7)),
+            (Location::new(3, 1), Location::new(3, 8)),
+            (Location::new(4, 1), Location::new(4, 9)),
+            (Location::new(5, 1), Location::new(5, 10)),
+            (Location::new(6, 1), Location::new(6, 13)),
+            // 注意：最后一行是段落，不是标题
+            (Location::new(7, 1), Location::new(8, 9)),
+        ];
+        // 检查标题节点
+        for (i, &(start, end)) in expected_locations.iter().enumerate().take(6) {
+            match &ast[i + 1].body {
+                MarkdownNode::Heading(heading::Heading::ATX(atx)) => {
+                    assert_eq!(atx.level, heading::HeadingLevel::try_from(i + 1).unwrap());
+                }
+                _ => panic!("Expected heading, found {:?}", ast[i + 1].body),
+            }
+            assert_eq!(ast[i + 1].start, start);
+            assert_eq!(ast[i + 1].end, end);
+            assert_eq!(ast.get_next(i + 1), Some(i + 2));
         }
+        // 检查最后一个段落节点
         assert_eq!(ast[7].body, MarkdownNode::Paragraph);
+        let last = expected_locations.last().unwrap();
+        assert_eq!(ast[7].start, last.0);
+        assert_eq!(ast[7].end, last.1);
     }
     #[test]
     fn test_setext_heading() {
@@ -199,13 +218,23 @@ baz*
         .trim();
         let ast = Parser::new(text).parse();
         assert_eq!(ast[0].body, MarkdownNode::Document);
+        println!("{ast:?}");
+        let expected_locations = [
+            (Location::new(1, 1), Location::new(2, 10)),
+            (Location::new(3, 1), Location::new(4, 10)),
+            // 注意：最后一行是段落，不是标题
+            (Location::new(5, 1), Location::new(7, 5)),
+        ];
         for i in 1..3 {
+            let (start, end) = expected_locations[i - 1];
             assert_eq!(
                 ast[i].body,
                 MarkdownNode::Heading(heading::Heading::SETEXT(heading::SetextHeading {
                     level: heading::HeadingLevel::try_from(i).unwrap(),
                 }))
             );
+            assert_eq!(ast[i].start, start);
+            assert_eq!(ast[i].end, end);
             assert_eq!(ast.get_next(i), Some(i + 1));
         }
         assert_eq!(
@@ -214,5 +243,9 @@ baz*
                 level: heading::HeadingLevel::H1,
             }))
         );
+
+        let last = expected_locations.last().unwrap();
+        assert_eq!(ast[3].start, last.0);
+        assert_eq!(ast[3].end, last.1);
     }
 }
