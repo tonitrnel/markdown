@@ -7,3 +7,4 @@ mod render;
 mod tokenizer;
 mod tree;
 mod utils;
+mod inlines;

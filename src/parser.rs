@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter};
 
 use crate::ast::MarkdownNode;
@@ -6,7 +6,7 @@ use crate::blocks::{BlockMatching, BlockProcessing};
 use crate::line::Line;
 use crate::tokenizer::{Location, TokenIterator, Tokenizer};
 use crate::tree::Tree;
-use crate::{blocks, exts};
+use crate::{blocks, exts, inlines};
 
 pub struct Node {
     pub body: MarkdownNode,
@@ -35,7 +35,7 @@ pub struct Parser<'input> {
     pub(crate) tokens: TokenIterator<'input>,
     pub(crate) tree: Tree<Node>,
     /// 存储在解析 Block 时能接收 inlines 的 block 的 ID 和剩余未处理的 Line
-    pub(crate) inlines: HashMap<usize, Vec<Line<'input>>>,
+    pub(crate) inlines: BTreeMap<usize, Vec<Line<'input>>>,
     pub(crate) doc: usize,
     /// 应等同于 tree.cur()
     pub(crate) curr_proc_node: usize,
@@ -48,11 +48,11 @@ pub struct Parser<'input> {
 impl<'input> Parser<'input> {
     pub fn new(text: &'input str) -> Self {
         let mut tree = Tree::<Node>::new();
-        println!("创建 document 节点");
+        println!("创建 Document 节点");
         let doc = tree.append(Node::new(MarkdownNode::Document, Location::default()));
         Self {
             tokens: Tokenizer::new(text).tokenize(),
-            inlines: HashMap::new(),
+            inlines: BTreeMap::new(),
             tree,
             doc,
             curr_proc_node: doc,
@@ -80,7 +80,7 @@ impl<'input> Parser<'input> {
             println!("处理第 {i} 行");
             i += 1;
             let last_location = if line.is_blank() {
-                Location::new(self.last_location.line + 1, 1)
+                self.last_location
             } else {
                 line.last_token_end_location()
             };
@@ -92,13 +92,22 @@ impl<'input> Parser<'input> {
             self.finalize(self.curr_proc_node, self.last_location)
         }
         self.tree[self.doc].end = self.last_location;
+        self.tree.reset();
     }
     fn parse_inlines(&mut self) {
-        for (idx, lines) in self.inlines.iter() {
-            println!("{:?}", self.tree[*idx].body);
-            for line in lines {
-                println!("    \"{}\"", line)
+        let keys = self.inlines.keys().copied().collect::<Vec<_>>();
+        for idx in keys {
+            let lines = self.inlines.remove(&idx);
+            let node = &self.tree[idx].body;
+            if lines.is_none()
+                || !node.accepts_lines()
+            {
+                eprintln!("WARNING: Invalid node {node:?} exists inlines");
+                continue;
             }
+            let lines = lines.unwrap();
+            println!("#{idx} {:?}", self.tree[idx].body);
+            inlines::process(idx, self, Line::extends(lines));
         }
         // todo!()
     }
@@ -126,7 +135,7 @@ impl<'input> Parser<'input> {
             }
         }
         self.all_closed = container == self.prev_proc_node;
-        println!("Container#{container}  {:?}", self.tree[container].body);
+        println!("当前容器 #{container}  {:?}", self.tree[container].body);
         self.last_matched_node = container;
         let mut matched_leaf = !matches!(self.tree[container].body, MarkdownNode::Paragraph)
             && self.tree[container].body.accepts_lines();
@@ -163,6 +172,7 @@ impl<'input> Parser<'input> {
                 }
             }
         }
+        println!("喵喵喵");
         if !self.all_closed
             && !line.is_blank()
             && matches!(self.tree[self.curr_proc_node].body, MarkdownNode::Paragraph)
@@ -212,9 +222,21 @@ impl<'input> Parser<'input> {
         println!("创建节点 #{idx} {:?}", self.tree[idx].body);
         idx
     }
+    pub fn append_block_to(
+        &mut self,
+        id: usize,
+        node: MarkdownNode,
+        location: (Location, Location),
+    ) -> usize {
+        let idx = self.tree.append_child(id, Node::new(node, location.0));
+        self.tree[idx].end = location.1;
+        println!("创建节点 #{idx} {:?}", self.tree[idx].body);
+        idx
+    }
     pub fn replace_block(&mut self, node: MarkdownNode, loc: Location) -> Option<usize> {
         self.last_location = loc;
         if let Some(idx) = self.tree.peek_up() {
+            println!("替换节点 {:?} => {:?}", self.tree[idx].body, node);
             self.tree[idx].body = node;
             Some(idx)
         } else {
@@ -240,8 +262,32 @@ impl<'input> Parser<'input> {
             .tree
             .append(Node::new(content.as_ref().into(), location.0));
         self.tree[idx].end = location.1;
-        println!("创建#{idx} {:?} 节点", self.tree[idx].body);
+        println!("创建节点 #{idx} {:?}", self.tree[idx].body);
         idx
+    }
+    pub fn append_text_to(
+        &mut self,
+        parent: usize,
+        content: impl AsRef<str>,
+        location: (Location, Location),
+    ) -> usize {
+        if let Some((idx, MarkdownNode::Text(text))) = self
+            .tree
+            .get_last_child(parent)
+            .map(|id| (id, &mut self.tree[id].body))
+        {
+            text.push_str(content.as_ref());
+            self.tree[idx].end = location.1;
+            // println!("追加文本到节点 #{idx} {:?}", self.tree[idx].body);
+            idx
+        } else {
+            let idx = self
+                .tree
+                .append_child(parent, Node::new(content.as_ref().into(), location.0));
+            self.tree[idx].end = location.1;
+            println!("创建节点 #{idx} {:?}", self.tree[idx].body);
+            idx
+        }
     }
     pub fn current_proc(&self) -> &Node {
         &self.tree[self.curr_proc_node]
@@ -272,5 +318,41 @@ impl<'input> Parser<'input> {
             self.tree.pop();
         }
         self.curr_proc_node = parent;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        let text = r#"# Block formatting
+
+You can also use Markdown to create various text blocks, such as:
+
+- Block quotes - Start a line with `﹥` followed by a space.
+
+- Headings:
+
+    1. Heading 1 - Start a line with `#` followed by a space.
+
+    2. Heading 2 - Start a line with `##` followed by a space.
+
+    3. Heading 3 - Start a line with `###` followed by a space.
+
+- Lists, including nested ones:
+
+    - Numbered lists - Start a line with `1.` or `1)` followed by a space.
+
+    - Bulleted lists - Start a line with `*` or `-` followed by a space.
+
+    - To-do lists - Start a line with `[ ]` or `[x]` followed by a space to insert an unchecked or checked list item.
+
+- Code blocks - Start a line with ` ˋˋˋ `.
+
+- Horizontal lines - Start a line with `---`"#;
+        let ast = Parser::new(text).parse();
+        println!("AST\n---------------------------------------\n{ast:?}---------------------------------------")
     }
 }
