@@ -90,8 +90,10 @@ pub enum Token<'input> {
     Dollar,
     /// Colon `:`
     Colon,
-    /// Quote `"`
-    Quote,
+    /// DoubleQuote `'`
+    SingleQuote,
+    /// DoubleQuote `"`
+    DoubleQuote,
     /// Question `?`
     Question,
     /// Semicolon `;`
@@ -102,6 +104,8 @@ pub enum Token<'input> {
     Ordered(u64, char),
     /// Slash `/`
     Slash,
+    /// Backslash `\`
+    Backslash,
     /// Escaped
     Escaped(char),
     Invalid(char),
@@ -144,6 +148,9 @@ impl Token<'_> {
                 // Ordered Task or Task
                 | Token::Ordered(..)
                 | Token::Hyphen
+                // Table
+                | Token::Pipe
+                | Token::Colon
         )
     }
 }
@@ -197,12 +204,14 @@ impl fmt::Display for Token<'_> {
             Token::Gt => f.write_str(">"),
             Token::Dollar => f.write_str("$"),
             Token::Colon => f.write_str(":"),
-            Token::Quote => f.write_str("\""),
+            Token::SingleQuote => f.write_str("'"),
+            Token::DoubleQuote => f.write_str("\""),
             Token::Question => f.write_str("?"),
             Token::Semicolon => f.write_str(";"),
             Token::BlockReference => f.write_str("#^"),
             Token::Ordered(u, d) => write!(f, "{u}{d}"),
             Token::Slash => write!(f, "/"),
+            Token::Backslash => write!(f, "\\"),
             Token::Escaped(ch) => write!(f, "\\{ch}"),
             Token::Invalid(_) => f.write_char('\u{FFFD}'),
         }
@@ -367,10 +376,9 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
         '\r' => {
             chars.next();
             if let Some('\n') = chars.peek() {
-                chars.next();
                 consume_and_return(chars, Token::Whitespace(Whitespace::NewLine("\r\n")))
             } else {
-                consume_and_return(chars, Token::Whitespace(Whitespace::NewLine("\r")))
+                Some(Token::Whitespace(Whitespace::NewLine("\r")))
             }
         }
         '#' => {
@@ -388,10 +396,11 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
         '/' => consume_and_return(chars, Token::Slash),
         '\\' => {
             chars.next();
-            if let Some(ch) = chars.next() {
+            if let Some(ch) = chars.peek().filter(|ch| !ch.is_ascii_control()).cloned() {
+                chars.next();
                 Some(Token::Escaped(ch))
             } else {
-                Some(Token::Text("\\"))
+                Some(Token::Backslash)
             }
         }
         '[' => {
@@ -428,7 +437,8 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
         '>' => consume_and_return(chars, Token::Gt),
         '$' => consume_and_return(chars, Token::Dollar),
         ':' => consume_and_return(chars, Token::Colon),
-        '"' => consume_and_return(chars, Token::Quote),
+        '"' => consume_and_return(chars, Token::DoubleQuote),
+        '\'' => consume_and_return(chars, Token::SingleQuote),
         '?' => consume_and_return(chars, Token::Question),
         ';' => consume_and_return(chars, Token::Semicolon),
         '0'..='9' => {
