@@ -1,7 +1,9 @@
-
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TableHeadAlignment {
+pub struct Table{
+    pub(crate) column: usize
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Alignment {
     Left,
     Center,
     Right,

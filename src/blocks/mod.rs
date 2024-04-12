@@ -9,6 +9,7 @@ mod heading;
 mod html;
 mod list;
 mod thematic_break;
+mod table;
 
 pub enum BlockMatching {
     Unmatched = 0,
@@ -77,6 +78,7 @@ pub fn process<'input>(
         MarkdownNode::Html(..) => ast::html::Html::process(ctx),
         MarkdownNode::List(..) => ast::list::List::process(ctx),
         MarkdownNode::ListItem(..) => ast::list::ListItem::process(ctx),
+        MarkdownNode::Table(..) => ast::table::Table::process(ctx),
         _ => BlockProcessing::Unprocessed,
     }
 }
@@ -116,6 +118,7 @@ pub fn matcher<'input>(
         ast::heading::SetextHeading::before,
         ast::thematic_break::ThematicBreak::before,
         ast::list::ListItem::before,
+        ast::table::Table::before,
         ast::code::IndentedCode::before,
     ];
     let snapshot = line.snapshot();
