@@ -195,7 +195,7 @@ fn is_begin_type_7(line: &mut Line) -> bool {
                 _ => break,
             },
             TagState::PropValue => match next {
-                Token::Quote => {
+                Token::DoubleQuote => {
                     line.next();
                     if quoted == Some('"') {
                         quoted = None;

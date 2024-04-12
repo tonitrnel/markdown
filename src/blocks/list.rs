@@ -122,11 +122,6 @@ impl BlockStrategy for list::ListItem {
         };
         let cur_list_node = MarkdownNode::List(cur_list);
         parser.close_unmatched_blocks();
-        println!(
-            "@@@ {:?} -> {:?}",
-            parser.current_proc().body,
-            parser.tree[container].body
-        );
         if !matches!(parser.current_proc().body, MarkdownNode::List(..))
             || !match_list_node(&cur_list_node, &parser.tree[container].body)
         {
@@ -153,7 +148,7 @@ impl BlockStrategy for list::ListItem {
             line.advance_next_nonspace();
         } else if line.indent >= list.padding() + list.marker_offset() {
             line.skip(list.padding() + list.marker_offset());
-            line.re_find_nonspace();
+            line.re_find_indent();
             println!("line = '{line}' {:?}", line.get_raw(0));
         } else {
             return BlockProcessing::Unprocessed;
@@ -322,5 +317,21 @@ mod tests {
         assert_eq!(ast[6].body, MarkdownNode::Paragraph);
         assert_eq!(ast[6].start, Location::new(3, 4));
         assert_eq!(ast[6].end, Location::new(3, 7));
+    }
+
+    #[test]
+    fn case_4() {
+        let text = r#"
+- Headings:
+
+    1. Heading 1 - Start a line with `#` followed by a space.
+
+    2. Heading 2 - Start a line with `##` followed by a space.
+
+    3. Heading 3 - Start a line with `###` followed by a space."#
+            .trim();
+        let ast = Parser::new(text).parse();
+        assert_eq!(ast[0].body, MarkdownNode::Document);
+        println!("{ast:?}")
     }
 }
