@@ -84,6 +84,17 @@ impl<T> Tree<T> {
         self.cur = Some(index);
         index
     }
+    pub fn append_child(&mut self, parent: usize, node: T) -> usize{
+        let index = self.create_node(node);
+        if let Some(last_child) = self.nodes[parent].last_child {
+            self.nodes[last_child].next = Some(index);
+            self.nodes[parent].last_child = Some(index);
+        } else {
+            self.nodes[parent].first_child = Some(index);
+            self.nodes[parent].last_child = Some(index);
+        }
+        index
+    }
     // pub fn batch_append(&mut self, nodes: Vec<T>) {
     //     for node in nodes {
     //         self.append(node);
