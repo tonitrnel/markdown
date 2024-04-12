@@ -1,5 +1,6 @@
 use crate::ast::reference::Reference;
 
+#[allow(unused)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum LinkVariant {
     Default,
@@ -13,6 +14,7 @@ pub struct Link {
     url: Option<String>,
 }
 
+#[allow(unused)]
 impl Link {
     fn new(url: String) -> Self {
         Self {

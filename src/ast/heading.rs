@@ -42,3 +42,12 @@ impl TryFrom<usize> for HeadingLevel {
         }
     }
 }
+
+impl Heading {
+    pub fn level(&self) -> &HeadingLevel {
+        match self {
+            Heading::ATX(atx) => &atx.level,
+            Heading::SETEXT(heading) => &heading.level,
+        }
+    }
+}

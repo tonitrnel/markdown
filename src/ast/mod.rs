@@ -48,9 +48,9 @@ pub enum MarkdownNode {
     // 代码
     Code(code::Code),
     // 表格
-    Table,
+    Table(table::Table),
     TableHead,
-    TableHeadCol(table::TableHeadAlignment),
+    TableHeadCol(table::Alignment),
     TableBody,
     TableRow,
     TableDataCol,
@@ -94,7 +94,7 @@ impl MarkdownNode {
                 | MarkdownNode::Code(..)
                 | MarkdownNode::Html(..)
                 | MarkdownNode::Paragraph
-                | MarkdownNode::Table
+                | MarkdownNode::Table(..)
         )
     }
     /// 是否接受目标节点
@@ -104,7 +104,7 @@ impl MarkdownNode {
             MarkdownNode::Document | MarkdownNode::BlockQuote(..) | MarkdownNode::ListItem(..) => {
                 !matches!(target, MarkdownNode::ListItem(..))
             }
-            MarkdownNode::Table => {
+            MarkdownNode::Table(..) => {
                 matches!(target, MarkdownNode::TableHead | MarkdownNode::TableBody)
             }
             MarkdownNode::TableHead => matches!(target, MarkdownNode::TableHeadCol(..)),
@@ -117,7 +117,11 @@ impl MarkdownNode {
     pub fn accepts_lines(&self) -> bool {
         matches!(
             self,
-            MarkdownNode::Code(..) | MarkdownNode::Html(..) | MarkdownNode::Paragraph
+            MarkdownNode::Code(..)
+                | MarkdownNode::Html(..)
+                | MarkdownNode::Paragraph
+                | MarkdownNode::TableHeadCol(..)
+                | MarkdownNode::TableDataCol
         )
     }
 }

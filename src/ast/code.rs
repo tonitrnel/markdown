@@ -2,7 +2,7 @@ use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Code {
-    Inline,
+    Inline(InlineCode),
     Fenced(FencedCode),
     Indented(IndentedCode),
 }
@@ -18,3 +18,6 @@ pub struct FencedCode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndentedCode {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineCode{}
