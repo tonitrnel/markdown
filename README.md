@@ -1,39 +1,40 @@
 ## Introduction
 
-`@painted/markdown` 是一個 Markdown 解析器，其目的在於解析 [CommonMark](https://commonmark.org/)、[Github Flavored Markdown](https://github.github.com/gfm/) 規範和 Obsidian 編輯器的 [Obsidian Flavored Markdown](https://help.obsidian.md/Editing+and+formatting/Obsidian+Flavored+Markdown) 規範
+该项目是一個正在实施的 Markdown 解析器，其目的在於解析 [CommonMark](https://commonmark.org/)、[Github Flavored Markdown](https://github.github.com/gfm/)
+規範和 Obsidian 編輯器的 [Obsidian Flavored Markdown](https://help.obsidian.md/Editing+and+formatting/Obsidian+Flavored+Markdown) 規範
 
-該解析器主要目的是生產 AST 然後打包為 `WASM` 后在 `NodeJS` 或 `Browser` 進行使用
+該解析器主要目的是打包為 `WASM` 版后在 `NodeJS` 或 `Browser` 生產 AST 進行使用，渲染为 HTML 也在实现目标中，主要用于测试用例
 
-## Features
+## Todos
 
-Leaf blocks
+**Blocks**
 
-- [ ] Thematic-Breaks
-- [ ] ATX Headings
-- [ ] Setext headings
-- [ ] Indented code blocks
-- [ ] Fenced code blocks
-- [ ] HTML blocks
+- [x] Thematic-Breaks
+- [x] ATX Headings
+- [x] Setext headings
+- [x] Indented code blocks
+- [x] Fenced code blocks
+- [x] HTML blocks
 - [ ] Link reference definitions
-- [ ] Paragraphs
+- [x] Paragraphs
 - [ ] Blank lines
-- [ ] Tables(GFM)
-
-Container blocks
-
-- [ ] Block quotes
-- [ ] List items
-- [ ] Task list items(GFM)
+- [x] Tables(GFM)
+- [x] Block quotes
+- [x] List items
+- [x] Task list items(GFM)
 - [ ] Callouts(OFM)
+- [ ] Block defining id(OFM)
+
+**Inlines**
+
 - [ ] Backslash escapes
 - [ ] Entity and numeric character references
-- [ ] Code spans
+- [x] Code spans
 - [ ] Emphasis and strong emphasis
 - [ ] Strikethrough(GFM)
 - [ ] Links
 - [ ] Internal links(OFM)
 - [ ] Block reference(OFM)
-- [ ] Block defining id(OFM)
 - [ ] Images
 - [ ] Embedding Files(OFM)
 - [ ] Autolinks
@@ -41,21 +42,11 @@ Container blocks
 - [ ] RawHTML
 - [ ] Comments(OFM)
 - [ ] DisallowedRawHTML(GFM)
-- [ ] Hard line breaks
-- [ ] Soft line breaks
+- [x] Hard line breaks
+- [x] Soft line breaks
 - [ ] Textual content
+
+**Other**
+
 - [ ] Smart Punctuation
-
-## API 设计
-
-```javascript
-const makrdown = require("..");
-
-async function send(stream){
-    const parser = makrdown.createStreamParser();
-    for await (const chunk of stream){
-        await parser.send(new Uint8Array(chunk));
-        await parser.next();
-    }
-}
-```
+- [ ] 中文语境优化 [chinese-copywriting-guidelines](https://github.com/sparanoid/chinese-copywriting-guidelines)
