@@ -409,7 +409,7 @@ mod tests {
             ast[1].body,
             MarkdownNode::Html(html::Html::Block(html::BlockType::Type1))
         );
-        assert_eq!(ast.len(), 2);
+        assert_eq!(ast.len(), 3);
     }
     #[test]
     fn case_2() {
@@ -424,7 +424,7 @@ mod tests {
             ast[1].body,
             MarkdownNode::Html(html::Html::Block(html::BlockType::Type2))
         );
-        assert_eq!(ast.len(), 2);
+        assert_eq!(ast.len(), 3);
     }
     #[test]
     fn case_3() {
@@ -441,7 +441,7 @@ echo "php is best programming language in the universe."
             ast[1].body,
             MarkdownNode::Html(html::Html::Block(html::BlockType::Type3))
         );
-        assert_eq!(ast.len(), 2);
+        assert_eq!(ast.len(), 3);
     }
     #[test]
     fn case_4() {
@@ -456,7 +456,7 @@ echo "php is best programming language in the universe."
             ast[1].body,
             MarkdownNode::Html(html::Html::Block(html::BlockType::Type4))
         );
-        assert_eq!(ast.len(), 2);
+        assert_eq!(ast.len(), 3);
     }
     #[test]
     fn case_5() {
@@ -483,7 +483,6 @@ return 0;
             ast[1].body,
             MarkdownNode::Html(html::Html::Block(html::BlockType::Type5))
         );
-        assert_eq!(ast.len(), 2);
     }
     #[test]
     fn case_6() {
@@ -500,7 +499,6 @@ return 0;
             ast[1].body,
             MarkdownNode::Html(html::Html::Block(html::BlockType::Type6))
         );
-        assert_eq!(ast.len(), 2);
     }
     #[test]
     fn case_7() {

@@ -3,16 +3,31 @@ use std::ops::{Index, IndexMut};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TreeNode<T> {
-    #[allow(unused)]
-    pub item: T,
+    // impl `mem::take`
+    pub item: Option<T>,
     parent: usize,
     first_child: Option<usize>,
     last_child: Option<usize>,
     next: Option<usize>,
+    prev: Option<usize>,
 }
+
 impl<T: PartialEq> PartialEq<T> for TreeNode<T> {
     fn eq(&self, other: &T) -> bool {
-        self.item.eq(other)
+        self.item.as_ref().unwrap().eq(other)
+    }
+}
+
+impl<T> Default for TreeNode<T> {
+    fn default() -> Self {
+        Self {
+            item: None,
+            parent: 0,
+            first_child: None,
+            last_child: None,
+            next: None,
+            prev: None,
+        }
     }
 }
 
@@ -29,16 +44,16 @@ impl<T> Index<usize> for Tree<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.nodes.index(index).item
+        self.nodes.index(index).item.as_ref().unwrap()
     }
 }
 impl<T> IndexMut<usize> for Tree<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.nodes.index_mut(index).item
+        self.nodes.index_mut(index).item.as_mut().unwrap()
     }
 }
 
-impl<T> Tree<T> {
+impl<T: Debug> Tree<T> {
     pub fn new() -> Tree<T> {
         Tree::default()
     }
@@ -66,33 +81,36 @@ impl<T> Tree<T> {
     /// 返回值：
     /// 返回新节点在树中的索引。
     pub fn append(&mut self, node: T) -> usize {
-        let index = self.create_node(node);
+        let next = self.create_node(node);
         // 如果当前索引存在则进行顺序追加
-        if let Some(idx) = self.cur {
-            let parent = self.get_parent(idx);
-            self.nodes[idx].next = Some(index);
-            self.nodes[parent].last_child = Some(index);
+        if let Some(cur) = self.cur {
+            let parent = self.get_parent(cur);
+            self.nodes[cur].next = Some(next);
+            self.nodes[next].prev = Some(cur);
+            self.nodes[parent].last_child = Some(next);
         }
         // 如果当前索引不存在则意味着存在分叉，为最后一个分叉位置创建一个子节点
         else if let Some(&parent) = self.forks.last() {
             let parent = &mut self.nodes[parent];
             if parent.first_child.is_none() {
-                parent.first_child = Some(index)
+                parent.first_child = Some(next)
             }
-            parent.last_child = Some(index);
+            parent.last_child = Some(next);
         }
-        self.cur = Some(index);
-        index
+        self.cur = Some(next);
+        next
     }
-    pub fn append_child(&mut self, parent: usize, node: T) -> usize{
+    pub fn append_child(&mut self, parent: usize, node: T) -> usize {
         let index = self.create_node(node);
         if let Some(last_child) = self.nodes[parent].last_child {
             self.nodes[last_child].next = Some(index);
+            self.nodes[index].prev = Some(last_child);
             self.nodes[parent].last_child = Some(index);
         } else {
             self.nodes[parent].first_child = Some(index);
             self.nodes[parent].last_child = Some(index);
         }
+        self.nodes[index].parent = parent;
         index
     }
     // pub fn batch_append(&mut self, nodes: Vec<T>) {
@@ -109,11 +127,12 @@ impl<T> Tree<T> {
             return None;
         }
         let node = TreeNode {
-            item,
+            item: Some(item),
             parent: self.nodes[idx].parent,
             first_child: self.nodes[idx].first_child,
             last_child: self.nodes[idx].last_child,
             next: self.nodes[idx].next,
+            prev: self.nodes[idx].prev,
         };
         Some(std::mem::replace(&mut self.nodes[idx], node))
     }
@@ -151,11 +170,12 @@ impl<T> Tree<T> {
     pub fn create_node(&mut self, item: T) -> usize {
         let index = self.nodes.len();
         self.nodes.push(TreeNode {
-            item,
+            item: Some(item),
             parent: self.peek_up().unwrap_or(0),
             first_child: None,
             last_child: None,
             next: None,
+            prev: None,
         });
         index
     }
@@ -232,6 +252,23 @@ impl<T> Tree<T> {
     pub fn get_parent(&self, index: usize) -> usize {
         self.nodes[index].parent
     }
+    /// 设置节点的父级节点
+    ///
+    /// 注：这会将该节点添加至父节点的 `last_child`
+    pub fn set_parent(&mut self, index: usize, parent: usize) {
+        assert_eq!(self.nodes[index].parent, 0, "node must be free node");
+        self.nodes[index].parent = parent;
+        if let Some(last_child) = self.nodes[parent].last_child {
+            assert!(self.nodes[last_child].next.is_none(), "#{last_child}");
+            self.nodes[last_child].next = Some(index);
+            self.nodes[index].prev = Some(last_child);
+            self.nodes[parent].last_child = Some(index);
+        } else {
+            let parent = &mut self.nodes[parent];
+            parent.first_child = Some(index);
+            parent.last_child = Some(index);
+        }
+    }
     pub fn get_first_child(&self, index: usize) -> Option<usize> {
         self.nodes[index].first_child
     }
@@ -240,6 +277,116 @@ impl<T> Tree<T> {
     }
     pub fn get_next(&self, index: usize) -> Option<usize> {
         self.nodes[index].next
+    }
+    /// 设置目标节点的一个后一个节点为指定节点
+    ///
+    /// 注：两个节点必需是同一个父节点，否则会 panic
+    pub fn set_next(&mut self, index: usize, next: usize) {
+        assert_eq!(
+            self.get_parent(index),
+            self.get_parent(next),
+            "Must have the same parent"
+        );
+        // 断开 next 节点关系
+        self.unlink(next);
+        self.nodes[next].parent = self.get_parent(index);
+        // 重写 next 关系
+        if let Some(prior_next) = self.get_next(index) {
+            self.nodes[next].next = Some(prior_next);
+            self.nodes[prior_next].prev = Some(next);
+        };
+        // 设置 next
+        self.nodes[index].next = Some(next);
+        self.nodes[next].prev = Some(index);
+    }
+    pub fn get_prev(&self, index: usize) -> Option<usize> {
+        self.nodes[index].prev
+    }
+
+    /// 设置目标节点的一个前一个节点为指定节点
+    ///
+    /// 注：两个节点必需是同一个父节点，否则会 panic
+    pub fn set_prev(&mut self, index: usize, prev: usize) {
+        assert_eq!(
+            self.get_parent(index),
+            self.get_parent(prev),
+            "Must have the same parent"
+        );
+        // 断开 prev 节点关系
+        self.unlink(prev);
+        self.nodes[prev].parent = self.get_parent(index);
+        // 重写 prev 关系
+        if let Some(prior_prev) = self.get_prev(index) {
+            self.nodes[prev].prev = Some(prior_prev);
+            self.nodes[prior_prev].next = Some(prev);
+        };
+        // 设置 prev
+        self.nodes[index].prev = Some(prev);
+        self.nodes[prev].next = Some(index);
+    }
+    /// 移除子节点
+    ///
+    /// 注：如果存在子节点将会触发 panic
+    pub fn remove(&mut self, idx: usize) -> T {
+        assert!(
+            self.get_first_child(idx).is_none(),
+            "Expected no child nodes for index {}",
+            idx
+        );
+        assert!(
+            self.get_last_child(idx).is_none(),
+            "Expected no child nodes for index {}",
+            idx
+        );
+        self.unlink(idx);
+        let node = std::mem::take(&mut self.nodes[idx]);
+        node.item.unwrap()
+    }
+    /// 断掉节点的前后关系和父级关系，使该节点成为一个 `free` 节点
+    ///
+    /// 注：如果该节点存在字节点，那么所有子节点将会跟随该节点成为 `free` 节点
+    pub fn unlink(&mut self, idx: usize) {
+        // 断开父节点
+        let parent = self.get_parent(idx);
+        match (
+            self.nodes[parent].first_child == Some(idx),
+            self.nodes[parent].last_child == Some(idx),
+        ) {
+            (true, true) => {
+                self.nodes[parent].first_child = None;
+                self.nodes[parent].last_child = None;
+            }
+            (true, false) => {
+                self.nodes[parent].first_child = self.get_next(idx);
+            }
+            (false, true) => {
+                self.nodes[parent].last_child = self.get_prev(idx);
+            }
+            (false, false) => (),
+        }
+        self.nodes[idx].parent = 0;
+        // 断开前后节点
+        if let Some(prev) = self.nodes[idx].prev {
+            self.nodes[prev].next = self.nodes[idx].next
+        }
+        if let Some(next) = self.nodes[idx].next {
+            self.nodes[next].prev = self.nodes[idx].prev
+        }
+        self.nodes[idx].next = None;
+        self.nodes[idx].prev = None;
+    }
+    pub fn print_link_info(&self, title: &str, idx: usize){
+        println!("[{title}]: ({:?})", self.nodes[idx].last_child);
+        let mut item = self.nodes[idx].first_child;
+        while let Some(next) = item {
+            if let Some(item) = self.nodes[next].item.as_ref() {
+                print!("->#{next}{item:?}");
+            } else {
+                print!("->#{next}<Free>");
+            }
+            item = self.nodes[next].next;
+        }
+        println!();
     }
 }
 
@@ -269,7 +416,7 @@ where
             for _ in 0..indent {
                 write!(f, "  ")?;
             }
-            writeln!(f, "{:?}", &tree.nodes[cur].item)?;
+            writeln!(f, "{:?}", &tree.nodes[cur].item.as_ref().unwrap())?;
             if let Some(child_ix) = tree.nodes[cur].first_child {
                 debug_tree(tree, child_ix, indent + 1, f)?;
             }

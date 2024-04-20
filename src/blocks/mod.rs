@@ -10,6 +10,7 @@ mod html;
 mod list;
 mod thematic_break;
 mod table;
+mod callout;
 
 pub enum BlockMatching {
     Unmatched = 0,
@@ -79,6 +80,7 @@ pub fn process<'input>(
         MarkdownNode::List(..) => ast::list::List::process(ctx),
         MarkdownNode::ListItem(..) => ast::list::ListItem::process(ctx),
         MarkdownNode::Table(..) => ast::table::Table::process(ctx),
+        MarkdownNode::Callout(..) => ast::callout::Callout::process(ctx),
         _ => BlockProcessing::Unprocessed,
     }
 }
@@ -111,6 +113,7 @@ pub fn matcher<'input>(
     line: &mut Line<'input>,
 ) -> BlockMatching {
     let matchers = [
+        ast::callout::Callout::before,
         ast::block_quote::BlockQuote::before,
         ast::heading::ATXHeading::before,
         ast::code::FencedCode::before,

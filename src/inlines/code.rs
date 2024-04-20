@@ -3,7 +3,7 @@ use crate::inlines::ProcessCtx;
 use crate::tokenizer::Token;
 
 impl code::InlineCode {
-    pub(super) fn parse(ProcessCtx { line, parser, id }: &mut ProcessCtx) -> bool {
+    pub(super) fn parse(ProcessCtx { line, parser, id, .. }: &mut ProcessCtx) -> bool {
         let start_offset = line.start_offset;
         let mut code_locations = (line.start_location(), line.end_location());
         let marker_length = line.starts_count(&Token::Backtick);

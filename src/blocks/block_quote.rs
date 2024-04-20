@@ -25,6 +25,7 @@ impl BlockStrategy for block_quote::BlockQuote {
             ctx.line.next();
             // optional following space.
             ctx.line.consume(|it: &Token| it.is_space_or_tab());
+            ctx.line.re_find_indent();
             return BlockProcessing::Further;
         }
         BlockProcessing::Unprocessed

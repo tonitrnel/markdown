@@ -28,6 +28,10 @@ fn to_html(tree: &Tree<Node>, cur: usize, writer: &mut impl Write) -> std::fmt::
                 "</code></pre>",
             ),
         }),
+        MarkdownNode::Emphasis => Some((Borrowed("<em>"), "</em>")),
+        MarkdownNode::Strong => Some((Borrowed("<strong>"), "</strong>")),
+        MarkdownNode::Strikethrough => Some((Borrowed("<del>"), "</del>")),
+        MarkdownNode::Highlighting => Some((Borrowed("<mark>"), "</mark>")),
         MarkdownNode::SoftBreak => {
             write!(writer, " ")?;
             None

@@ -240,7 +240,7 @@ impl BlockStrategy for table::Table {
     }
 
     fn process(ProcessCtx { line, parser, id }: ProcessCtx) -> BlockProcessing {
-        let id = if let MarkdownNode::Table(table) = &parser.tree[id].body {
+        let id = if let MarkdownNode::Table(_) = &parser.tree[id].body {
             parser.append_block(MarkdownNode::TableBody, line.start_location())
         } else {
             id

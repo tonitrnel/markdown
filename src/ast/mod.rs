@@ -101,7 +101,7 @@ impl MarkdownNode {
     pub fn can_contain(&self, target: &MarkdownNode) -> bool {
         match self {
             MarkdownNode::List(..) => matches!(target, MarkdownNode::ListItem(..)),
-            MarkdownNode::Document | MarkdownNode::BlockQuote(..) | MarkdownNode::ListItem(..) => {
+            MarkdownNode::Document | MarkdownNode::BlockQuote(..) | MarkdownNode::Callout(..) | MarkdownNode::ListItem(..) => {
                 !matches!(target, MarkdownNode::ListItem(..))
             }
             MarkdownNode::Table(..) => {

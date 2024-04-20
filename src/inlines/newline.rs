@@ -2,7 +2,7 @@ use crate::ast::MarkdownNode;
 use crate::inlines::ProcessCtx;
 use crate::tokenizer::{Token, Whitespace};
 
-pub(super) fn parse(ProcessCtx { line, parser, id }: &mut ProcessCtx) -> bool {
+pub(super) fn parse(ProcessCtx { line, parser, id, .. }: &mut ProcessCtx) -> bool {
     if let Some((child_idx, MarkdownNode::Text(text))) = parser
         .tree
         .get_last_child(*id)
@@ -32,7 +32,7 @@ pub(super) fn parse(ProcessCtx { line, parser, id }: &mut ProcessCtx) -> bool {
     true
 }
 
-pub(super) fn parse_backslash(ProcessCtx { line, parser, id }: &mut ProcessCtx)->bool{
+pub(super) fn parse_backslash(ProcessCtx { line, parser, id, .. }: &mut ProcessCtx) ->bool{
     if line.validate(1, Token::Whitespace(Whitespace::NewLine("\n"))) {
         parser.append_block_to(
             *id,

@@ -1,3 +1,4 @@
+use crate::utils;
 use std::fmt::{self, Write};
 use std::iter::Peekable;
 
@@ -129,7 +130,7 @@ impl Token<'_> {
         matches!(self, Token::Whitespace(Whitespace::Space | Whitespace::Tab))
     }
     /// 是用于 Markdown Block 相关的 Token
-    pub fn is_special_token(&self) -> bool {
+    pub fn is_block_special_token(&self) -> bool {
         matches!(
             self,
             // ATX Heading
@@ -152,6 +153,63 @@ impl Token<'_> {
                 | Token::Pipe
                 | Token::Colon
         )
+    }
+    // pub fn is_special_char(ch: &char) -> bool {
+    //     matches!(
+    //         ch,
+    //         '#' | '`'
+    //             | '~'
+    //             | '*'
+    //             | '_'
+    //             | '+'
+    //             | '-'
+    //             | '='
+    //             | '<'
+    //             | '>'
+    //             | '|'
+    //             | ':'
+    //             | '!'
+    //             | '&'
+    //             | '['
+    //             | ']'
+    //             | '.'
+    //             | '\\'
+    //     )
+    // }
+    pub(crate) fn is_anything_space(&self) -> bool {
+        let ch = match self {
+            Token::Escaped(ch) => Some(*ch),
+            Token::Text(str) => str.chars().last(),
+            Token::Ordered(_, _) | Token::Invalid(_) | Token::Number(_) => return false,
+            Token::Whitespace(..) => return true,
+            _ => return false,
+        };
+        if let Some(uc) = ch.map(|it| it as u32) {
+            uc == 9
+                || uc == 10
+                || uc == 12
+                || uc == 13
+                || uc == 32
+                || uc == 160
+                || uc == 5760
+                || (8192..=8202).contains(&uc)
+                || uc == 8239
+                || uc == 8287
+                || uc == 12288
+        } else {
+            false
+        }
+    }
+    pub(crate) fn is_punctuation(&self) -> bool {
+        let ch = match self {
+            Token::Escaped(ch) => Some(*ch),
+            Token::Text(str) => str.chars().last(),
+            Token::Ordered(_, _) | Token::Invalid(_) | Token::Number(_) | Token::Whitespace(_) => {
+                return false
+            }
+            _ => return true,
+        };
+        ch.map(utils::is_punctuation_or_symbol).unwrap_or(false)
     }
 }
 
@@ -212,7 +270,7 @@ impl fmt::Display for Token<'_> {
             Token::Ordered(u, d) => write!(f, "{u}{d}"),
             Token::Slash => write!(f, "/"),
             Token::Backslash => write!(f, "\\"),
-            Token::Escaped(ch) => write!(f, "\\{ch}"),
+            Token::Escaped(ch) => write!(f, "{ch}"),
             Token::Invalid(_) => f.write_char('\u{FFFD}'),
         }
     }
@@ -266,7 +324,7 @@ impl TokenWithLocation<'_> {
         self.token.is_space_or_tab()
     }
     pub fn is_special_token(&self) -> bool {
-        self.token.is_special_token()
+        self.token.is_block_special_token()
     }
     pub fn len(&self) -> usize {
         self.token.len()

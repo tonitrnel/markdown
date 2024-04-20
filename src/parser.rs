@@ -147,7 +147,7 @@ impl<'input> Parser<'input> {
             if !line.is_indented()
                 && !line
                     .get(line.indent)
-                    .map(|it| it.is_special_token())
+                    .map(|it| it.is_block_special_token())
                     .unwrap_or(false)
             {
                 line.advance_next_nonspace();
@@ -172,7 +172,6 @@ impl<'input> Parser<'input> {
                 }
             }
         }
-        println!("喵喵喵");
         if !self.all_closed
             && !line.is_blank()
             && matches!(self.tree[self.curr_proc_node].body, MarkdownNode::Paragraph)
@@ -222,6 +221,11 @@ impl<'input> Parser<'input> {
         println!("创建节点 #{idx} {:?}", self.tree[idx].body);
         idx
     }
+    pub fn append_free_node(&mut self, node: MarkdownNode, loc: Location) -> usize{
+        let idx = self.tree.create_node(Node::new(node, loc));
+        println!("创建游离节点 #{idx} {:?}", self.tree[idx].body);
+        idx
+    }
     pub fn append_block_to(
         &mut self,
         id: usize,
@@ -265,6 +269,7 @@ impl<'input> Parser<'input> {
         println!("创建节点 #{idx} {:?}", self.tree[idx].body);
         idx
     }
+    /// 插入文本当目标节点，这会自动合并相邻 *仍在处理* 的 Text 节点
     pub fn append_text_to(
         &mut self,
         parent: usize,
@@ -274,6 +279,7 @@ impl<'input> Parser<'input> {
         if let Some((idx, MarkdownNode::Text(text))) = self
             .tree
             .get_last_child(parent)
+            .filter(|id|self.tree[*id].processing)
             .map(|id| (id, &mut self.tree[id].body))
         {
             text.push_str(content.as_ref());
@@ -288,6 +294,9 @@ impl<'input> Parser<'input> {
             println!("创建节点 #{idx} {:?}", self.tree[idx].body);
             idx
         }
+    }
+    pub fn mark_as_processed(&mut self, idx: usize){
+        self.tree[idx].processing = false;
     }
     pub fn current_proc(&self) -> &Node {
         &self.tree[self.curr_proc_node]
