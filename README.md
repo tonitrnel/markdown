@@ -17,34 +17,35 @@
 - [x] HTML blocks
 - [ ] Link reference definitions
 - [x] Paragraphs
-- [ ] Blank lines
+- [x] Blank lines
 - [x] Tables(GFM)
 - [x] Block quotes
 - [x] List items
 - [x] Task list items(GFM)
-- [ ] Callouts(OFM)
-- [ ] Block defining id(OFM)
+- [x] Callouts(OFM)
 
 **Inlines**
 
-- [ ] Backslash escapes
-- [ ] Entity and numeric character references
+- [x] Backslash escapes
+- [x] Entity and numeric character references
 - [x] Code spans
-- [ ] Emphasis and strong emphasis
-- [ ] Strikethrough(GFM)
-- [ ] Links
-- [ ] Internal links(OFM)
-- [ ] Block reference(OFM)
-- [ ] Images
-- [ ] Embedding Files(OFM)
+- [x] Emphasis and strong emphasis
+- [x] Strikethrough(GFM)
+- [x] Links
+- [x] Internal links(OFM)
+- [x] Block reference(OFM)
+- [x] Block defining id(OFM)
+- [x] Images
+- [x] Embedding Files(OFM)
+- [x] Math(OFM)
 - [ ] Autolinks
 - [ ] Autolinks(GFM)
 - [ ] RawHTML
-- [ ] Comments(OFM)
+- [x] Comments(OFM)
 - [ ] DisallowedRawHTML(GFM)
 - [x] Hard line breaks
 - [x] Soft line breaks
-- [ ] Textual content
+- [x] Textual content
 
 **Other**
 

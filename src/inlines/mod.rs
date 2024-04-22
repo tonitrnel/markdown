@@ -1,79 +1,28 @@
-use std::cell::{Ref, RefCell, RefMut};
-use std::collections::VecDeque;
-use std::fmt::{Debug, Formatter};
-use std::rc::Rc;
-
 use crate::ast;
+use crate::inlines::bracket::BracketChain;
+use crate::inlines::delimiter::DelimiterChain;
 use crate::line::Line;
 use crate::parser::Parser;
 use crate::tokenizer::{Token, Whitespace};
+use std::collections::HashMap;
 
+mod bracket;
 mod code;
-mod emphasis;
+mod delimiter;
+mod entity;
 mod math;
 mod newline;
+mod link;
 
-#[derive(Clone)]
-pub(super) struct DelimiterChain<'input>(Rc<RefCell<Delimiter<'input>>>);
-impl<'a, 'input> DelimiterChain<'input> {
-    fn new(delimiter: Delimiter<'input>) -> Self {
-        Self(Rc::new(RefCell::new(delimiter)))
-    }
-    fn borrow(&'a self) -> Ref<'a, Delimiter<'input>> {
-        self.0.borrow()
-    }
-    fn borrow_mut(&'a self) -> RefMut<'a, Delimiter<'input>> {
-        self.0.borrow_mut()
-    }
-}
+type RefMap = HashMap<String, (String, String)>;
 
-pub(super) struct ProcessCtx<'a, 'input> {
-    pub(super) id: usize,
-    pub(super) parser: &'a mut Parser<'input>,
-    pub(super) line: &'a mut Line<'input>,
-    #[allow(unused)]
-    pub(super) brackets: VecDeque<u8>,
-    pub(super) delimiters: Option<DelimiterChain<'input>>,
-}
-#[derive(Clone)]
-struct Delimiter<'input> {
-    token: Token<'input>,
-    can_open: bool,
-    can_close: bool,
-    length: usize,
-    prev: Option<DelimiterChain<'input>>,
-    next: Option<DelimiterChain<'input>>,
-    position: usize,
-    node: usize,
-}
-
-impl Debug for DelimiterChain<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut count = 0;
-        {
-            let cur = self.borrow();
-            writeln!(
-                f,
-                "  {count}. [{}]({},{})@{}#{}",
-                cur.token, cur.can_open, cur.can_close, cur.length, cur.node
-            )?;
-        }
-        let mut prev = self.borrow().prev.clone();
-        while let Some(prev_delimiter) = prev {
-            count += 1;
-            {
-                let prev = prev_delimiter.borrow();
-                writeln!(
-                    f,
-                    "  {count}. [{}]({},{})@{}#{}",
-                    prev.token, prev.can_open, prev.can_close, prev.length, prev.node
-                )?;
-            }
-            let cloned = prev_delimiter.borrow().prev.clone();
-            prev = cloned;
-        }
-        Ok(())
-    }
+struct ProcessCtx<'a, 'input> {
+    id: usize,
+    parser: &'a mut Parser<'input>,
+    line: &'a mut Line<'input>,
+    brackets: Option<BracketChain<'input>>,
+    delimiters: Option<DelimiterChain<'input>>,
+    ref_map: RefMap,
 }
 
 pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: Line<'input>) {
@@ -82,8 +31,9 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
         id,
         parser,
         line: &mut line,
-        brackets: VecDeque::new(),
+        brackets: None,
         delimiters: None,
+        ref_map: HashMap::new(),
     };
     while let Some(token) = ctx.line.peek() {
         let snapshot = ctx.line.snapshot();
@@ -94,39 +44,36 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
             // Code
             Token::Backtick => ast::code::InlineCode::parse(&mut ctx),
             // Emphasis, Strong emphasis
-            Token::Asterisk | Token::Underscore => emphasis::before(&mut ctx, false, false, false),
+            Token::Asterisk | Token::Underscore => delimiter::before(&mut ctx, false, false, false),
             // Strikethrough(GFM)
-            Token::Tilde => emphasis::before(&mut ctx, false, true, false),
+            Token::Tilde => delimiter::before(&mut ctx, false, true, false),
             // Highlight(OFM)
-            Token::Eq => emphasis::before(&mut ctx, false, false, true),
-            // // Image, Embed
-            // Token::ExclamationMark => {
-            //     todo!()
-            // }
-            // // Link
-            // Token::LBracket => {
-            //     todo!()
-            // }
+            Token::Eq => delimiter::before(&mut ctx, false, false, true),
+            // Link
+            Token::LBracket => bracket::before(&mut ctx, false),
+            // Wikilink(OFM)
+            Token::DoubleLBracket => link::process_wikilink(&mut ctx),
+            // Image, Embed(OFM)
+            Token::ExclamationMark => match ctx.line.get(1) { 
+                Some(Token::LBracket) => bracket::before(&mut ctx, true),
+                Some(Token::DoubleLBracket) => link::process_embed(&mut ctx),
+                _ => false
+            },
+            // Close
+            Token::RBracket => bracket::process(&mut ctx),
+            // Entity
+            Token::Ampersand => entity::process(&mut ctx),
             // // AutoLinks, Raw HTML
             // Token::Lt => {
             //     todo!()
             // }
-            // // Strikethrough(GFM)
-            // Token::Tilde => {
-            //     todo!()
-            // }
-            // // Highlight(OFM)
-            // Token::Eq => {
-            //     todo!()
-            // }
             // // Math
-            // Token::Dollar => {
-            //     if ctx.line.validate(1, Token::Dollar) {
-            //         ast::math::BlockMath::parse(&mut ctx)
-            //     } else {
-            //         ast::math::InlineMath::parse(&mut ctx)
-            //     }
-            // }
+            Token::Dollar => {
+                let is_block = ctx.line.validate(1, Token::Dollar);
+                math::process(&mut ctx, is_block)
+            }
+            // Block id(OFM)
+            Token::Caret => link::process_block_id(&mut ctx),
             _ => false,
         };
         if !handled {
@@ -140,5 +87,5 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
             };
         }
     }
-    emphasis::process(&mut ctx, 0);
+    delimiter::process(&mut ctx, 0);
 }

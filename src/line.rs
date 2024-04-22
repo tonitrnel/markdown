@@ -119,6 +119,14 @@ impl<'input> Line<'input> {
         let last = self.iter().rposition(|it|!it.is_space_or_tab()).unwrap_or(len);
         Self::new(self.iter().skip(first).take(last + 1 - first).cloned().collect::<Vec<_>>())
     }
+    pub fn trim_start_matches<P>(&mut self, pat: P) -> &Self
+        where
+            P: Fn(&Token) -> bool,
+    {
+        let count = self.starts_count_matches(pat);
+        self.start_offset += count;
+        self
+    }
     pub fn trim_end_matches<P>(&mut self, pat: P) -> &Self
     where
         P: Fn(&Token) -> bool,
@@ -333,6 +341,29 @@ impl<'input> Line<'input> {
             })
             .collect();
         Self::new(result)
+    }
+    /// Converts an iterator of tokens to an escaped string
+    /// 
+    /// This function takes an iterator of tokens and converts each token
+    /// to a string, escaping punctuation characters if needed.
+    /// 
+    /// ## It maps over each token, checking its type:
+    /// 
+    /// - For escaped tokens that are ASCII punctuation, it formats them without escaping
+    /// - For other escaped tokens, it formats them with a backslash escape
+    /// - For other non-escaped tokens, it just calls `to_string()`
+    /// 
+    /// ## Returns:
+    /// 
+    /// An escaped string representing the tokens
+    pub fn to_escaped_string(&self) -> String{
+        self.iter().map(|it| {
+            match it.token {
+                Token::Escaped(ch) if ch.is_ascii_punctuation() => format!("{ch}"),
+                Token::Escaped(ch) => format!("\\{ch}"),
+                _ => it.to_string()
+            }
+        }).collect::<String>()
     }
 }
 impl Display for Line<'_> {

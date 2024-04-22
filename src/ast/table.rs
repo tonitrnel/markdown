@@ -1,6 +1,6 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table{
-    pub(crate) column: usize
+    pub column: usize
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Alignment {

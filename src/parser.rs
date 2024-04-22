@@ -12,7 +12,8 @@ pub struct Node {
     pub body: MarkdownNode,
     pub start: Location,
     pub end: Location,
-    pub processing: bool,
+    pub(crate) processing: bool,
+    pub id: Option<String>
 }
 impl Debug for Node {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -27,6 +28,7 @@ impl Node {
             start: location,
             end: location,
             processing: true,
+            id: None
         }
     }
 }

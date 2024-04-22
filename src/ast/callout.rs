@@ -41,7 +41,7 @@ impl From<&str> for CalloutType{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Callout {
-    pub(crate) _type: CalloutType,
-    pub(crate) title: Option<String>,
-    pub(crate) foldable: Option<bool>
+    pub _type: CalloutType,
+    pub title: Option<String>,
+    pub foldable: Option<bool>
 }

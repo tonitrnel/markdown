@@ -99,8 +99,6 @@ pub enum Token<'input> {
     Question,
     /// Semicolon `;`
     Semicolon,
-    /// BlockReference `#^`
-    BlockReference,
     /// Ordered, like: `1. `, `2. `
     Ordered(u64, char),
     /// Slash `/`
@@ -120,7 +118,6 @@ impl Token<'_> {
             Token::Whitespace(ws) => ws.len(),
             Token::DoubleLBracket
             | Token::DoubleRBracket
-            | Token::BlockReference
             | Token::Escaped(_) => 2,
             Token::Ordered(n, _) => get_digit_count(*n) + 1,
             _ => 1,
@@ -266,7 +263,6 @@ impl fmt::Display for Token<'_> {
             Token::DoubleQuote => f.write_str("\""),
             Token::Question => f.write_str("?"),
             Token::Semicolon => f.write_str(";"),
-            Token::BlockReference => f.write_str("#^"),
             Token::Ordered(u, d) => write!(f, "{u}{d}"),
             Token::Slash => write!(f, "/"),
             Token::Backslash => write!(f, "\\"),
@@ -439,15 +435,7 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
                 Some(Token::Whitespace(Whitespace::NewLine("\r")))
             }
         }
-        '#' => {
-            chars.next();
-            if let Some('^') = chars.peek() {
-                chars.next();
-                Some(Token::BlockReference)
-            } else {
-                Some(Token::Crosshatch)
-            }
-        }
+        '#' => consume_and_return(chars, Token::Crosshatch),
         '*' => consume_and_return(chars, Token::Asterisk),
         '_' => consume_and_return(chars, Token::Underscore),
         '~' => consume_and_return(chars, Token::Tilde),
@@ -502,12 +490,11 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
         '0'..='9' => {
             let start = chars.pos;
             let s = peeking_take_while(chars, |ch| ch.is_ascii_digit(), None);
-            let mut end = chars.pos;
             match chars.peek() {
                 Some(d @ '.' | d @ ')') => {
                     let d = *d;
+                    let cloned = chars.clone();
                     chars.next();
-                    end += 1;
                     match chars.peek() {
                         Some(ch) if d == '.' && ch.is_ascii_digit() => {
                             chars.next();
@@ -517,7 +504,10 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
                         Some(' ' | '\n') if s.len() < 10 => {
                             Some(Token::Ordered(s.parse::<u64>().unwrap(), d))
                         }
-                        _ => Some(Token::Text(&chars.content[start..end])),
+                        _ => {
+                            *chars = cloned;
+                            Some(Token::Number(s))
+                        }
                     }
                 }
                 _ => Some(Token::Number(s)),
@@ -664,6 +654,12 @@ mod tests {
         let tokens = Tokenizer::new("1234567890) hello world")
             .tokenize()
             .collect::<Vec<_>>();
-        assert_eq!(tokens[0].token, Token::Text("1234567890)"));
+        assert_eq!(tokens[0].token, Token::Number("1234567890"));
+    }
+
+    #[test]
+    fn case_5() {
+        let tokens = Tokenizer::new("(/url2)").tokenize().collect::<Vec<_>>();
+        assert_eq!(tokens.last().map(|it|it.token), Some(Token::RParen))
     }
 }

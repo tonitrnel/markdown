@@ -1,6 +1,5 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Image {
-    pub alt: String,
+    pub url: String,
     pub title: Option<String>,
-    pub size: Option<(String, String)>,
 }

@@ -1,7 +1,64 @@
 use crate::ast::MarkdownNode;
-use crate::inlines::{Delimiter, DelimiterChain, ProcessCtx};
+use crate::inlines::ProcessCtx;
 use crate::line::Line;
 use crate::tokenizer::{Token, Whitespace};
+use std::cell::{Ref, RefCell, RefMut};
+use std::fmt::{Debug, Formatter};
+use std::rc::Rc;
+
+#[derive(Clone)]
+pub(super) struct Delimiter<'input> {
+    pub(super) token: Token<'input>,
+    pub(super) can_open: bool,
+    pub(super) can_close: bool,
+    pub(super) length: usize,
+    pub(super) prev: Option<DelimiterChain<'input>>,
+    pub(super) next: Option<DelimiterChain<'input>>,
+    pub(super) position: usize,
+    pub(super) node: usize,
+}
+#[derive(Clone)]
+pub(super) struct DelimiterChain<'input>(Rc<RefCell<Delimiter<'input>>>);
+impl<'a, 'input> DelimiterChain<'input> {
+    pub(super) fn new(delimiter: Delimiter<'input>) -> Self {
+        Self(Rc::new(RefCell::new(delimiter)))
+    }
+    pub(super) fn borrow(&'a self) -> Ref<'a, Delimiter<'input>> {
+        self.0.borrow()
+    }
+    pub(super) fn borrow_mut(&'a self) -> RefMut<'a, Delimiter<'input>> {
+        self.0.borrow_mut()
+    }
+}
+
+impl Debug for DelimiterChain<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut count = 0;
+        {
+            let cur = self.borrow();
+            writeln!(
+                f,
+                "  {count}. [{}]({},{})@{}#{}",
+                cur.token, cur.can_open, cur.can_close, cur.length, cur.node
+            )?;
+        }
+        let mut prev = self.borrow().prev.clone();
+        while let Some(prev_delimiter) = prev {
+            count += 1;
+            {
+                let prev = prev_delimiter.borrow();
+                writeln!(
+                    f,
+                    "  {count}. [{}]({},{})@{}#{}",
+                    prev.token, prev.can_open, prev.can_close, prev.length, prev.node
+                )?;
+            }
+            let cloned = prev_delimiter.borrow().prev.clone();
+            prev = cloned;
+        }
+        Ok(())
+    }
+}
 
 pub(super) fn scan_delimiters<'input>(
     line: &mut Line<'input>,
@@ -124,10 +181,7 @@ pub(super) fn before(
 }
 pub(super) fn process(
     ProcessCtx {
-        line,
-        parser,
-        delimiters,
-        ..
+        parser, delimiters, ..
     }: &mut ProcessCtx,
     stack_bottom: usize,
 ) {
@@ -168,10 +222,8 @@ pub(super) fn process(
                         14 + if closer_delimiter.can_open { 2 } else { 0 } + closer_delimiter.length
                     }
                     // Highlight
-                    Token::Eq => {
-                        19 + if closer_delimiter.can_open { 1 } else { 0 }
-                    },
-                    _ => panic!("Invalid Token {}", closer_delimiter.token)
+                    Token::Eq => 19 + if closer_delimiter.can_open { 1 } else { 0 },
+                    _ => panic!("Invalid Token {}", closer_delimiter.token),
                 };
                 (closer_delimiter.prev.clone(), openers_bottom_index)
             };
@@ -228,17 +280,21 @@ pub(super) fn process(
                             parser.tree[closer_inl].end.column -= used_delimiter_nums as u64;
                         }
                         let start_location = parser.tree[opener_inl].end;
-                        let node = match closer_token { 
+                        let node = match closer_token {
                             Token::Asterisk | Token::Underscore => {
                                 if used_delimiter_nums == 1 {
                                     parser.append_free_node(MarkdownNode::Emphasis, start_location)
                                 } else {
                                     parser.append_free_node(MarkdownNode::Strong, start_location)
                                 }
-                            },
-                            Token::Tilde => parser.append_free_node(MarkdownNode::Strikethrough, start_location),
-                            Token::Eq => parser.append_free_node(MarkdownNode::Highlighting, start_location),
-                            _ => panic!("Invalid Token {}", closer_token)
+                            }
+                            Token::Tilde => {
+                                parser.append_free_node(MarkdownNode::Strikethrough, start_location)
+                            }
+                            Token::Eq => {
+                                parser.append_free_node(MarkdownNode::Highlighting, start_location)
+                            }
+                            _ => panic!("Invalid Token {}", closer_token),
                         };
                         parser.tree[node].end = {
                             let mut loc = parser.tree[closer_inl].end;
@@ -258,14 +314,20 @@ pub(super) fn process(
                             temp = next;
                         }
 
-                        parser.tree.print_link_info("A",parser.tree.get_parent(opener_inl));
+                        parser
+                            .tree
+                            .print_link_info("A", parser.tree.get_parent(opener_inl));
                         parser
                             .tree
                             .set_parent(node, parser.tree.get_parent(opener_inl));
-                        parser.tree.print_link_info("B",parser.tree.get_parent(opener_inl));
+                        parser
+                            .tree
+                            .print_link_info("B", parser.tree.get_parent(opener_inl));
                         parser.tree.set_next(opener_inl, node);
                         parser.tree.set_prev(closer_inl, node);
-                        parser.tree.print_link_info("C",parser.tree.get_parent(opener_inl));
+                        parser
+                            .tree
+                            .print_link_info("C", parser.tree.get_parent(opener_inl));
                         println!("喵喵喵 opener_inl = {opener_inl} closer_inl = {closer_inl} node = {node}");
 
                         if opener_delimiter.borrow().length == 0 {
@@ -485,16 +547,19 @@ mod tests {
         println!("{ast:?}");
         assert_eq!(ast.to_html(), "<p>foo <em>_</em></p>")
     }
-    
+
     #[test]
-    fn gfm_case_491(){
+    fn gfm_case_491() {
         let text = r#"~~Hi~~ Hello, ~there~ world!"#;
         let ast = Parser::new(text).parse();
         println!("{ast:?}");
-        assert_eq!(ast.to_html(), "<p><del>Hi</del> Hello, <del>there</del> world!</p>")
+        assert_eq!(
+            ast.to_html(),
+            "<p><del>Hi</del> Hello, <del>there</del> world!</p>"
+        )
     }
     #[test]
-    fn gfm_case_492(){
+    fn gfm_case_492() {
         let text = r#"This ~~has a
 
 new paragraph~~."#;
@@ -503,15 +568,15 @@ new paragraph~~."#;
         assert_eq!(ast.to_html(), "<p>This ~~has a</p><p>new paragraph~~.</p>")
     }
     #[test]
-    fn gfm_case_493(){
+    fn gfm_case_493() {
         let text = r#"This will ~~~not~~~ strike."#;
         let ast = Parser::new(text).parse();
         println!("{ast:?}");
         assert_eq!(ast.to_html(), "<p>This will ~~~not~~~ strike.</p>")
     }
-    
+
     #[test]
-    fn ofm_case_1(){
+    fn ofm_case_1() {
         let text = r#"==Highlighted text=="#;
         let ast = Parser::new(text).parse();
         println!("{ast:?}");
