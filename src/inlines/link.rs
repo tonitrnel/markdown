@@ -229,7 +229,7 @@ pub(super) fn process_block_id(
     for item in line.iter() {
         match &item.token {
             Token::Text(str) if str.chars().all(|ch| ch.is_ascii_alphabetic()) => continue,
-            Token::Number(str) if !str.contains('.') => continue,
+            Token::Digit(_) => continue,
             Token::Hyphen => continue,
             _ => return false,
         }
@@ -295,7 +295,7 @@ pub(super) fn process_wikilink(
                 rrs.1.push((end + 1, end + 1));
                 state = WikilinkState::InRef(InRef::RefBlock)
             }
-            (WikilinkState::InRef(InRef::Ref), Token::Text(_) | Token::Number(_)) => {
+            (WikilinkState::InRef(InRef::Ref), Token::Text(_) | Token::Digit(..)) => {
                 rrs.0 = false;
                 rrs.1.push((end, end));
                 state = WikilinkState::InRef(InRef::RefHeading(0))
@@ -312,7 +312,7 @@ pub(super) fn process_wikilink(
             }
             (
                 WikilinkState::InRef(InRef::RefBlock),
-                Token::Text(_) | Token::Number(_) | Token::Hyphen,
+                Token::Text(_) | Token::Digit(..) | Token::Hyphen,
             ) => continue,
             (WikilinkState::InRef(InRef::RefHeading(index)), Token::DoubleRBracket) => {
                 rrs.1[*index].1 = end;
@@ -441,15 +441,15 @@ pub(super) fn process_embed(
                 state = EmbedState::Initial;
                 break;
             }
-            (EmbedState::InSize(InSize::Width), Token::Number(_)) => continue,
-            (EmbedState::InSize(InSize::Height), Token::Number(_)) => continue,
+            (EmbedState::InSize(InSize::Width), Token::Digit(..)) => continue,
+            (EmbedState::InSize(InSize::Height), Token::Digit(..)) => continue,
 
             (EmbedState::InRef(InRef::Ref), Token::Caret) => {
                 rrs.0 = true;
                 rrs.1.push((end + 1, end + 1));
                 state = EmbedState::InRef(InRef::RefBlock)
             }
-            (EmbedState::InRef(InRef::Ref), Token::Text(_) | Token::Number(_)) => {
+            (EmbedState::InRef(InRef::Ref), Token::Text(_) | Token::Digit(..)) => {
                 rrs.0 = false;
                 rrs.1.push((end, end));
                 state = EmbedState::InRef(InRef::RefHeading(0))
@@ -461,7 +461,7 @@ pub(super) fn process_embed(
             }
             (
                 EmbedState::InRef(InRef::RefBlock),
-                Token::Text(_) | Token::Number(_) | Token::Hyphen,
+                Token::Text(_) | Token::Digit(..) | Token::Hyphen,
             ) => continue,
 
             (EmbedState::InRef(InRef::RefHeading(index)), Token::Crosshatch) => {
@@ -513,12 +513,12 @@ pub(super) fn process_embed(
                         line.slice(*start, *end).to_string()
                     }
                 })
-                .filter_map(|it|{
+                .filter_map(|it| {
                     let mut parts = it.split('=');
                     match (parts.next(), parts.next()) {
                         (Some(a), Some(b)) => Some((a.to_string(), b.to_string())),
                         (Some(a), None) => Some((a.to_string(), "".to_string())),
-                        _ => None
+                        _ => None,
                     }
                 })
                 .collect::<Vec<_>>(),
@@ -529,14 +529,14 @@ pub(super) fn process_embed(
     let size = if sr.0 != sr.1 {
         let size = line.slice(sr.0, sr.1).to_string();
         let mut parts = size.split('x');
-        let first = parts.next().and_then(|it|it.parse::<u32>().ok());
-        let second = parts.next().and_then(|it|it.parse::<u32>().ok());
+        let first = parts.next().and_then(|it| it.parse::<u32>().ok());
+        let second = parts.next().and_then(|it| it.parse::<u32>().ok());
         match (first, second) {
             (Some(a), Some(b)) => Some((a, Some(b))),
             (Some(a), None) => Some((a, None)),
-            _ => None
+            _ => None,
         }
-    } else { 
+    } else {
         None
     };
     let end =
@@ -545,14 +545,152 @@ pub(super) fn process_embed(
             .max(sr.1);
     let end_location = line[end].end_location();
     line.skip(end + 1);
-    parser.append_block_to(*id, MarkdownNode::Embed(embed::Embed {
-        path,
-        size,
-        reference,
-        attrs,
-    }), (start_location, end_location));
+    parser.append_block_to(
+        *id,
+        MarkdownNode::Embed(embed::Embed {
+            path,
+            size,
+            reference,
+            attrs,
+        }),
+        (start_location, end_location),
+    );
     true
 }
+
+pub(super) fn process_autolink(
+    ProcessCtx {
+        id, line, parser, ..
+    }: &mut ProcessCtx,
+) -> bool {
+    let start_location = line.start_location();
+    line.next();
+    if let Some(end) = scan_email(line) {
+        let link = line.slice(0, end);
+        let end_location = line[end].end_location();
+        line.skip(end + 1);
+        let node = parser.append_block_to(
+            *id,
+            MarkdownNode::Link(
+                link::DefaultLink {
+                    url: format!("mailto:{}", link),
+                    title: None,
+                }
+                .into(),
+            ),
+            (start_location, end_location),
+        );
+        let locations = (link.start_location(), link.last_token_end_location());
+        parser.append_text_to(node, link.to_string(), locations);
+        true
+    } else if let Some((end, escaped_esc)) = scan_url(line) {
+        let link = line.slice(0, end);
+        let end_location = line[end].end_location();
+        let mut unescaped_string = link.to_unescape_string();
+        if escaped_esc {
+            unescaped_string.push('\\')
+        }
+        line.skip(end + 1);
+        let node = parser.append_block_to(
+            *id,
+            MarkdownNode::Link(
+                link::DefaultLink {
+                    url: utils::percent_encode::encode(utils::escape_xml(&unescaped_string), true),
+                    title: None,
+                }
+                .into(),
+            ),
+            (start_location, end_location),
+        );
+        let mut locations = (link.start_location(), link.last_token_end_location());
+        if escaped_esc {
+            locations.1.column += 1;
+        }
+        parser.append_text_to(node, unescaped_string, locations);
+        true
+    } else {
+        false
+    }
+}
+
+fn scan_url(line: &Line) -> Option<(usize, bool)> {
+    let mut end = 0;
+    let mut escaped_esc = false;
+    let mut iter = line.iter().enumerate();
+    let mut len = 0;
+    for (i, item) in iter.by_ref() {
+        println!("scan_url first loop#{len} -> {:?}", item.token);
+        match item.token {
+            Token::Text(str) if str.chars().all(|it| it.is_ascii_alphabetic()) => (),
+            Token::Digit(..) | Token::Plus | Token::Period | Token::Hyphen if i > 0 => (),
+            Token::Colon if (2..32).contains(&len) => break,
+            _ => return None,
+        }
+        len += item.len();
+    }
+    for (i, item) in iter.by_ref() {
+        println!("scan_url second loop#{len} -> {:?}", item.token);
+        match item.token {
+            Token::Gt | Token::Escaped('>') => {
+                escaped_esc = item.token == Token::Escaped('>');
+                end = i;
+                break;
+            }
+            Token::Lt | Token::Escaped('<') => return None,
+            t if t.is_control() => return None,
+            _ => (),
+        }
+        len += item.len();
+    }
+    Some((end, escaped_esc))
+}
+#[derive(Debug)]
+enum EmailState {
+    Initial,
+    Username,
+    At,
+    Domain(usize),
+    Tld(usize),
+}
+fn scan_email(line: &Line) -> Option<usize> {
+    let mut end = 0;
+    let mut state = EmailState::Initial;
+    let mut len = 0;
+    for (i, item) in line.iter().enumerate() {
+        println!("scan_email#{len} -> {state:?} = {:?}", item.token);
+        match (&state, &item.token) {
+            (EmailState::Initial, Token::Text(..) | Token::Digit(..)) => {
+                state = EmailState::Username
+            }
+            (EmailState::Username, Token::Punctuation('@')) if len > 2 => state = EmailState::At,
+            (EmailState::Username, Token::Text(str))
+                if str.chars().all(|it| it.is_ascii_alphabetic()) => (),
+            (EmailState::Username, Token::Digit(..)) => (),
+            (EmailState::Username, t) if t.in_str(".!#$%&'*+\\/=?^_`{|}~-") => (),
+            (EmailState::At, t) if t.is_ascii_alphanumeric() => state = EmailState::Domain(len),
+            (EmailState::Domain(_), Token::Text(..) | Token::Digit(..) | Token::Hyphen) => (),
+            (EmailState::Domain(s), Token::Period) if (2..62).contains(&(len - *s)) => {
+                state = EmailState::Tld(len)
+            }
+            (EmailState::Tld(_), Token::Text(..) | Token::Digit(..) | Token::Hyphen) => (),
+            (EmailState::Tld(s), Token::Period) if (2..62).contains(&(len - *s)) => {
+                state = EmailState::Tld(len)
+            }
+            (EmailState::Tld(s), Token::Gt) if (2..62).contains(&(len - *s)) => {
+                state = EmailState::Initial;
+                end = i;
+                break;
+            }
+            _ => return None,
+        }
+        len += item.len();
+    }
+    if !matches!(state, EmailState::Initial) {
+        return None;
+    }
+    Some(end)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ast::reference::Reference;
@@ -650,106 +788,171 @@ mod tests {
             )
         )
     }
-    
+
     #[test]
-    fn ofm_case_embed_1(){
+    fn ofm_case_embed_1() {
         let text = r#"![[Internal links]]"#;
         let ast = Parser::new(text).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(
-                embed::Embed{
-                    path: "Internal links".to_string(),
-                    size: None,
-                    reference: None,
-                    attrs: None,
-                }
-            )
+            MarkdownNode::Embed(embed::Embed {
+                path: "Internal links".to_string(),
+                size: None,
+                reference: None,
+                attrs: None,
+            })
         )
     }
     #[test]
-    fn ofm_case_embed_2(){
+    fn ofm_case_embed_2() {
         let text = r#"![[Internal links#^b15695]]"#;
         let ast = Parser::new(text).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(
-                embed::Embed{
-                    path: "Internal links".to_string(),
-                    size: None,
-                    reference: Some(Reference::BlockId("b15695".to_string())),
-                    attrs: None,
-                }
-            )
+            MarkdownNode::Embed(embed::Embed {
+                path: "Internal links".to_string(),
+                size: None,
+                reference: Some(Reference::BlockId("b15695".to_string())),
+                attrs: None,
+            })
         )
     }
     #[test]
-    fn ofm_case_embed_3(){
+    fn ofm_case_embed_3() {
         let text = r#"![[Engelbart.jpg|100x145]]"#;
         let ast = Parser::new(text).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(
-                embed::Embed{
-                    path: "Engelbart.jpg".to_string(),
-                    size: Some((100, Some(145))),
-                    reference: None,
-                    attrs: None,
-                }
-            )
+            MarkdownNode::Embed(embed::Embed {
+                path: "Engelbart.jpg".to_string(),
+                size: Some((100, Some(145))),
+                reference: None,
+                attrs: None,
+            })
         )
     }
     #[test]
-    fn ofm_case_embed_4(){
+    fn ofm_case_embed_4() {
         let text = r#"![[Engelbart.jpg|100]]"#;
         let ast = Parser::new(text).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(
-                embed::Embed{
-                    path: "Engelbart.jpg".to_string(),
-                    size: Some((100, None)),
-                    reference: None,
-                    attrs: None,
-                }
-            )
+            MarkdownNode::Embed(embed::Embed {
+                path: "Engelbart.jpg".to_string(),
+                size: Some((100, None)),
+                reference: None,
+                attrs: None,
+            })
         )
     }
     #[test]
-    fn ofm_case_embed_5(){
+    fn ofm_case_embed_5() {
         let text = r#"![[Document.pdf#page=3]]"#;
         let ast = Parser::new(text).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(
-                embed::Embed{
-                    path: "Document.pdf".to_string(),
-                    size: None,
-                    reference: None,
-                    attrs: Some(vec![
-                        ("page".to_string(), "3".to_string()),
-                    ]),
-                }
-            )
+            MarkdownNode::Embed(embed::Embed {
+                path: "Document.pdf".to_string(),
+                size: None,
+                reference: None,
+                attrs: Some(vec![("page".to_string(), "3".to_string()),]),
+            })
         )
     }
     #[test]
-    fn ofm_case_embed_6(){
+    fn ofm_case_embed_6() {
         let text = r#"![[Document.pdf#page=3&theme=dark]]"#;
         let ast = Parser::new(text).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(
-                embed::Embed{
-                    path: "Document.pdf".to_string(),
-                    size: None,
-                    reference: None,
-                    attrs: Some(vec![
-                        ("page".to_string(), "3".to_string()),
-                        ("theme".to_string(), "dark".to_string()),
-                    ]),
-                }
-            )
+            MarkdownNode::Embed(embed::Embed {
+                path: "Document.pdf".to_string(),
+                size: None,
+                reference: None,
+                attrs: Some(vec![
+                    ("page".to_string(), "3".to_string()),
+                    ("theme".to_string(), "dark".to_string()),
+                ]),
+            })
+        )
+    }
+
+    #[test]
+    fn case_594() {
+        let text = r#"<http://foo.bar.baz>"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p><a href="http://foo.bar.baz">http://foo.bar.baz</a></p>"#
+        )
+    }
+    #[test]
+    fn case_595() {
+        let text = r#"<https://foo.bar.baz/test?q=hello&id=22&boolean>"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p><a href="https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean">https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean</a></p>"#
+        )
+    }
+    #[test]
+    fn case_596() {
+        let text = r#"<irc://foo.bar:2233/baz>"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p><a href="irc://foo.bar:2233/baz">irc://foo.bar:2233/baz</a></p>"#
+        )
+    }
+    #[test]
+    fn case_597() {
+        let text = r#"<MAILTO:FOO@BAR.BAZ>"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p><a href="MAILTO:FOO@BAR.BAZ">MAILTO:FOO@BAR.BAZ</a></p>"#
+        )
+    }
+    #[test]
+    fn case_602() {
+        let text = r#"<https://foo.bar/baz bim>"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(ast.to_html(), r#"<p>&lt;https://foo.bar/baz bim&gt;</p>"#)
+    }
+    #[test]
+    fn case_603() {
+        let text = r#"<https://example.com/\[\>"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p><a href="https://example.com/%5C%5B%5C">https://example.com/\[\</a></p>"#
+        )
+    }
+    #[test]
+    fn case_604() {
+        let text = r#"<foo@bar.example.com>"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p><a href="mailto:foo@bar.example.com">foo@bar.example.com</a></p>"#
+        )
+    }
+    #[test]
+    fn case_605() {
+        let text = r#"<foo+special@Bar.baz-bar0.com>"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p><a href="mailto:foo+special@Bar.baz-bar0.com">foo+special@Bar.baz-bar0.com</a></p>"#
+        )
+    }
+    #[test]
+    fn case_606() {
+        let text = r#"<foo\+@bar.example.com>"#;
+        let ast = Parser::new(text).parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p>&lt;foo+@bar.example.com&gt;</p>"#
         )
     }
 }

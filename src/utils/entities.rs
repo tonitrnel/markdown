@@ -2237,6 +2237,19 @@ pub(crate) fn unescape_string(str: impl AsRef<str>) -> String {
         str.to_string()
     }
 }
+pub(crate) fn escape_xml(str: impl AsRef<str>) -> String {
+    let mut new = String::new();
+    for char in str.as_ref().chars() {
+        match char {
+            '&' => new.push_str("&amp;"),
+            '<' => new.push_str("&lt;"),
+            '>' => new.push_str("&gt;"),
+            '"' => new.push_str("&quot;"),
+            _ => new.push(char),
+        }
+    }
+    new
+}
 #[cfg(test)]
 mod tests {
     use super::*;

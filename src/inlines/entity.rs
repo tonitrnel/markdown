@@ -17,7 +17,7 @@ pub(super) fn process(
             (EscapeState::Entity, Token::Crosshatch) => {
                 state = EscapeState::Numeric;
             }
-            (EscapeState::Entity, Token::Text(..) | Token::Number(..)) => {
+            (EscapeState::Entity, Token::Text(..) | Token::Digit(..)) => {
                 start = end;
                 state = EscapeState::Named
             }
@@ -25,11 +25,11 @@ pub(super) fn process(
                 start = end;
                 state = EscapeState::Hex;
             }
-            (EscapeState::Numeric, Token::Number(str)) if !str.contains('.') => {
+            (EscapeState::Numeric, Token::Digit(_)) => {
                 start = end;
                 state = EscapeState::Dec;
             }
-            (EscapeState::Named, Token::Text(_) | Token::Number(_)) => continue,
+            (EscapeState::Named, Token::Text(_) | Token::Digit(..)) => continue,
             (EscapeState::Named, Token::Semicolon) => {
                 let buf = line.slice(start, end).to_string();
                 if let Some(val) = utils::lookup_entity(buf.as_bytes()) {
@@ -39,7 +39,7 @@ pub(super) fn process(
                 };
                 return false;
             }
-            (EscapeState::Hex, Token::Text(_) | Token::Number(_)) => continue,
+            (EscapeState::Hex, Token::Text(_) | Token::Digit(..)) => continue,
             (EscapeState::Hex, Token::Semicolon) => {
                 let buf = line.slice(start, end).to_string();
                 if let Ok(Some(mut ch)) = u32::from_str_radix(&buf[1..], 16).map(char::from_u32) {
@@ -54,7 +54,7 @@ pub(super) fn process(
                 }
                 return false;
             }
-            (EscapeState::Dec, Token::Number(_)) => continue,
+            (EscapeState::Dec, Token::Digit(..)) => continue,
             (EscapeState::Dec, Token::Semicolon) => {
                 let buf = line.slice(start, end).to_string();
                 if let Ok(Some(mut ch)) = buf.parse::<u32>().map(char::from_u32) {

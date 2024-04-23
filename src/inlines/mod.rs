@@ -10,9 +10,9 @@ mod bracket;
 mod code;
 mod delimiter;
 mod entity;
+mod link;
 mod math;
 mod newline;
-mod link;
 
 type RefMap = HashMap<String, (String, String)>;
 
@@ -54,19 +54,17 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
             // Wikilink(OFM)
             Token::DoubleLBracket => link::process_wikilink(&mut ctx),
             // Image, Embed(OFM)
-            Token::ExclamationMark => match ctx.line.get(1) { 
+            Token::ExclamationMark => match ctx.line.get(1) {
                 Some(Token::LBracket) => bracket::before(&mut ctx, true),
                 Some(Token::DoubleLBracket) => link::process_embed(&mut ctx),
-                _ => false
+                _ => false,
             },
             // Close
             Token::RBracket => bracket::process(&mut ctx),
             // Entity
             Token::Ampersand => entity::process(&mut ctx),
             // // AutoLinks, Raw HTML
-            // Token::Lt => {
-            //     todo!()
-            // }
+            Token::Lt => link::process_autolink(&mut ctx),
             // // Math
             Token::Dollar => {
                 let is_block = ctx.line.validate(1, Token::Dollar);

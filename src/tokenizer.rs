@@ -39,10 +39,12 @@ impl fmt::Display for Whitespace<'_> {
 pub enum Token<'input> {
     /// Text
     Text(&'input str),
-    /// Number 0-9 Include decimal
-    Number(&'input str),
+    /// Digit 0-9 **Not Include decimal**
+    Digit(&'input str),
     /// Whitespace
     Whitespace(Whitespace<'input>),
+    /// Ordered, like: `1. `, `2. `, `3) `
+    Ordered(u64, char),
     /// Crosshatch `#`
     Crosshatch,
     /// Asterisk `*`
@@ -99,26 +101,32 @@ pub enum Token<'input> {
     Question,
     /// Semicolon `;`
     Semicolon,
-    /// Ordered, like: `1. `, `2. `
-    Ordered(u64, char),
+    /// Period `.`
+    Period,
     /// Slash `/`
     Slash,
     /// Backslash `\`
     Backslash,
     /// Escaped
+    ///
+    /// No included ascii control characters
     Escaped(char),
-    Invalid(char),
+    /// More ASCII Control 0x00 - 0x20
+    ///
+    /// No included `Token::Whitespace`
+    Control(char),
+    /// More ASCII Punctuation 0x21 - 0x2F, 0x3A - 0x40
+    ///
+    /// Exclude `Token::Text | Token::Digest | Token::Escaped | Token::Whitespace | Token::Ordered`
+    Punctuation(char),
 }
-
 impl Token<'_> {
     pub fn len(&self) -> usize {
         match self {
             Token::Text(s) => s.chars().count(),
-            Token::Number(s) => s.len(),
+            Token::Digit(s) => s.len(),
             Token::Whitespace(ws) => ws.len(),
-            Token::DoubleLBracket
-            | Token::DoubleRBracket
-            | Token::Escaped(_) => 2,
+            Token::DoubleLBracket | Token::DoubleRBracket | Token::Escaped(_) => 2,
             Token::Ordered(n, _) => get_digit_count(*n) + 1,
             _ => 1,
         }
@@ -175,9 +183,9 @@ impl Token<'_> {
     // }
     pub(crate) fn is_anything_space(&self) -> bool {
         let ch = match self {
-            Token::Escaped(ch) => Some(*ch),
+            Token::Escaped(ch) | Token::Control(ch) => Some(*ch),
             Token::Text(str) => str.chars().last(),
-            Token::Ordered(_, _) | Token::Invalid(_) | Token::Number(_) => return false,
+            Token::Ordered(_, _) | Token::Digit(_) => return false,
             Token::Whitespace(..) => return true,
             _ => return false,
         };
@@ -197,22 +205,95 @@ impl Token<'_> {
             false
         }
     }
+    // Checks if the value is a UTF8 punctuation character:
     pub(crate) fn is_punctuation(&self) -> bool {
-        let ch = match self {
-            Token::Escaped(ch) => Some(*ch),
-            Token::Text(str) => str.chars().last(),
-            Token::Ordered(_, _) | Token::Invalid(_) | Token::Number(_) | Token::Whitespace(_) => {
-                return false
+        match self {
+            Token::Escaped(ch) => utils::is_punctuation_or_symbol(*ch),
+            Token::Text(_) => false,
+            Token::Ordered(_, _) | Token::Control(_) | Token::Digit(_) | Token::Whitespace(_) => {
+                false
             }
-            _ => return true,
-        };
-        ch.map(utils::is_punctuation_or_symbol).unwrap_or(false)
+            _ => true,
+        }
+    }
+    // Checks if the value is an ASCII control character
+    //
+    // Codepoint: 0x00 - 0x20
+    pub(crate) fn is_control(&self) -> bool {
+        matches!(self, Token::Whitespace(_) | Token::Control(_))
+    }
+    pub(crate) fn is_ascii_alphanumeric(&self) -> bool {
+        match self {
+            Token::Text(str) => str.chars().all(|it| it.is_ascii_alphabetic()),
+            Token::Digit(..) => true,
+            _ => false,
+        }
+    }
+    /// 判断 Token 是否存在于给定的字符串
+    /// 
+    /// 仅对可转换为 `char` 的 `Token` 生效，其他永远返回 `false`
+    pub(crate) fn in_str(&self, str: &str) -> bool {
+        str.chars().any(|ch| self.eq(&ch))
     }
 }
-
 impl<'input> AsRef<Token<'input>> for Token<'input> {
     fn as_ref(&self) -> &Token<'input> {
         self
+    }
+}
+impl<'input> TryFrom<&Token<'input>> for char{
+    type Error = ();
+    fn try_from(value: &Token<'input>) -> Result<Self, Self::Error> {
+        Ok(match value {
+            Token::Crosshatch => '#',
+            Token::Asterisk => '*',
+            Token::Underscore => '_',
+            Token::Tilde => '~',
+            Token::LBracket => '[',
+            Token::RBracket => ']',
+            Token::LParen => '(',
+            Token::RParen => ')',
+            Token::LBrace => '{',
+            Token::RBrace => '}',
+            Token::Backtick => '`',
+            Token::Eq => '=',
+            Token::Ampersand => '&',
+            Token::Caret => '^',
+            Token::Pipe => '|',
+            Token::ExclamationMark => '!',
+            Token::Hyphen => '-',
+            Token::Plus => '+',
+            Token::Lt => '<',
+            Token::Gt => '>',
+            Token::Dollar => '$',
+            Token::Colon => ':',
+            Token::SingleQuote => '\'',
+            Token::DoubleQuote => '"',
+            Token::Question => '?',
+            Token::Semicolon => ';',
+            Token::Period => '.',
+            Token::Slash => '/',
+            Token::Backslash => '\\',
+            Token::Escaped(ch) => *ch,
+            Token::Control(ch) => *ch,
+            Token::Punctuation(ch) => *ch,
+            Token::Text(..)
+            | Token::Digit(..)
+            | Token::Ordered(..)
+            | Token::Whitespace(..)
+            | Token::DoubleRBracket
+            | Token::DoubleLBracket => return Err(()),
+        })
+    }
+}
+impl<'input> PartialEq<char> for Token<'input> {
+    fn eq(&self, other: &char) -> bool {
+        match self {
+            Token::Text(_) | Token::Digit(_) | Token::Ordered(..) | Token::Escaped(_) => false,
+            Token::Control(ch) => ch == other,
+            Token::Punctuation(ch) => ch == other,
+            _ => char::try_from(self).map(|ch| &ch == other).unwrap_or(false),
+        }
     }
 }
 
@@ -233,41 +314,49 @@ impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Token::Text(str) => write!(f, "{str}"),
-            Token::Number(str) => write!(f, "{str}"),
+            Token::Digit(str) => write!(f, "{str}"),
             Token::Whitespace(ws) => write!(f, "{ws}"),
-            Token::Crosshatch => f.write_str("#"),
-            Token::Asterisk => f.write_str("*"),
-            Token::Underscore => f.write_str("_"),
-            Token::Tilde => f.write_str("~"),
-            Token::LBracket => f.write_str("["),
-            Token::DoubleLBracket => f.write_str("[["),
-            Token::RBracket => f.write_str("]"),
-            Token::DoubleRBracket => f.write_str("]]"),
-            Token::LParen => f.write_str("("),
-            Token::RParen => f.write_str(")"),
-            Token::LBrace => f.write_str("{"),
-            Token::RBrace => f.write_str("}"),
-            Token::Backtick => f.write_str("`"),
-            Token::Eq => f.write_str("="),
-            Token::Ampersand => f.write_str("&"),
-            Token::Caret => f.write_str("^"),
-            Token::Pipe => f.write_str("|"),
-            Token::ExclamationMark => f.write_str("!"),
-            Token::Hyphen => f.write_str("-"),
-            Token::Plus => f.write_str("+"),
-            Token::Lt => f.write_str("<"),
-            Token::Gt => f.write_str(">"),
-            Token::Dollar => f.write_str("$"),
-            Token::Colon => f.write_str(":"),
-            Token::SingleQuote => f.write_str("'"),
-            Token::DoubleQuote => f.write_str("\""),
-            Token::Question => f.write_str("?"),
-            Token::Semicolon => f.write_str(";"),
             Token::Ordered(u, d) => write!(f, "{u}{d}"),
-            Token::Slash => write!(f, "/"),
-            Token::Backslash => write!(f, "\\"),
-            Token::Escaped(ch) => write!(f, "{ch}"),
-            Token::Invalid(_) => f.write_char('\u{FFFD}'),
+            Token::DoubleLBracket => f.write_str("[["),
+            Token::DoubleRBracket => f.write_str("]]"),
+            Token::Crosshatch => f.write_char('#'),
+            Token::Asterisk => f.write_char('*'),
+            Token::Underscore => f.write_char('_'),
+            Token::Tilde => f.write_char('~'),
+            Token::LBracket => f.write_char('['),
+            Token::RBracket => f.write_char(']'),
+            Token::LParen => f.write_char('('),
+            Token::RParen => f.write_char(')'),
+            Token::LBrace => f.write_char('{'),
+            Token::RBrace => f.write_char('}'),
+            Token::Backtick => f.write_char('`'),
+            Token::Eq => f.write_char('='),
+            Token::Ampersand => f.write_char('&'),
+            Token::Caret => f.write_char('^'),
+            Token::Pipe => f.write_char('|'),
+            Token::ExclamationMark => f.write_char('!'),
+            Token::Hyphen => f.write_char('-'),
+            Token::Plus => f.write_char('+'),
+            Token::Lt => f.write_char('<'),
+            Token::Gt => f.write_char('>'),
+            Token::Dollar => f.write_char('$'),
+            Token::Colon => f.write_char(':'),
+            Token::SingleQuote => f.write_char('\''),
+            Token::DoubleQuote => f.write_char('"'),
+            Token::Question => f.write_char('?'),
+            Token::Semicolon => f.write_char(';'),
+            Token::Period => f.write_char('.'),
+            Token::Slash => f.write_char('/'),
+            Token::Backslash => f.write_char('\\'),
+            Token::Escaped(ch) => f.write_char(*ch),
+            Token::Control(ch) => {
+                if ch == &'\u{0000}' {
+                    f.write_char('\u{FFFD}')
+                } else {
+                    f.write_char(*ch)
+                }
+            }
+            Token::Punctuation(ch) => f.write_char(*ch),
         }
     }
 }
@@ -487,8 +576,8 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
         '\'' => consume_and_return(chars, Token::SingleQuote),
         '?' => consume_and_return(chars, Token::Question),
         ';' => consume_and_return(chars, Token::Semicolon),
+        '.' => consume_and_return(chars, Token::Period),
         '0'..='9' => {
-            let start = chars.pos;
             let s = peeking_take_while(chars, |ch| ch.is_ascii_digit(), None);
             match chars.peek() {
                 Some(d @ '.' | d @ ')') => {
@@ -496,21 +585,16 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
                     let cloned = chars.clone();
                     chars.next();
                     match chars.peek() {
-                        Some(ch) if d == '.' && ch.is_ascii_digit() => {
-                            chars.next();
-                            peeking_take_while(chars, |ch| ch.is_ascii_digit(), None);
-                            Some(Token::Number(&chars.content[start..chars.pos]))
-                        }
                         Some(' ' | '\n') if s.len() < 10 => {
                             Some(Token::Ordered(s.parse::<u64>().unwrap(), d))
                         }
                         _ => {
                             *chars = cloned;
-                            Some(Token::Number(s))
+                            Some(Token::Digit(s))
                         }
                     }
                 }
-                _ => Some(Token::Number(s)),
+                _ => Some(Token::Digit(s)),
             }
         }
         '%' => {
@@ -530,13 +614,11 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
                     &chars.content[start..end],
                 )))
             } else {
-                Some(Token::Text("%"))
+                Some(Token::Punctuation('%'))
             }
         }
-        '\u{0000}' => {
-            chars.next();
-            Some(Token::Invalid(ch))
-        }
+        ch if ch.is_ascii_control() => consume_and_return(chars, Token::Control(ch)),
+        ch if ch.is_ascii_punctuation() => consume_and_return(chars, Token::Punctuation(ch)),
         ch => {
             let ch_len = ch.len_utf8();
             let start = chars.pos;
@@ -620,7 +702,7 @@ mod tests {
             Tokenizer::new("1. Markdown 语法\n2. test2.2\n3. 12453\n21.214")
                 .tokenize()
                 .count(),
-            16
+            20
         )
     }
 
@@ -654,12 +736,12 @@ mod tests {
         let tokens = Tokenizer::new("1234567890) hello world")
             .tokenize()
             .collect::<Vec<_>>();
-        assert_eq!(tokens[0].token, Token::Number("1234567890"));
+        assert_eq!(tokens[0].token, Token::Digit("1234567890"));
     }
 
     #[test]
     fn case_5() {
         let tokens = Tokenizer::new("(/url2)").tokenize().collect::<Vec<_>>();
-        assert_eq!(tokens.last().map(|it|it.token), Some(Token::RParen))
+        assert_eq!(tokens.last().map(|it| it.token), Some(Token::RParen))
     }
 }

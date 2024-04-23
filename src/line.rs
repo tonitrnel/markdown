@@ -113,15 +113,27 @@ impl<'input> Line<'input> {
     {
         self.iter().rev().take_while(|it| pat(&it.token)).count()
     }
-    pub fn trim(&self) -> Self{
+    pub fn trim(&self) -> Self {
         let len = self.end_offset - self.start_offset;
-        let first = self.iter().position(|it|!it.is_space_or_tab()).unwrap_or(0);
-        let last = self.iter().rposition(|it|!it.is_space_or_tab()).unwrap_or(len);
-        Self::new(self.iter().skip(first).take(last + 1 - first).cloned().collect::<Vec<_>>())
+        let first = self
+            .iter()
+            .position(|it| !it.is_space_or_tab())
+            .unwrap_or(0);
+        let last = self
+            .iter()
+            .rposition(|it| !it.is_space_or_tab())
+            .unwrap_or(len);
+        Self::new(
+            self.iter()
+                .skip(first)
+                .take(last + 1 - first)
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
     }
     pub fn trim_start_matches<P>(&mut self, pat: P) -> &Self
-        where
-            P: Fn(&Token) -> bool,
+    where
+        P: Fn(&Token) -> bool,
     {
         let count = self.starts_count_matches(pat);
         self.start_offset += count;
@@ -206,7 +218,7 @@ impl<'input> Line<'input> {
         self
     }
     /// 跳至行结束，等同与标记该行已结束
-    pub fn skip_to_end(&mut self){
+    pub fn skip_to_end(&mut self) {
         self.start_offset = self.end_offset;
     }
     /// 如果下一个 Token 断定为 true 则消费，否则什么也不做
@@ -343,27 +355,35 @@ impl<'input> Line<'input> {
         Self::new(result)
     }
     /// Converts an iterator of tokens to an escaped string
-    /// 
+    ///
     /// This function takes an iterator of tokens and converts each token
     /// to a string, escaping punctuation characters if needed.
-    /// 
+    ///
     /// ## It maps over each token, checking its type:
-    /// 
+    ///
     /// - For escaped tokens that are ASCII punctuation, it formats them without escaping
     /// - For other escaped tokens, it formats them with a backslash escape
     /// - For other non-escaped tokens, it just calls `to_string()`
-    /// 
+    ///
     /// ## Returns:
-    /// 
+    ///
     /// An escaped string representing the tokens
-    pub fn to_escaped_string(&self) -> String{
-        self.iter().map(|it| {
-            match it.token {
+    pub fn to_escaped_string(&self) -> String {
+        self.iter()
+            .map(|it| match it.token {
                 Token::Escaped(ch) if ch.is_ascii_punctuation() => format!("{ch}"),
                 Token::Escaped(ch) => format!("\\{ch}"),
-                _ => it.to_string()
-            }
-        }).collect::<String>()
+                _ => it.to_string(),
+            })
+            .collect::<String>()
+    }
+    pub fn to_unescape_string(&self) -> String {
+        self.iter()
+            .map(|it| match it.token {
+                Token::Escaped(ch) => format!("\\{ch}"),
+                _ => it.to_string(),
+            })
+            .collect::<String>()
     }
 }
 impl Display for Line<'_> {
@@ -374,7 +394,14 @@ impl Display for Line<'_> {
 
 impl Debug for Line<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", &self.inner[self.start_offset..self.end_offset].iter().map(|it|it.token).collect::<Vec<_>>())
+        write!(
+            f,
+            "{:?}",
+            &self.inner[self.start_offset..self.end_offset]
+                .iter()
+                .map(|it| it.token)
+                .collect::<Vec<_>>()
+        )
     }
 }
 
@@ -467,7 +494,7 @@ mod tests {
                 i += 1;
                 match i {
                     1 => assert!(matches!(line.peek(), Some(Token::Text("abcdefgh")))),
-                    2 => assert!(matches!(line.peek(), Some(Token::Number("1256648483541")))),
+                    2 => assert!(matches!(line.peek(), Some(Token::Digit("1256648483541")))),
                     3 => assert!(matches!(line.peek(), Some(Token::Crosshatch))),
                     4 => assert!(matches!(line.peek(), Some(Token::Text("sadfrasg")))),
                     _ => panic!("unexpected line"),
@@ -488,7 +515,7 @@ mod tests {
                 i += 1;
                 match i {
                     1 => assert!(line.is_blank()),
-                    2 => assert!(matches!(line.peek(), Some(Token::Number("1256648483541")))),
+                    2 => assert!(matches!(line.peek(), Some(Token::Digit("1256648483541")))),
                     3 => assert!(matches!(line.peek(), Some(Token::Crosshatch))),
                     4 => assert!(matches!(line.peek(), Some(Token::Text("sadfrasg")))),
                     _ => panic!("unexpected line"),
@@ -512,7 +539,7 @@ mod tests {
         assert_eq!(cp1[2].token, Token::Text("你"));
         let cp2 = line.slice(3, 6);
         assert_eq!(cp2.len(), 3);
-        assert_eq!(cp2[0].token, Token::Number("5"));
+        assert_eq!(cp2[0].token, Token::Digit("5"));
         assert_eq!(cp2[2].token, Token::Crosshatch);
     }
 
@@ -522,9 +549,9 @@ mod tests {
         let mut line = Line::extract(&mut tokens).unwrap();
         assert_eq!(line.peek(), Some(&Token::Text("r")));
         assert_eq!(line.next(), Some(Token::Text("r")));
-        assert_eq!(line.peek(), Some(&Token::Number("12")));
-        assert_eq!(line.peek(), Some(&Token::Number("12")));
-        assert_eq!(line.next(), Some(Token::Number("12")));
+        assert_eq!(line.peek(), Some(&Token::Digit("12")));
+        assert_eq!(line.peek(), Some(&Token::Digit("12")));
+        assert_eq!(line.next(), Some(Token::Digit("12")));
         assert_eq!(line.peek(), Some(&Token::Text("你")));
     }
 

@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::{ast, utils};
 use crate::ast::{link, MarkdownNode};
 use crate::parser::Node;
 use crate::tree::Tree;
@@ -42,7 +42,11 @@ fn to_html(tree: &Tree<Node>, cur: usize, writer: &mut impl Write) -> std::fmt::
                 to_pure_text(tree, child, &mut alt, true)?;
             }
             let title = format_title_attr(&img.title);
-            write!(writer, "<img src=\"{}\" alt=\"{}\"{} />", img.url, alt, title)?;
+            write!(
+                writer,
+                "<img src=\"{}\" alt=\"{}\"{} />",
+                img.url, alt, title
+            )?;
             None
         }
         MarkdownNode::SoftBreak => {
@@ -81,37 +85,27 @@ impl Tree<Node> {
         string
     }
 }
-
-fn escape_xml(str: &str) -> String{
-    let mut new = String::new();
-    for char in str.chars() {
-        match char {
-            '&' => new.push_str("&amp;"),
-            '<' => new.push_str("&lt;"),
-            '>' => new.push_str("&gt;"),
-            '"' => new.push_str("&quot;"),
-            _ => new.push(char)
-        }
-    }
-    new
-}
-fn to_pure_text(tree: &Tree<Node>, cur: usize, writer: &mut impl Write, include_next: bool)-> std::fmt::Result{
+fn to_pure_text(
+    tree: &Tree<Node>,
+    cur: usize,
+    writer: &mut impl Write,
+    include_next: bool,
+) -> std::fmt::Result {
     if let MarkdownNode::Text(str) = &tree[cur].body {
-            if str.contains(['&', '<', '>', '"']) {
-                write!(writer, "{}", escape_xml(str))?;
-            } else {
-                write!(writer, "{}", str)?;
-            }
+        if str.contains(['&', '<', '>', '"']) {
+            write!(writer, "{}", utils::escape_xml(str))?;
+        } else {
+            write!(writer, "{}", str)?;
         }
-    if let Some(idx) = tree.get_first_child(cur) {
+    } else if let Some(idx) = tree.get_first_child(cur) {
         to_pure_text(tree, idx, writer, true)?;
     }
-    if let Some(idx) = tree.get_next(cur).filter(|_|include_next) {
+    if let Some(idx) = tree.get_next(cur).filter(|_| include_next) {
         to_pure_text(tree, idx, writer, true)?;
     }
     Ok(())
 }
-fn format_title_attr(title: &Option<String>) -> String{
+fn format_title_attr(title: &Option<String>) -> String {
     if let Some(title) = &title {
         format!(" title=\"{}\"", title)
     } else {

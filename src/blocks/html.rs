@@ -156,7 +156,7 @@ fn is_begin_type_7(line: &mut Line) -> bool {
             },
             TagState::TagName => match next {
                 Token::Text(_) => consume_and_return(line, TagState::TagName),
-                Token::Number(str) if !str.contains('.') => {
+                Token::Digit(_) => {
                     consume_and_return(line, TagState::TagName)
                 }
                 Token::Hyphen => consume_and_return(line, TagState::TagName),
@@ -167,7 +167,7 @@ fn is_begin_type_7(line: &mut Line) -> bool {
                 _ => break,
             },
             TagState::PropName => match next {
-                Token::Number(str) if !str.contains('.') => {
+                Token::Digit(_) => {
                     consume_and_return(line, TagState::PropName)
                 }
                 Token::Hyphen | Token::Underscore | Token::Colon | Token::Text(_) => {
@@ -235,7 +235,7 @@ fn is_end_type_7(line: &Line) -> bool {
     while let Some(token) = line.get_raw(i) {
         let r = match token {
             Token::Text(str) if !is_end => str.chars().all(|char| char.is_ascii_alphabetic()),
-            Token::Number(str) if !is_end => !str.contains('.'),
+            Token::Digit(_) if !is_end => true,
             Token::Hyphen if !is_end => true,
             Token::Whitespace(Whitespace::Space) => {
                 is_end = true;
