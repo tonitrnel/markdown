@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use crate::ast::{self, MarkdownNode};
 use crate::inlines::{DelimiterChain, ProcessCtx};
+use crate::utils;
 
 #[derive(Clone)]
 pub(super) enum BracketVariant {
@@ -92,10 +93,9 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         line,
         parser,
         brackets,
-        ref_map,
         ..
     } = ctx;
-    println!("AST: \n{:?}", parser.tree);
+    // println!("AST: \n{:?}", parser.tree);
     let opener = match brackets.as_ref() {
         Some(b) => b,
         _ => return false,
@@ -105,13 +105,34 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         return false;
     }
     line.next();
-    return if let Some((url, title)) = super::link::scan_link_or_image(line, opener, ref_map) {
+    return if let Some((url, title, is_footnote_link)) =
+        super::link::scan_link_or_image(line, opener, &parser.link_refs, &parser.footnotes)
+    {
         let is_image = opener.is_image();
         let opener_inl = opener.borrow().node;
         let start_location = parser.tree[opener_inl].start;
         let node = if is_image {
             parser.append_free_node(
                 MarkdownNode::Image(ast::image::Image { url, title }),
+                start_location,
+            )
+        } else if is_footnote_link {
+            let (index, ref_count) = parser
+                .footnote_refs
+                .get(&url)
+                .map(|(a, b)| (*a, b + 1))
+                .unwrap_or((parser.footnote_refs.len() + 1, 1));
+            parser
+                .footnote_refs
+                .entry(url.clone())
+                .and_modify(|it| it.1 += 1)
+                .or_insert((index, ref_count));
+            parser.append_free_node(
+                MarkdownNode::Link(ast::link::Link::Footnote(ast::link::FootnoteLink {
+                    footnote_label: utils::percent_encode::encode(url, true),
+                    index,
+                    ref_count,
+                })),
                 start_location,
             )
         } else {
@@ -135,6 +156,7 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
             parser.tree.set_parent(item, node);
             temp = next;
         }
+        parser.tree[node].end = line.start_location();
         parser
             .tree
             .set_parent(node, parser.tree.get_parent(opener_inl));

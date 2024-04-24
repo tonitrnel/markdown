@@ -1,12 +1,14 @@
-use crate::{ast, utils};
-use crate::ast::{link, MarkdownNode};
-use crate::parser::Node;
-use crate::tree::Tree;
 use std::borrow::Cow::{Borrowed, Owned};
 use std::fmt::Write;
 
+use crate::ast::{link, MarkdownNode};
+use crate::parser::Node;
+use crate::tree::Tree;
+use crate::{ast, utils};
+
 fn to_html(tree: &Tree<Node>, cur: usize, writer: &mut impl Write) -> std::fmt::Result {
     let pair = match &tree[cur].body {
+        MarkdownNode::Document => Some((Borrowed(""), "")),
         MarkdownNode::Paragraph => Some((Borrowed("<p>"), "</p>")),
         MarkdownNode::Heading(heading) => Some(match heading.level() {
             ast::heading::HeadingLevel::H1 => (Borrowed("<h1>"), "</h1>"),
@@ -36,6 +38,40 @@ fn to_html(tree: &Tree<Node>, cur: usize, writer: &mut impl Write) -> std::fmt::
             let title = format_title_attr(&link.title);
             Some((Owned(format!("<a href=\"{}\"{title}>", link.url)), "</a>"))
         }
+        MarkdownNode::Link(link::Link::Footnote(link)) => {
+            let ref_count = if link.ref_count == 1 {
+                Borrowed("")
+            } else {
+                Owned(format!("-{}", link.ref_count))
+            };
+            let id = format!("cont-fn-ref-{}{ref_count}", link.footnote_label);
+            let href = format!("#cont-fn-{}", link.footnote_label);
+            write!(writer, "<a href={href:?} id={id:?}>[{}]</a>", link.index)?;
+            None
+        }
+        MarkdownNode::Link(link::Link::FootnoteBackref(backref)) => {
+            let index = if backref.index == 1 {
+                Borrowed("")
+            } else {
+                Owned(format!("-{}", backref.index))
+            };
+            let sup = if backref.index == 1 {
+                Borrowed("")
+            } else {
+                Owned(format!("<sup>{}</sup>", backref.index))
+            };
+            let href = format!("#cont-fn-ref-{}{index}", backref.footnote_label);
+            write!(writer, "<a href={href:?}>↩{sup}</a>")?;
+            None
+        }
+        MarkdownNode::Footnote(footnote) => {
+            let id = format!("cont-fn-{}", footnote.label);
+            Some((Owned(format!("<li id={id:?}>")), "</li>"))
+        }
+        MarkdownNode::FootnoteList => Some((
+            Borrowed("<section><h2>Footnotes</h2><ol>"),
+            "</ol></section>",
+        )),
         MarkdownNode::Image(img) => {
             let mut alt = String::new();
             if let Some(child) = tree.get_first_child(cur) {
@@ -76,12 +112,12 @@ fn to_html(tree: &Tree<Node>, cur: usize, writer: &mut impl Write) -> std::fmt::
     Ok(())
 }
 impl Tree<Node> {
-    pub fn to_html(self) -> String {
+    pub fn to_html(&self) -> String {
         let mut string = String::new();
         if self.is_empty() {
             return string;
         }
-        to_html(&self, 1, &mut string).unwrap();
+        to_html(self, 0, &mut string).unwrap();
         string
     }
 }

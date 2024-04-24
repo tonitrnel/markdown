@@ -1,9 +1,10 @@
 use crate::ast::{embed, link, reference::Reference, MarkdownNode};
 use crate::inlines::bracket::BracketChain;
-use crate::inlines::{ProcessCtx, RefMap};
+use crate::inlines::ProcessCtx;
 use crate::line::Line;
 use crate::tokenizer::{Token, Whitespace};
 use crate::utils;
+use std::collections::HashMap;
 
 enum TitleState {
     Initial,
@@ -14,28 +15,28 @@ enum InString {
     Single,
     Paren,
 }
-
 pub(crate) fn scan_link_or_image<'input>(
     line: &mut Line<'input>,
     opener: &BracketChain<'input>,
-    ref_map: &RefMap,
-) -> Option<(String, Option<String>)> {
+    ref_map: &HashMap<String, (String, Option<String>)>,
+    footnotes: &HashMap<String, usize>,
+) -> Option<(String, Option<String>, bool)> {
     let snapshot = line.snapshot();
     let mut url = None;
     let mut title = None;
     let mut matched = false;
-    println!(" -> scan_link_block");
+    // println!(" -> scan_link_block");
     // 尝试解析 inline link
     'scan_link_block: {
         if !line.consume(Token::LParen) {
             break 'scan_link_block;
         }
-        line.skip(line.starts_count_matches(|it| matches!(it, Token::Whitespace(..))));
-        println!(" -> scan_link_block::scan_link_url");
+        skip_spaces(line);
+        // println!(" -> scan_link_block::scan_link_url");
         url = match scan_link_url(line) {
             Some((size, _line)) => {
                 line.skip(size);
-                println!("### {:?}", _line.to_string());
+                // println!("### {:?}", _line.to_string());
                 Some(utils::percent_encode::encode(
                     utils::unescape_string(_line.to_escaped_string()),
                     true,
@@ -43,33 +44,33 @@ pub(crate) fn scan_link_or_image<'input>(
             }
             _ => break 'scan_link_block,
         };
-        println!(" -> scan_link_block::scan_link_title => url = {url:?}");
+        // println!(" -> scan_link_block::scan_link_title => url = {url:?}");
         title = {
-            let mut title = None;
-            let count = line.starts_count_matches(|it| matches!(it, Token::Whitespace(..)));
+            let count = skip_spaces(line);
             if count > 0 {
-                line.skip(count);
-                title = match scan_link_title(line) {
+                match scan_link_title(line) {
                     Some((size, _line)) => {
                         line.skip(size);
                         Some(_line.to_string())
                     }
                     _ => None,
                 }
+            } else {
+                None
             }
-            title
         };
-        line.skip(line.starts_count_matches(|it| matches!(it, Token::Whitespace(..))));
-        println!(" -> scan_link_block::end_matches => title = {title:?}");
+        skip_spaces(line);
+        // println!(" -> scan_link_block::end_matches => title = {title:?}");
         if !line.consume(Token::RParen) {
             break 'scan_link_block;
         };
         matched = true;
     };
-    println!(" -> scan_link_label = {matched}");
+    // println!(" -> scan_link_label = {matched}");
+    let mut is_footnote_link = false;
     // 如果上一个块未匹配，尝试解析 link label
     'scan_link_label: {
-        if matched {
+        if matched || opener.is_image() {
             break 'scan_link_label;
         };
         line.resume(snapshot);
@@ -83,20 +84,30 @@ pub(crate) fn scan_link_or_image<'input>(
                 .to_string(),
             _ => break 'scan_link_label,
         };
-        let ref_label = normalize_reference(ref_label);
-        if let Some((_link, _title)) = ref_map.get(&ref_label) {
-            url = Some(_link.to_owned());
-            title = Some(_title.to_owned());
-            matched = true
+        // println!("scan_link_label ref_label={ref_label:?}");
+        if ref_label.starts_with("[^") {
+            let ref_label = &ref_label[2..ref_label.len() - 1];
+            if footnotes.contains_key(ref_label) {
+                url = Some(ref_label.to_string());
+                matched = true;
+                is_footnote_link = true;
+            }
+        } else {
+            let ref_label = normalize_reference(ref_label);
+            if let Some((_link, _title)) = ref_map.get(&ref_label) {
+                url = Some(_link.clone());
+                title = _title.clone();
+                matched = true;
+            }
         }
     }
-    println!(" -> matched = {matched}");
+    // println!(" -> matched = {matched}");
     if !matched {
         return None;
     }
-    Some((url.unwrap(), title))
+    Some((url.unwrap(), title, is_footnote_link))
 }
-fn scan_link_url<'input>(line: &Line<'input>) -> Option<(usize, Line<'input>)> {
+pub(super) fn scan_link_url<'input>(line: &Line<'input>) -> Option<(usize, Line<'input>)> {
     if line.validate(0, Token::Lt) {
         let mut i = 0;
         let mut end = false;
@@ -153,7 +164,7 @@ fn scan_link_url<'input>(line: &Line<'input>) -> Option<(usize, Line<'input>)> {
         Some((i, line))
     }
 }
-fn scan_link_title<'input>(line: &Line<'input>) -> Option<(usize, Line<'input>)> {
+pub(super) fn scan_link_title<'input>(line: &Line<'input>) -> Option<(usize, Line<'input>)> {
     let mut i = 0;
     let mut state = TitleState::Initial;
     for item in line.iter() {
@@ -182,34 +193,48 @@ fn scan_link_title<'input>(line: &Line<'input>) -> Option<(usize, Line<'input>)>
     Some((i, line.slice(1, i - 1)))
 }
 
-fn scan_link_label(line: &Line) -> Option<(usize, String)> {
+/// 扫描链接的 Label，用于 Reference
+///
+/// 返回结束位置和 Label
+pub(super) fn scan_link_label(line: &Line) -> Option<(usize, String)> {
     if !line.validate(0, Token::LBracket) {
         return None;
     }
     let iter = line.iter().skip(1);
-    let mut end = false;
-    let mut i = 0;
-    for item in iter {
-        i += 1;
+    let mut end = 0;
+    let mut len = 0;
+    for (i, item) in iter.enumerate() {
+        len += item.len();
         if i > 1000 {
             return None;
         }
         match item.token {
             Token::RBracket => {
-                end = true;
+                end = i + 1; // included skip item
                 break;
             }
             Token::LBracket => return None,
             _ => (),
         }
     }
-    if !end || i <= 2 {
+    if end == 0 || len <= 2 {
         return None;
     }
-    Some((i, line.slice(0, i).to_string()))
+    Some((end + 1, line.slice(0, end + 1).to_string()))
 }
-fn normalize_reference(str: String) -> String {
-    str[1..str.len()]
+/// 跳过多个连续空格包含换行（不过应该最多只有 1 个换行符）
+///
+/// 返回：
+/// 跳过的数量
+pub(super) fn skip_spaces(line: &mut Line) -> usize {
+    let count = line.starts_count_matches(|it| matches!(it, Token::Whitespace(..)));
+    if count > 0 {
+        line.skip(count);
+    };
+    count
+}
+pub(super) fn normalize_reference(str: String) -> String {
+    str[1..str.len() - 1]
         .trim()
         .to_uppercase()
         .split_whitespace()
@@ -619,7 +644,7 @@ fn scan_url(line: &Line) -> Option<(usize, bool)> {
     let mut iter = line.iter().enumerate();
     let mut len = 0;
     for (i, item) in iter.by_ref() {
-        println!("scan_url first loop#{len} -> {:?}", item.token);
+        // println!("scan_url first loop#{len} -> {:?}", item.token);
         match item.token {
             Token::Text(str) if str.chars().all(|it| it.is_ascii_alphabetic()) => (),
             Token::Digit(..) | Token::Plus | Token::Period | Token::Hyphen if i > 0 => (),
@@ -629,7 +654,7 @@ fn scan_url(line: &Line) -> Option<(usize, bool)> {
         len += item.len();
     }
     for (i, item) in iter.by_ref() {
-        println!("scan_url second loop#{len} -> {:?}", item.token);
+        // println!("scan_url second loop#{len} -> {:?}", item.token);
         match item.token {
             Token::Gt | Token::Escaped('>') => {
                 escaped_esc = item.token == Token::Escaped('>');
@@ -657,14 +682,14 @@ fn scan_email(line: &Line) -> Option<usize> {
     let mut state = EmailState::Initial;
     let mut len = 0;
     for (i, item) in line.iter().enumerate() {
-        println!("scan_email#{len} -> {state:?} = {:?}", item.token);
+        // println!("scan_email#{len} -> {state:?} = {:?}", item.token);
         match (&state, &item.token) {
             (EmailState::Initial, Token::Text(..) | Token::Digit(..)) => {
                 state = EmailState::Username
             }
             (EmailState::Username, Token::Punctuation('@')) if len > 2 => state = EmailState::At,
             (EmailState::Username, Token::Text(str))
-                if str.chars().all(|it| it.is_ascii_alphabetic()) => (),
+                if str.chars().all(|it| it.is_ascii_alphabetic()) => {}
             (EmailState::Username, Token::Digit(..)) => (),
             (EmailState::Username, t) if t.in_str(".!#$%&'*+\\/=?^_`{|}~-") => (),
             (EmailState::At, t) if t.is_ascii_alphanumeric() => state = EmailState::Domain(len),
@@ -950,9 +975,6 @@ mod tests {
     fn case_606() {
         let text = r#"<foo\+@bar.example.com>"#;
         let ast = Parser::new(text).parse();
-        assert_eq!(
-            ast.to_html(),
-            r#"<p>&lt;foo+@bar.example.com&gt;</p>"#
-        )
+        assert_eq!(ast.to_html(), r#"<p>&lt;foo+@bar.example.com&gt;</p>"#)
     }
 }

@@ -16,12 +16,12 @@ pub fn parse(parser: &mut Parser) -> Option<serde_yaml::Value> {
         Token::Plus => Token::Plus,
         _ => return None,
     };
-    if !line.starts_with(&marker, 3) || !line.skip(3).only_spaces_to_end() {
+    if !line.starts_with(&marker, 3) || !line.skip(3).only_space_to_end() {
         return None;
     }
     let mut lines = Vec::<Line>::new();
     while let Some(mut line) = guard.line() {
-        if line.starts_with(&marker, 3) && line.skip(3).only_spaces_to_end() {
+        if line.starts_with(&marker, 3) && line.skip(3).only_space_to_end() {
             let text = lines.iter().fold(String::new(), |mut acc, it| {
                 writeln!(acc, "{}", it).unwrap();
                 acc

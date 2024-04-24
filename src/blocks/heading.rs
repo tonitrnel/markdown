@@ -138,7 +138,7 @@ impl BlockStrategy for heading::SetextHeading {
                 line.skip_consecutive_tokens(&Token::Hyphen);
                 heading::HeadingLevel::H2
             };
-            if !line.only_spaces_to_end() {
+            if !line.only_space_to_end() {
                 return BlockMatching::Unmatched;
             }
             parser.replace_block(

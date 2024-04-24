@@ -1,20 +1,22 @@
-use crate::ast;
-use crate::inlines::bracket::BracketChain;
-use crate::inlines::delimiter::DelimiterChain;
+use crate::inlines::{bracket::BracketChain, delimiter::DelimiterChain};
 use crate::line::Line;
 use crate::parser::Parser;
 use crate::tokenizer::{Token, Whitespace};
-use std::collections::HashMap;
 
 mod bracket;
 mod code;
 mod delimiter;
+mod emoji;
 mod entity;
+mod footnote;
 mod link;
+mod link_reference;
 mod math;
 mod newline;
+mod text;
 
-type RefMap = HashMap<String, (String, String)>;
+pub(crate) use footnote::process_footnote_list;
+pub(crate) use link_reference::process_link_reference;
 
 struct ProcessCtx<'a, 'input> {
     id: usize,
@@ -22,7 +24,6 @@ struct ProcessCtx<'a, 'input> {
     line: &'a mut Line<'input>,
     brackets: Option<BracketChain<'input>>,
     delimiters: Option<DelimiterChain<'input>>,
-    ref_map: RefMap,
 }
 
 pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: Line<'input>) {
@@ -33,16 +34,15 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
         line: &mut line,
         brackets: None,
         delimiters: None,
-        ref_map: HashMap::new(),
     };
     while let Some(token) = ctx.line.peek() {
         let snapshot = ctx.line.snapshot();
         let handled = match token {
             // Hard break, Soft break
-            Token::Whitespace(Whitespace::NewLine(..)) => newline::parse(&mut ctx),
-            Token::Backslash => newline::parse_backslash(&mut ctx),
+            Token::Whitespace(Whitespace::NewLine(..)) => newline::process(&mut ctx),
+            Token::Backslash => newline::process_backslash(&mut ctx),
             // Code
-            Token::Backtick => ast::code::InlineCode::parse(&mut ctx),
+            Token::Backtick => code::process(&mut ctx),
             // Emphasis, Strong emphasis
             Token::Asterisk | Token::Underscore => delimiter::before(&mut ctx, false, false, false),
             // Strikethrough(GFM)
@@ -72,6 +72,8 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
             }
             // Block id(OFM)
             Token::Caret => link::process_block_id(&mut ctx),
+            // Emoji
+            Token::Colon => emoji::process(&mut ctx),
             _ => false,
         };
         if !handled {
@@ -86,4 +88,5 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
         }
     }
     delimiter::process(&mut ctx, 0);
+    text::process(&mut ctx, false);
 }

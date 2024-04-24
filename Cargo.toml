@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 serde = "1.0.197"
 serde_yaml = "0.9.33"
+autocorrect = "2.9.0"

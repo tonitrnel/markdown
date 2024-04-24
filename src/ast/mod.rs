@@ -43,6 +43,8 @@ pub enum MarkdownNode {
     Link(link::Link),
     // 标签
     Tag,
+    // 表情
+    Emoji(String),
     // 块引用
     BlockQuote(block_quote::BlockQuote),
     // 代码
@@ -61,7 +63,9 @@ pub enum MarkdownNode {
     // 水平线
     ThematicBreak,
     // 脚注
-    FootNote(footnote::FootNote),
+    Footnote(footnote::Footnote),
+    // 脚注列表（仅在使用某个脚注创建，不由正文生成）
+    FootnoteList,
     // 数学/公式
     Math(math::Math),
     // 标注
@@ -69,47 +73,23 @@ pub enum MarkdownNode {
     // HTML
     Html(html::Html),
 }
-
 impl MarkdownNode {
-    pub fn is_container(&self) -> bool {
-        matches!(
-            self,
-            MarkdownNode::BlockQuote(..)
-                | MarkdownNode::List(..)
-                | MarkdownNode::ListItem(..)
-                | MarkdownNode::Paragraph
-                | MarkdownNode::Heading(..)
-                | MarkdownNode::Emphasis
-                | MarkdownNode::Strong
-                | MarkdownNode::Link(..)
-                | MarkdownNode::Image(..)
-                | MarkdownNode::Callout(..)
-        )
-    }
-    pub fn is_leaf_block(&self) -> bool {
-        matches!(
-            self,
-            MarkdownNode::ThematicBreak
-                | MarkdownNode::Heading(..)
-                | MarkdownNode::Code(..)
-                | MarkdownNode::Html(..)
-                | MarkdownNode::Paragraph
-                | MarkdownNode::Table(..)
-        )
-    }
     /// 是否接受目标节点
     pub fn can_contain(&self, target: &MarkdownNode) -> bool {
         match self {
             MarkdownNode::List(..) => matches!(target, MarkdownNode::ListItem(..)),
-            MarkdownNode::Document | MarkdownNode::BlockQuote(..) | MarkdownNode::Callout(..) | MarkdownNode::ListItem(..) => {
-                !matches!(target, MarkdownNode::ListItem(..))
-            }
+            MarkdownNode::Document
+            | MarkdownNode::BlockQuote(..)
+            | MarkdownNode::Callout(..)
+            | MarkdownNode::Footnote(..)
+            | MarkdownNode::ListItem(..) => !matches!(target, MarkdownNode::ListItem(..)),
             MarkdownNode::Table(..) => {
                 matches!(target, MarkdownNode::TableHead | MarkdownNode::TableBody)
             }
             MarkdownNode::TableHead => matches!(target, MarkdownNode::TableHeadCol(..)),
             MarkdownNode::TableBody => matches!(target, MarkdownNode::TableRow),
             MarkdownNode::TableRow => matches!(target, MarkdownNode::TableDataCol),
+            MarkdownNode::FootnoteList => matches!(target, MarkdownNode::Footnote(..)),
             _ => false,
         }
     }
@@ -122,6 +102,34 @@ impl MarkdownNode {
                 | MarkdownNode::Paragraph
                 | MarkdownNode::TableHeadCol(..)
                 | MarkdownNode::TableDataCol
+                | MarkdownNode::Heading(..)
+        )
+    }
+    pub fn is_inline_node(&self) -> bool {
+        !self.is_block_node()
+    }
+    pub fn is_block_node(&self) -> bool {
+        matches!(
+            self,
+            MarkdownNode::Document
+                | MarkdownNode::FrontMatter
+                | MarkdownNode::Paragraph
+                | MarkdownNode::Heading(..)
+                | MarkdownNode::List(..)
+                | MarkdownNode::ListItem(..)
+                | MarkdownNode::BlockQuote(..)
+                | MarkdownNode::Code(code::Code::Fenced(..) | code::Code::Indented(..))
+                | MarkdownNode::Table(..)
+                | MarkdownNode::TableHead
+                | MarkdownNode::TableHeadCol(..)
+                | MarkdownNode::TableBody
+                | MarkdownNode::TableRow
+                | MarkdownNode::TableDataCol
+                | MarkdownNode::ThematicBreak
+                | MarkdownNode::Footnote(..)
+                | MarkdownNode::FootnoteList
+                | MarkdownNode::Callout(..)
+                | MarkdownNode::Html(html::Html::Block(..))
         )
     }
 }

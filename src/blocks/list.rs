@@ -98,7 +98,7 @@ impl BlockStrategy for list::ListItem {
             }
         }
         // 空白列表不能打断段落
-        if line.only_spaces_to_end()
+        if line.only_space_to_end()
             && matches!(parser.tree[container].body, MarkdownNode::Paragraph)
         {
             return BlockMatching::Unmatched;

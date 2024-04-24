@@ -134,6 +134,12 @@ impl Token<'_> {
     pub fn is_space_or_tab(&self) -> bool {
         matches!(self, Token::Whitespace(Whitespace::Space | Whitespace::Tab))
     }
+    pub fn is_newline(&self) -> bool{
+        matches!(self, Token::Whitespace(Whitespace::NewLine(..)))
+    }
+    pub fn is_comment(&self) -> bool{
+        matches!(self, Token::Whitespace(Whitespace::Comment(..)))
+    }
     /// 是用于 Markdown Block 相关的 Token
     pub fn is_block_special_token(&self) -> bool {
         matches!(
@@ -157,6 +163,8 @@ impl Token<'_> {
                 // Table
                 | Token::Pipe
                 | Token::Colon
+                // Footnote
+                | Token::LBracket
         )
     }
     // pub fn is_special_char(ch: &char) -> bool {
@@ -181,9 +189,11 @@ impl Token<'_> {
     //             | '\\'
     //     )
     // }
+    
     pub(crate) fn is_anything_space(&self) -> bool {
         let ch = match self {
-            Token::Escaped(ch) | Token::Control(ch) => Some(*ch),
+            Token::Escaped(_) => return false,
+            Token::Control(ch) => Some(*ch),
             Token::Text(str) => str.chars().last(),
             Token::Ordered(_, _) | Token::Digit(_) => return false,
             Token::Whitespace(..) => return true,
@@ -407,6 +417,9 @@ impl TokenWithLocation<'_> {
     /// 是空白或制表符
     pub fn is_space_or_tab(&self) -> bool {
         self.token.is_space_or_tab()
+    }
+    pub fn is_newline(&self) -> bool {
+        self.token.is_newline()
     }
     pub fn is_special_token(&self) -> bool {
         self.token.is_block_special_token()

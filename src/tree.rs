@@ -44,12 +44,20 @@ impl<T> Index<usize> for Tree<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
-        self.nodes.index(index).item.as_ref().unwrap()
+        if let Some(node) = self.nodes.index(index).item.as_ref() {
+            node
+        } else {
+            panic!("Node #{index} has been released or has an invalid node index")
+        }
     }
 }
 impl<T> IndexMut<usize> for Tree<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        self.nodes.index_mut(index).item.as_mut().unwrap()
+        if let Some(node) = self.nodes.index_mut(index).item.as_mut() {
+            node
+        } else {
+            panic!("Node #{index} has been released or has an invalid node index")
+        }
     }
 }
 
@@ -83,7 +91,7 @@ impl<T: Debug> Tree<T> {
     pub fn append(&mut self, node: T) -> usize {
         let next = self.create_node(node);
         // 如果当前索引存在则进行顺序追加
-        if let Some(cur) = self.cur {
+        if let Some(cur) = self.cur.filter(|idx| !self.is_free_node(*idx)) {
             let parent = self.get_parent(cur);
             self.nodes[cur].next = Some(next);
             self.nodes[next].prev = Some(cur);
@@ -91,11 +99,11 @@ impl<T: Debug> Tree<T> {
         }
         // 如果当前索引不存在则意味着存在分叉，为最后一个分叉位置创建一个子节点
         else if let Some(&parent) = self.forks.last() {
-            let parent = &mut self.nodes[parent];
-            if parent.first_child.is_none() {
-                parent.first_child = Some(next)
+            if self.nodes[parent].first_child.is_none() {
+                self.nodes[parent].first_child = Some(next)
             }
-            parent.last_child = Some(next);
+            self.nodes[next].prev = self.nodes[parent].last_child;
+            self.nodes[parent].last_child = Some(next);
         }
         self.cur = Some(next);
         next
@@ -113,11 +121,7 @@ impl<T: Debug> Tree<T> {
         self.nodes[index].parent = parent;
         index
     }
-    // pub fn batch_append(&mut self, nodes: Vec<T>) {
-    //     for node in nodes {
-    //         self.append(node);
-    //     }
-    // }
+
     /// 替换指定位置的节点为传入的节点
     ///
     /// 返回值:
@@ -180,60 +184,17 @@ impl<T: Debug> Tree<T> {
         index
     }
 
-    /// 将一个节点下所有子节点变成同级节点
-    // pub fn flatten(&mut self, idx: usize) {
-    //     if let Some(node) = self.nodes.get_mut(idx) {
-    //         let next_idx = node.next;
-    //         if let Some(child_idx) = node.child {
-    //             node.next = Some(child_idx);
-    //             node.child = None;
-    //             if let Some(next_idx) = next_idx {
-    //                 let mut cur = child_idx;
-    //                 loop {
-    //                     if let Some(target) = self.nodes.get_mut(cur) {
-    //                         if let Some(next_cur) = target.next {
-    //                             cur = next_cur;
-    //                         } else {
-    //                             target.next = Some(next_idx);
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         };
-    //         self.forks.retain(|&x| x == idx);
-    //     }
-    // }
-    pub fn create_scope<F>(&mut self, node: T, f: F)
-    where
-        F: FnOnce(&mut Tree<T>),
-    {
-        self.append(node);
-        self.push();
-        f(self);
-        self.pop();
-    }
-
-    #[allow(unused)]
-    /// 将指针移动到指定节点的下一个节点
-    pub fn move_next_sibling(&mut self, index: usize) -> Option<usize> {
-        self.cur = self.nodes[index].next;
-        self.cur
-    }
-
     /// 查看当前节点的父节点的 ID
-    #[allow(unused)]
     pub fn peek_up(&self) -> Option<usize> {
         self.forks.last().copied()
     }
 
-    #[allow(unused)]
     /// 清空分叉，这将丢失“当前节点”的指针，清空后当前的指针将指向根节点
     pub fn reset(&mut self) {
         self.cur = if self.is_empty() { None } else { Some(0) };
         self.forks.clear();
     }
 
-    #[allow(unused)]
     /// 节点数量是否为空
     ///
     /// 类似：`len() == 0`
@@ -259,7 +220,11 @@ impl<T: Debug> Tree<T> {
         assert_eq!(self.nodes[index].parent, 0, "node must be free node");
         self.nodes[index].parent = parent;
         if let Some(last_child) = self.nodes[parent].last_child {
-            assert!(self.nodes[last_child].next.is_none(), "#{last_child}");
+            assert!(
+                self.nodes[last_child].next.is_none(),
+                "#{last_child} next node #{} is invalid",
+                self.nodes[last_child].next.unwrap()
+            );
             self.nodes[last_child].next = Some(index);
             self.nodes[index].prev = Some(last_child);
             self.nodes[parent].last_child = Some(index);
@@ -375,7 +340,11 @@ impl<T: Debug> Tree<T> {
         self.nodes[idx].next = None;
         self.nodes[idx].prev = None;
     }
-    pub fn print_link_info(&self, title: &str, idx: usize){
+    pub fn is_free_node(&self, idx: usize) -> bool {
+        let node = &self.nodes[idx];
+        node.parent == 0 && node.prev.is_none() && node.next.is_none()
+    }
+    pub fn print_link_info(&self, title: &str, idx: usize) {
         println!("[{title}]: ({:?})", self.nodes[idx].last_child);
         let mut item = self.nodes[idx].first_child;
         while let Some(next) = item {

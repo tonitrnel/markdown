@@ -148,8 +148,20 @@ impl<'input> Line<'input> {
         self
     }
     /// 确保仅空白到当前行结束
-    pub fn only_spaces_to_end(&self) -> bool {
-        self.iter().all(|it| it.is_space_or_tab())
+    pub fn only_space_to_end(&self) -> bool {
+        if self.is_end() {
+            return true;
+        }
+        for item in self.iter() {
+            if item.is_newline() {
+                return true;
+            }
+            if item.is_space_or_tab() {
+                continue;
+            }
+            return false;
+        }
+        true
     }
 
     pub fn peek(&self) -> Option<&Token<'input>> {
@@ -324,7 +336,11 @@ impl<'input> Line<'input> {
 
     /// 获取当前Token的开始位置
     pub fn start_location(&self) -> Location {
-        self.inner[self.start_offset.min(self.inner.len() - 1)].start_location()
+        if self.is_end() {
+            self.inner[self.end_offset - 1].end_location()
+        } else {
+            self.inner[self.start_offset.min(self.inner.len() - 1)].start_location()
+        }
     }
     /// 获取当前Token的结束位置
     pub fn end_location(&self) -> Location {

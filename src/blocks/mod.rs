@@ -4,13 +4,14 @@ use crate::parser::Parser;
 use crate::tokenizer::Location;
 
 mod block_quote;
+mod callout;
 mod code;
+mod footnote;
 mod heading;
 mod html;
 mod list;
-mod thematic_break;
 mod table;
-mod callout;
+mod thematic_break;
 
 pub enum BlockMatching {
     Unmatched = 0,
@@ -54,6 +55,7 @@ pub trait BlockStrategy {
     /// - `BlockProcessing::Processed` 已处理，后续步骤也应该退出当前容器
     /// - `BlockProcessing::Further` 可以继续处理
     fn process(ctx: ProcessCtx) -> BlockProcessing;
+    /// 节点即将关闭
     fn after(_id: usize, _parser: &mut Parser) {}
 }
 
@@ -81,6 +83,7 @@ pub fn process<'input>(
         MarkdownNode::ListItem(..) => ast::list::ListItem::process(ctx),
         MarkdownNode::Table(..) => ast::table::Table::process(ctx),
         MarkdownNode::Callout(..) => ast::callout::Callout::process(ctx),
+        MarkdownNode::Footnote(..) => ast::footnote::Footnote::process(ctx),
         _ => BlockProcessing::Unprocessed,
     }
 }
@@ -103,6 +106,10 @@ pub fn after(id: usize, parser: &mut Parser, location: Location) {
             ast::code::IndentedCode::after(id, parser)
         }
         MarkdownNode::List(..) => ast::list::List::after(id, parser),
+        MarkdownNode::ListItem(..) => ast::list::ListItem::after(id, parser),
+        MarkdownNode::Table(..) => ast::table::Table::after(id, parser),
+        MarkdownNode::Callout(..) => ast::callout::Callout::after(id, parser),
+        MarkdownNode::Footnote(..) => ast::footnote::Footnote::after(id, parser),
         _ => (),
     }
 }
@@ -122,6 +129,7 @@ pub fn matcher<'input>(
         ast::thematic_break::ThematicBreak::before,
         ast::list::ListItem::before,
         ast::table::Table::before,
+        ast::footnote::Footnote::before,
         ast::code::IndentedCode::before,
     ];
     let snapshot = line.snapshot();

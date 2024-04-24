@@ -185,10 +185,10 @@ pub(super) fn process(
     }: &mut ProcessCtx,
     stack_bottom: usize,
 ) {
-    println!("AST: \n{:?}", parser.tree);
-    if let Some(dc) = delimiters.as_ref() {
-        println!("Delimiter chain: \n{dc:?}");
-    }
+    // println!("AST: \n{:?}", parser.tree);
+    // if let Some(dc) = delimiters.as_ref() {
+    // println!("Delimiter chain: \n{dc:?}");
+    // }
     let mut openers_bottom = [stack_bottom; 21];
     let mut candidate = delimiters.clone();
     let mut closer = None;

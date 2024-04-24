@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Debug, Formatter};
 
 use crate::ast::MarkdownNode;
@@ -13,7 +13,7 @@ pub struct Node {
     pub start: Location,
     pub end: Location,
     pub(crate) processing: bool,
-    pub id: Option<String>
+    pub id: Option<String>,
 }
 impl Debug for Node {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -28,7 +28,7 @@ impl Node {
             start: location,
             end: location,
             processing: true,
-            id: None
+            id: None,
         }
     }
 }
@@ -38,6 +38,9 @@ pub struct Parser<'input> {
     pub(crate) tree: Tree<Node>,
     /// 存储在解析 Block 时能接收 inlines 的 block 的 ID 和剩余未处理的 Line
     pub(crate) inlines: BTreeMap<usize, Vec<Line<'input>>>,
+    pub(crate) link_refs: HashMap<String, (String, Option<String>)>, // HRefLabel, (Url, Option<Title>)
+    pub(crate) footnotes: HashMap<String, usize>,                    // label, node_id
+    pub(crate) footnote_refs: HashMap<String, (usize, usize)>,       // label, index, ref count
     pub(crate) doc: usize,
     /// 应等同于 tree.cur()
     pub(crate) curr_proc_node: usize,
@@ -55,6 +58,9 @@ impl<'input> Parser<'input> {
         Self {
             tokens: Tokenizer::new(text).tokenize(),
             inlines: BTreeMap::new(),
+            link_refs: HashMap::new(),
+            footnotes: HashMap::new(),
+            footnote_refs: HashMap::new(),
             tree,
             doc,
             curr_proc_node: doc,
@@ -66,10 +72,15 @@ impl<'input> Parser<'input> {
     }
     pub fn parse(mut self) -> Tree<Node> {
         self.tree.push();
-        println!("块解析");
+        let start = std::time::Instant::now();
+        println!("块解析开始");
         self.parse_blocks();
-        println!("内联行解析");
+        println!("块解析结束[{}ms]", start.elapsed().as_millis());
+        // todo: 处理 Reference Link
+        let start = std::time::Instant::now();
+        println!("行解析开始");
         self.parse_inlines();
+        println!("行解析结束[{}ms]", start.elapsed().as_millis());
         self.tree.pop();
         self.tree
     }
@@ -94,16 +105,16 @@ impl<'input> Parser<'input> {
             self.finalize(self.curr_proc_node, self.last_location)
         }
         self.tree[self.doc].end = self.last_location;
+        // 重置树，后面的不在使用树的状态控制层级而是直接操作层级
         self.tree.reset();
     }
     fn parse_inlines(&mut self) {
+        self.parse_reference_link();
         let keys = self.inlines.keys().copied().collect::<Vec<_>>();
         for idx in keys {
             let lines = self.inlines.remove(&idx);
             let node = &self.tree[idx].body;
-            if lines.is_none()
-                || !node.accepts_lines()
-            {
+            if lines.is_none() || !node.accepts_lines() {
                 eprintln!("WARNING: Invalid node {node:?} exists inlines");
                 continue;
             }
@@ -111,7 +122,27 @@ impl<'input> Parser<'input> {
             println!("#{idx} {:?}", self.tree[idx].body);
             inlines::process(idx, self, Line::extends(lines));
         }
-        // todo!()
+        self.parse_footnote_list();
+    }
+    fn parse_reference_link(&mut self) {
+        let mut next = self.tree.get_first_child(self.doc);
+        while let Some(idx) = next {
+            next = self.tree.get_next(idx);
+            inlines::process_link_reference(self, idx);
+        }
+    }
+    fn parse_footnote_list(&mut self) {
+        if self.footnote_refs.is_empty() {
+            return;
+        }
+        let mut values = self.footnote_refs.drain().collect::<Vec<_>>();
+        values.sort_by(|a, b| a.1 .0.cmp(&b.1 .0));
+        let values = values
+            .into_iter()
+            .map(|(label, (_, ref_count))| (self.footnotes.remove(&label).unwrap(), ref_count))
+            .collect::<Vec<_>>();
+        inlines::process_footnote_list(self, values);
+        self.footnotes.clear();
     }
     fn incorporate_line(&mut self, mut line: Line<'input>) {
         let mut container = self.doc;
@@ -208,8 +239,6 @@ impl<'input> Parser<'input> {
                 println!("当前行没有更多内容了");
             }
         }
-        // non indented code and common block start token
-        // if line.indent < 4 && !line.starts_with_matches(Parser::is_special_token, 1) {}
     }
     pub fn append_block(&mut self, node: MarkdownNode, loc: Location) -> usize {
         // 如果当前处理中的节点无法容纳插入的节点则退回当上一层
@@ -223,7 +252,7 @@ impl<'input> Parser<'input> {
         println!("创建节点 #{idx} {:?}", self.tree[idx].body);
         idx
     }
-    pub fn append_free_node(&mut self, node: MarkdownNode, loc: Location) -> usize{
+    pub fn append_free_node(&mut self, node: MarkdownNode, loc: Location) -> usize {
         let idx = self.tree.create_node(Node::new(node, loc));
         println!("创建游离节点 #{idx} {:?}", self.tree[idx].body);
         idx
@@ -281,7 +310,7 @@ impl<'input> Parser<'input> {
         if let Some((idx, MarkdownNode::Text(text))) = self
             .tree
             .get_last_child(parent)
-            .filter(|id|self.tree[*id].processing)
+            .filter(|id| self.tree[*id].processing)
             .map(|id| (id, &mut self.tree[id].body))
         {
             text.push_str(content.as_ref());
@@ -297,7 +326,7 @@ impl<'input> Parser<'input> {
             idx
         }
     }
-    pub fn mark_as_processed(&mut self, idx: usize){
+    pub fn mark_as_processed(&mut self, idx: usize) {
         self.tree[idx].processing = false;
     }
     pub fn current_proc(&self) -> &Node {
@@ -323,7 +352,11 @@ impl<'input> Parser<'input> {
         blocks::after(node_id, self, location);
         let node = &mut self.tree[node_id];
         node.processing = false;
-        println!("退出节点 #{node_id} {:?}", node.body);
+        if parent == self.doc {
+            println!("块 #{node_id} {:?} 解析完成", node.body);
+        } else {
+            println!("退出节点 #{node_id} {:?}", node.body);
+        }
         if Some(node_id) == self.tree.peek_up() {
             println!("树退出 #{node_id:?}");
             self.tree.pop();

@@ -95,7 +95,7 @@ impl BlockStrategy for code::FencedCode {
         // 检查当前行是否满足结束代码块的条件
         let location = line.start_location();
         let length = line.skip_indent().starts_count(&container.marker);
-        if length >= container.length && line.skip(length).only_spaces_to_end() {
+        if length >= container.length && line.skip(length).only_space_to_end() {
             parser.finalize(parser.curr_proc_node, location);
             return BlockProcessing::Processed;
         }
