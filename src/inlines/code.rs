@@ -37,13 +37,24 @@ pub(super) fn process(
         MarkdownNode::Code(code::Code::Inline(code::InlineCode {})),
         code_locations,
     );
+    let in_table = matches!(
+        parser.tree[*id].body,
+        MarkdownNode::TableHeadCol | MarkdownNode::TableDataCol
+    );
     let (mut text, start, end) = {
         let part = line.slice_raw(
             start_offset + marker_length,
             line.start_offset - marker_length,
         );
         (
-            part.to_unescape_string().replace('\n', " "),
+            {
+                if in_table {
+                    part.to_escaped_string(&['|'])
+                } else {
+                    part.to_unescape_string()
+                }
+            }
+            .replace('\n', " "),
             part.start_location(),
             part.last_token_end_location(),
         )

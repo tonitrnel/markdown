@@ -129,10 +129,12 @@ where
                 | html::HtmlType::Type6(element, flag)
                 | html::HtmlType::Type7(element, flag) => {
                     let is_inline = self.tree[idx].body.is_inline_level();
-                    let newline = if is_inline || self.is_first_layer(idx) {
-                        ""
-                    } else {
+                    let newline = if !is_inline
+                        && (!self.is_first_layer(idx) || matches!(flag, html::Flag::Full))
+                    {
                         "\n"
+                    } else {
+                        ""
                     };
                     match flag {
                         html::Flag::Full => Some((

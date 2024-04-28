@@ -460,7 +460,7 @@ bar | baz"#,
 | b **\|** im |"#,
         )
         .parse();
-        // println!("AST:\n{ast:?}")
+        println!("AST:\n{ast:?}");
         assert_eq!(
             ast.to_html(),
             r#"<table>

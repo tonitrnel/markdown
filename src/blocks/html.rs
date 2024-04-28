@@ -987,7 +987,7 @@ _world_.
             .trim();
         let ast = Parser::new(text).parse();
         assert_eq!(ast[0].body, MarkdownNode::Document);
-        // println!("AST:\n{:?}", ast)
+        println!("AST:\n{:?}", ast);
         assert_eq!(
             ast.to_html(),
             r#"<table>

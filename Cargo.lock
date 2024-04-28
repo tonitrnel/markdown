@@ -216,6 +216,7 @@ name = "markdown"
 version = "0.1.0"
 dependencies = [
  "autocorrect",
+ "regex",
  "serde",
  "serde_yaml",
 ]

@@ -61,7 +61,7 @@ fn scan_link_reference(line: &mut Line) -> Option<(String, String, Option<String
     let url = match link::scan_link_url(line) {
         Some((size, url)) => {
             line.skip(size);
-            utils::percent_encode::encode(utils::unescape_string(url.to_escaped_string()), true)
+            utils::percent_encode::encode(utils::unescape_string(url.to_string()), true)
         }
         _ => return None,
     };

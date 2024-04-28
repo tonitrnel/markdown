@@ -113,6 +113,7 @@ impl BlockStrategy for code::FencedCode {
             let end = lines.last().map(|it| it.last_token_end_location()).unwrap();
             let mut literal = lines.into_iter().fold(String::new(), |mut str, it| {
                 let _ = it.write_string(&mut str, false);
+                let _ = str.write_char('\n');
                 str
             });
             if !literal.ends_with('\n') {
@@ -161,6 +162,7 @@ impl BlockStrategy for code::IndentedCode {
             let end = lines.last().map(|it| it.last_token_end_location()).unwrap();
             let mut literal = lines.into_iter().fold(String::new(), |mut str, it| {
                 let _ = it.write_string(&mut str, false);
+                let _ = str.write_char('\n');
                 str
             });
             if !literal.ends_with('\n') {
@@ -196,12 +198,13 @@ mod tests {
                 marker: Token::Backtick
             }))
         );
-        // println!("{ast:?}")
-        if let MarkdownNode::Text(text) = &ast[2].body {
-            assert_eq!(text, "aaa\n aaa\naaa\n");
-        } else {
-            panic!()
-        }
+        assert_eq!(
+            ast.to_html(),
+            r##"<pre><code class="language-text">aaa
+ aaa
+aaa
+</code></pre>"##
+        )
     }
 
     #[test]

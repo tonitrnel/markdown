@@ -38,7 +38,7 @@ pub(crate) fn scan_link_or_image<'input>(
                 line.skip(size);
                 // println!("### {:?}", _line.to_string());
                 Some(utils::percent_encode::encode(
-                    utils::unescape_string(_line.to_escaped_string()),
+                    utils::unescape_string(_line.to_string()),
                     true,
                 ))
             }

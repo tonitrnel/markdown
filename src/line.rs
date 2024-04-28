@@ -396,30 +396,20 @@ impl<'input> Line<'input> {
             .collect();
         Self::new_with_search_next_nonspace(result)
     }
-    /// Converts an iterator of tokens to an escaped string
-    ///
-    /// This function takes an iterator of tokens and converts each token
-    /// to a string, escaping punctuation characters if needed.
-    ///
-    /// ## It maps over each token, checking its type:
-    ///
-    /// - For escaped tokens that are ASCII punctuation, it formats them without escaping
-    /// - For other escaped tokens, it formats them with a backslash escape
-    /// - For other non-escaped tokens, it just calls `to_string()`
-    ///
-    /// ## Returns:
-    ///
-    /// An escaped string representing the tokens
-    pub fn to_escaped_string(&self) -> String {
-        self.iter()
-            .map(|it| match it.token {
-                Token::Escaped(ch) if ch.is_ascii_punctuation() => format!("{ch}"),
-                Token::Escaped(ch) => format!("\\{ch}"),
-                _ => it.to_string(),
-            })
-            .collect::<String>()
+    /// Escape specified characters
+    pub fn to_escaped_string(&self, escaped_chars: &[char]) -> String {
+        let mut buf = String::new();
+        for item in self.iter() {
+            match item.token {
+                Token::Escaped(ch) if escaped_chars.contains(&ch) => buf.write_char(ch),
+                Token::Escaped(ch) => buf.write_char('\\').and_then(|_| buf.write_char(ch)),
+                _ => item.token.write(&mut buf),
+            }
+            .expect("unexpected error")
+        }
+        buf
     }
-    /// ignore backslash escape
+    /// Ignore backslash escape
     pub fn to_unescape_string(&self) -> String {
         let mut buf = String::new();
         self.write_string(&mut buf, false)
