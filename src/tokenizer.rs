@@ -109,7 +109,7 @@ pub enum Token<'input> {
     Backslash,
     /// Escaped
     ///
-    /// No included ascii control characters
+    /// No included ascii control characters and whitespace characters
     ///
     /// `impl Display` logic:
     /// - `is_ascii_punctuation`: Display escaped `char`
@@ -567,7 +567,11 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
         '/' => consume_and_return(chars, Token::Slash),
         '\\' => {
             chars.next();
-            if let Some(ch) = chars.peek().filter(|ch| !ch.is_ascii_control()).cloned() {
+            if let Some(ch) = chars
+                .peek()
+                .filter(|ch| !ch.is_ascii_control() && !ch.is_ascii_whitespace())
+                .cloned()
+            {
                 chars.next();
                 Some(Token::Escaped(ch))
             } else {

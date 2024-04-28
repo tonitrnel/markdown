@@ -260,18 +260,27 @@ pub(super) fn process(
             match closer_token {
                 Token::Asterisk | Token::Underscore | Token::Tilde | Token::Eq => {
                     if let Some(opener_delimiter) = opener.as_ref().filter(|_| opener_found) {
+                        let opener_inl = opener_delimiter.borrow().node;
+                        let closer_inl = closer_delimiter.borrow().node;
+                        let mut opener_char_nums =
+                            if let MarkdownNode::Text(t) = &parser.tree[opener_inl].body {
+                                t.len()
+                            } else {
+                                0
+                            };
+                        let mut closer_char_nums =
+                            if let MarkdownNode::Text(t) = &parser.tree[closer_inl].body {
+                                t.len()
+                            } else {
+                                0
+                            };
                         // 计算出实际使用的分隔符数量。
-                        let used_delimiter_nums = if closer_delimiter.borrow().length >= 2
-                            && opener_delimiter.borrow().length >= 2
+                        let used_delimiter_nums = if closer_char_nums >= 2 && opener_char_nums >= 2
                         {
                             2
                         } else {
                             1
                         };
-                        let mut opener_char_nums = 0;
-                        let mut closer_char_nums = 0;
-                        let opener_inl = opener_delimiter.borrow().node;
-                        let closer_inl = closer_delimiter.borrow().node;
                         if let MarkdownNode::Text(text) = &mut parser.tree[opener_inl].body {
                             *text = text[0..text.len() - used_delimiter_nums].to_string();
                             opener_char_nums = text.len();
