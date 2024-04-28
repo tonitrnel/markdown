@@ -1,5 +1,5 @@
 use crate::tokenizer::{Location, Token, TokenIterator, TokenWithLocation, Whitespace};
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter, Write};
 use std::iter::{Skip, Take};
 use std::ops::{Index, Range};
 use std::slice::Iter;
@@ -18,17 +18,29 @@ impl<'input> Line<'input> {
         let mut tokens = Vec::new();
         for it in iter {
             match &it.token {
-                Token::Whitespace(Whitespace::NewLine(_)) => return Some(Line::new(tokens)),
+                Token::Whitespace(Whitespace::NewLine(_)) => {
+                    // tokens.push(it);
+                    return Some(Line::new_with_search_next_nonspace(tokens));
+                }
                 _ => tokens.push(it),
             }
         }
         if tokens.is_empty() {
             None
         } else {
-            Some(Line::new(tokens))
+            Some(Line::new_with_search_next_nonspace(tokens))
         }
     }
     pub fn new(tokens: Vec<TokenWithLocation<'input>>) -> Self {
+        Self {
+            start_offset: 0,
+            end_offset: tokens.len(),
+            indent: 0,
+            inner: tokens,
+            skipped_indent: false,
+        }
+    }
+    pub fn new_with_search_next_nonspace(tokens: Vec<TokenWithLocation<'input>>) -> Self {
         let next_nonspace = Line::find_next_nonspace(tokens.iter()).unwrap_or(tokens.len());
         Self {
             start_offset: 0,
@@ -165,19 +177,26 @@ impl<'input> Line<'input> {
     }
 
     pub fn peek(&self) -> Option<&Token<'input>> {
-        self.inner.get(self.start_offset).map(|it| &it.token)
+        self.peek_with_location().map(|it| &it.token)
     }
     pub fn peek_with_location(&self) -> Option<&TokenWithLocation<'input>> {
+        if self.start_offset >= self.end_offset {
+            return None;
+        }
         self.inner.get(self.start_offset)
     }
     pub fn next(&mut self) -> Option<Token<'input>> {
         let val = self.peek().cloned();
-        self.start_offset += 1;
+        if self.start_offset < self.end_offset {
+            self.start_offset += 1;
+        }
         val
     }
     pub fn next_with_location(&mut self) -> Option<TokenWithLocation<'input>> {
         let val = self.peek_with_location().cloned();
-        self.start_offset += 1;
+        if self.start_offset < self.end_offset {
+            self.start_offset += 1;
+        }
         val
     }
     /// 跳过连续相同的 Tokens
@@ -190,7 +209,7 @@ impl<'input> Line<'input> {
     where
         I: Iterator<Item = &'a TokenWithLocation<'a>>,
     {
-        tokens.position(|it| !it.is_space_or_tab())
+        tokens.position(|it| !matches!(it.token, Token::Whitespace(..)))
     }
     pub fn position<P: ConsumePredicate<'input> + Copy>(&self, predicate: P) -> Option<usize> {
         self.iter().position(|it| predicate.evaluate(it.token))
@@ -254,8 +273,13 @@ impl<'input> Line<'input> {
     }
     /// 前进到下一个非空白的 token 字符
     pub fn advance_next_nonspace(&mut self) -> &Self {
-        let next_nonspace =
-            Line::find_next_nonspace(self.inner.iter().skip(self.start_offset)).unwrap_or(0);
+        let next_nonspace = Line::find_next_nonspace(
+            self.inner
+                .iter()
+                .skip(self.start_offset)
+                .take(self.end_offset - self.start_offset),
+        )
+        .unwrap_or(0);
         if next_nonspace > 0 {
             self.start_offset += next_nonspace;
         }
@@ -284,7 +308,7 @@ impl<'input> Line<'input> {
     /// 根据指定的 start 和 end 创建一个切片副本，如果要忽略偏移请使用 `slice_raw`
     pub fn slice(&self, start: usize, end: usize) -> Line<'input> {
         // 有没有不用克隆直接使用 start_offset 和 end_offset 创建切片的方法？
-        Line::new(
+        Line::new_with_search_next_nonspace(
             self.iter()
                 .skip(start)
                 .take(end.saturating_sub(start))
@@ -294,7 +318,7 @@ impl<'input> Line<'input> {
     }
     /// 忽略偏移，从原始 vector 上进行切片
     pub fn slice_raw(&self, start: usize, end: usize) -> Line<'input> {
-        Line::new(
+        Line::new_with_search_next_nonspace(
             self.inner
                 .iter()
                 .skip(start)
@@ -325,9 +349,11 @@ impl<'input> Line<'input> {
     }
     /// 安全的获取引用
     pub fn get(&self, index: usize) -> Option<&Token<'input>> {
-        self.inner
-            .get(self.start_offset + index)
-            .map(|it| &it.token)
+        let index = self.start_offset + index;
+        if index >= self.end_offset {
+            return None;
+        }
+        self.inner.get(index).map(|it| &it.token)
     }
     /// 从原始 vector 安全的获取引用，等同于 vector 的 `get`
     pub fn get_raw(&self, index: usize) -> Option<&Token<'input>> {
@@ -339,12 +365,12 @@ impl<'input> Line<'input> {
         if self.is_end() {
             self.inner[self.end_offset - 1].end_location()
         } else {
-            self.inner[self.start_offset.min(self.inner.len() - 1)].start_location()
+            self.inner[self.start_offset.min(self.end_offset - 1)].start_location()
         }
     }
     /// 获取当前Token的结束位置
     pub fn end_location(&self) -> Location {
-        self.inner[self.start_offset.min(self.inner.len() - 1)].end_location()
+        self.inner[self.start_offset.min(self.end_offset - 1)].end_location()
     }
     /// 获取当前行最后一个 Token 的结束位置
     pub fn last_token_end_location(&self) -> Location {
@@ -368,7 +394,7 @@ impl<'input> Line<'input> {
                 }
             })
             .collect();
-        Self::new(result)
+        Self::new_with_search_next_nonspace(result)
     }
     /// Converts an iterator of tokens to an escaped string
     ///
@@ -393,18 +419,32 @@ impl<'input> Line<'input> {
             })
             .collect::<String>()
     }
+    /// ignore backslash escape
     pub fn to_unescape_string(&self) -> String {
-        self.iter()
-            .map(|it| match it.token {
-                Token::Escaped(ch) => format!("\\{ch}"),
-                _ => it.to_string(),
-            })
-            .collect::<String>()
+        let mut buf = String::new();
+        self.write_string(&mut buf, false)
+            .expect("unexpected error");
+        buf
+    }
+    pub(crate) fn write_string<W>(&self, writer: &mut W, escape: bool) -> fmt::Result
+    where
+        W: Write,
+    {
+        for item in self.iter() {
+            match item.token {
+                Token::Escaped(ch) if !escape => {
+                    writer.write_char('\\')?;
+                    writer.write_char(ch)?;
+                }
+                _ => item.token.write(writer)?,
+            }
+        }
+        Ok(())
     }
 }
 impl Display for Line<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.iter().map(|it| it.to_string()).collect::<String>())
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.write_string(f, true)
     }
 }
 
@@ -428,6 +468,11 @@ pub trait ConsumePredicate<'input> {
 impl<'input> ConsumePredicate<'input> for Token<'input> {
     fn evaluate(self, token: impl AsRef<Token<'input>>) -> bool {
         &self == token.as_ref()
+    }
+}
+impl<'input> ConsumePredicate<'input> for &Token<'input> {
+    fn evaluate(self, token: impl AsRef<Token<'input>>) -> bool {
+        self == token.as_ref()
     }
 }
 

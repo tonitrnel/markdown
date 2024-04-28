@@ -149,7 +149,7 @@ impl BlockStrategy for list::ListItem {
         } else if line.indent >= list.padding() + list.marker_offset() {
             line.skip(list.padding() + list.marker_offset());
             line.re_find_indent();
-            println!("line = '{line}' {:?}", line.get_raw(0));
+        // println!("line = '{line}' {:?}", line.get_raw(0));
         } else {
             return BlockProcessing::Unprocessed;
         }
@@ -242,7 +242,7 @@ mod tests {
         );
         assert_eq!(ast[1].start, Location::new(1, 1));
         assert_eq!(ast[1].end, Location::new(6, 21));
-        println!("{:?}", ast);
+        // println!("{:?}", ast)
     }
     #[test]
     fn case_2() {
@@ -333,5 +333,20 @@ mod tests {
         let ast = Parser::new(text).parse();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         println!("{ast:?}")
+    }
+    #[test]
+    fn case_5() {
+        let text = r#"* foo
+→bar"#
+            .trim();
+        let ast = Parser::new(text).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(
+            ast.to_html(),
+            "<ul>
+<li>foo
+→bar</li>
+</ul>"
+        )
     }
 }

@@ -38,7 +38,6 @@ pub fn parse(parser: &mut Parser) -> Option<serde_yaml::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tokenizer::TokenWithLocation;
 
     #[test]
     fn it_works() {
@@ -54,43 +53,29 @@ date: 2022-11-05
 Hello world        "#
                 .trim_start(),
         );
-        if let Some(frontmatter) = parse(&mut parser) {
-            assert_eq!(
-                frontmatter.get("external"),
-                Some(&serde_yaml::Value::Bool(false))
-            );
-            assert_eq!(
-                frontmatter.get("draft"),
-                Some(&serde_yaml::Value::Bool(true))
-            );
-            assert_eq!(
-                frontmatter.get("description"),
-                Some(&serde_yaml::Value::String(
-                    "It's a beautiful world out there.".to_string()
-                ))
-            );
-            assert_eq!(
-                frontmatter.get("date"),
-                Some(&serde_yaml::Value::String("2022-11-05".to_string()))
-            );
-        } else {
-            panic!("Unexpected parse error")
-        };
-        assert!(matches!(
-            parser.tokens.next(),
-            Some(TokenWithLocation {
-                token: Token::Text("Hello"),
-                ..
-            })
-        ));
-        let mut parser = Parser::new("Hello world");
-        assert!(parse(&mut parser).is_none());
-        assert!(matches!(
-            parser.tokens.next(),
-            Some(TokenWithLocation {
-                token: Token::Text("Hello"),
-                ..
-            })
-        ));
+        let frontmatter = parser.parse_frontmatter().unwrap();
+        assert_eq!(
+            frontmatter.get("external"),
+            Some(&serde_yaml::Value::Bool(false))
+        );
+        assert_eq!(
+            frontmatter.get("draft"),
+            Some(&serde_yaml::Value::Bool(true))
+        );
+        assert_eq!(
+            frontmatter.get("description"),
+            Some(&serde_yaml::Value::String(
+                "It's a beautiful world out there.".to_string()
+            ))
+        );
+        assert_eq!(
+            frontmatter.get("date"),
+            Some(&serde_yaml::Value::String("2022-11-05".to_string()))
+        );
+        let ast = parser.parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), "<p>Hello world</p>")
     }
+    #[test]
+    fn basic_usage() {}
 }

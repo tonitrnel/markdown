@@ -2207,8 +2207,7 @@ pub(crate) fn unescape_string(str: impl AsRef<str>) -> String {
                 }
                 (EscapeState::Dec, ch) if ch.is_ascii_digit() => buf.push(ch),
                 (EscapeState::Hex, ';') => {
-                    if let Ok(Some(mut ch)) =
-                        u32::from_str_radix(&buf[3..], 16).map(char::from_u32)
+                    if let Ok(Some(mut ch)) = u32::from_str_radix(&buf[3..], 16).map(char::from_u32)
                     {
                         ch = if ch == '\u{0000}' { '\u{FFFD}' } else { ch };
                         unescaped.push(ch);
@@ -2263,11 +2262,16 @@ mod tests {
     }
     #[test]
     fn test_unescaped_string() {
-                assert_eq!(unescape_string("&nbsp; &amp; &copy; &AElig; &Dcaron;
+        assert_eq!(
+            unescape_string(
+                "&nbsp; &amp; &copy; &AElig; &Dcaron;
         &frac34; &HilbertSpace; &DifferentialD;
-        &ClockwiseContourIntegral; &ngE;"), "  & © Æ Ď
+        &ClockwiseContourIntegral; &ngE;"
+            ),
+            "  & © Æ Ď
         ¾ ℋ ⅆ
-        ∲ ≧̸");
+        ∲ ≧̸"
+        );
         assert_eq!(unescape_string("&#35; &#1234; &#992; &#0;"), "# Ӓ Ϡ �");
         assert_eq!(unescape_string("&#X22; &#XD06; &#xcab;"), "\" ആ ಫ");
         assert_eq!(
@@ -2288,7 +2292,7 @@ mod tests {
         assert_eq!(unescape_string("&MadeUpEntity;"), "&MadeUpEntity;");
     }
     #[test]
-    fn test_a(){
-        println!("{:?} == \u{c3a4}", unescape_string("&auml;"));
+    fn test_a() {
+        // println!("{:?} == \u{c3a4}", unescape_string("&auml;"));
     }
 }

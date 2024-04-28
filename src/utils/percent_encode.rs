@@ -1,5 +1,6 @@
 use crate::utils::text_encoding::encode_char;
 
+#[allow(unused)]
 pub(crate) fn decode(uri: impl AsRef<str>) -> String {
     let chars = uri.as_ref().chars().collect::<Vec<_>>();
     let len = chars.len();
@@ -59,7 +60,7 @@ pub(crate) fn encode(url: impl AsRef<str>, keep_escaped: bool) -> String {
             | '#' => encoded.push(char),
             '%' if keep_escaped => encoded.push(char),
             _ => {
-                for byte in encode_char(char, &mut [0;4]) {
+                for byte in encode_char(char, &mut [0; 4]) {
                     write!(encoded, "%{:02X}", byte).unwrap()
                 }
             }
@@ -69,8 +70,8 @@ pub(crate) fn encode(url: impl AsRef<str>, keep_escaped: bool) -> String {
 }
 #[cfg(test)]
 mod tests {
-    use crate::utils::text_encoding::encode_text;
     use super::*;
+    use crate::utils::text_encoding::encode_text;
 
     #[test]
     fn it_works() {
@@ -81,7 +82,12 @@ mod tests {
     }
     #[test]
     fn test_double_byte() {
-        println!("0xC3A4 == {:02X?} as {:02X?} as {:02X?} ", encode("ä", false), ('ä' as u32).to_be_bytes(), encode_text("ä"));
+        println!(
+            "0xC3A4 == {:02X?} as {:02X?} as {:02X?} ",
+            encode("ä", false),
+            ('ä' as u32).to_be_bytes(),
+            encode_text("ä")
+        );
         assert_eq!(encode("\u{00E4}", false), "%C3%A4")
     }
 }

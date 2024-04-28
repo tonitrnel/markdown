@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
 
 use crate::ast::MarkdownNode;
 use crate::blocks::{BlockMatching, BlockProcessing};
 use crate::line::Line;
-use crate::tokenizer::{Location, TokenIterator, Tokenizer};
+use crate::tokenizer::{Location, Token, TokenIterator, Tokenizer};
 use crate::tree::Tree;
 use crate::{blocks, exts, inlines};
 
@@ -17,8 +17,8 @@ pub struct Node {
 }
 impl Debug for Node {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{:?},{:?}]{:?}", self.start, self.end, self.body)
-        // write!(f, "{:?}", self.body)
+        // write!(f, "[{:?},{:?}]{:?}", self.start, self.end, self.body)
+        write!(f, "{:?}", self.body)
     }
 }
 impl Node {
@@ -33,9 +33,52 @@ impl Node {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct ParserOptions {
+    /// 当 github_flavored 和 obsidian_flavored 未启用时为 `true`
+    pub(crate) default_flavored: bool,
+    pub(crate) github_flavored: bool,
+    pub(crate) obsidian_flavored: bool,
+    pub(crate) cjk_autocorrect: bool,
+    pub(crate) smart_punctuation: bool,
+}
+
+impl ParserOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn enabled_gfm(self) -> Self {
+        Self {
+            github_flavored: true,
+            default_flavored: false,
+            ..self
+        }
+    }
+    pub fn enabled_ofm(self) -> Self {
+        Self {
+            obsidian_flavored: true,
+            default_flavored: false,
+            ..self
+        }
+    }
+    pub fn enabled_cjk_autocorrect(self) -> Self {
+        Self {
+            cjk_autocorrect: true,
+            ..self
+        }
+    }
+    pub fn enabled_smart_punctuation(self) -> Self {
+        Self {
+            smart_punctuation: true,
+            ..self
+        }
+    }
+}
+
 pub struct Parser<'input> {
     pub(crate) tokens: TokenIterator<'input>,
     pub(crate) tree: Tree<Node>,
+    pub(crate) options: ParserOptions,
     /// 存储在解析 Block 时能接收 inlines 的 block 的 ID 和剩余未处理的 Line
     pub(crate) inlines: BTreeMap<usize, Vec<Line<'input>>>,
     pub(crate) link_refs: HashMap<String, (String, Option<String>)>, // HRefLabel, (Url, Option<Title>)
@@ -48,19 +91,26 @@ pub struct Parser<'input> {
     pub(crate) last_matched_node: usize,
     pub(crate) last_location: Location,
     pub(crate) all_closed: bool,
+    pub(crate) tags: HashSet<String>,
+    pub(crate) html_stacks: VecDeque<(String, usize)>, // tag name, node idx
 }
 
 impl<'input> Parser<'input> {
     pub fn new(text: &'input str) -> Self {
+        Self::new_with_options(text, ParserOptions::default())
+    }
+    pub fn new_with_options(text: &'input str, options: ParserOptions) -> Self {
         let mut tree = Tree::<Node>::new();
-        println!("创建 Document 节点");
+        // println!("创建 Document 节点")
         let doc = tree.append(Node::new(MarkdownNode::Document, Location::default()));
         Self {
             tokens: Tokenizer::new(text).tokenize(),
             inlines: BTreeMap::new(),
+            options,
             link_refs: HashMap::new(),
             footnotes: HashMap::new(),
             footnote_refs: HashMap::new(),
+            tags: HashSet::new(),
             tree,
             doc,
             curr_proc_node: doc,
@@ -68,19 +118,19 @@ impl<'input> Parser<'input> {
             all_closed: true,
             last_matched_node: doc,
             last_location: Location::default(),
+            html_stacks: VecDeque::new(),
         }
     }
     pub fn parse(mut self) -> Tree<Node> {
         self.tree.push();
-        let start = std::time::Instant::now();
-        println!("块解析开始");
+        // let start = std::time::Instant::now();
+        // println!("块解析开始")
         self.parse_blocks();
-        println!("块解析结束[{}ms]", start.elapsed().as_millis());
-        // todo: 处理 Reference Link
-        let start = std::time::Instant::now();
-        println!("行解析开始");
+        // println!("块解析结束[{}ms]", start.elapsed().as_millis());
+        // let start = std::time::Instant::now();
+        // println!("行解析开始")
         self.parse_inlines();
-        println!("行解析结束[{}ms]", start.elapsed().as_millis());
+        // println!("行解析结束[{}ms]", start.elapsed().as_millis());
         self.tree.pop();
         self.tree
     }
@@ -88,10 +138,10 @@ impl<'input> Parser<'input> {
         exts::frontmatter::parse(self)
     }
     fn parse_blocks(&mut self) {
-        let mut i = 0;
+        // let mut i = 0;
         while let Some(line) = Line::extract(&mut self.tokens) {
-            println!("处理第 {i} 行");
-            i += 1;
+            // println!("处理第 {i} 行")
+            // i += 1;
             let last_location = if line.is_blank() {
                 self.last_location
             } else {
@@ -100,7 +150,7 @@ impl<'input> Parser<'input> {
             self.incorporate_line(line);
             self.last_location = last_location;
         }
-        println!("开始确定块");
+        // println!("开始确定块")
         while self.curr_proc_node != self.doc {
             self.finalize(self.curr_proc_node, self.last_location)
         }
@@ -118,9 +168,10 @@ impl<'input> Parser<'input> {
                 eprintln!("WARNING: Invalid node {node:?} exists inlines");
                 continue;
             }
-            let lines = lines.unwrap();
-            println!("#{idx} {:?}", self.tree[idx].body);
-            inlines::process(idx, self, Line::extends(lines));
+            let mut line = Line::extends(lines.unwrap());
+            line.trim_end_matches(|it: &Token| matches!(it, Token::Whitespace(..)));
+            // println!("#{idx} {:?} {:?}", self.tree[idx].body, line);
+            inlines::process(idx, self, line);
         }
         self.parse_footnote_list();
     }
@@ -147,7 +198,7 @@ impl<'input> Parser<'input> {
     fn incorporate_line(&mut self, mut line: Line<'input>) {
         let mut container = self.doc;
         self.prev_proc_node = self.curr_proc_node;
-        println!("检查是否存在正在处理的节点");
+        // println!("检查是否存在正在处理的节点")
         while let Some(last_child) = &self.tree.get_last_child(container).and_then(|idx| {
             if self.tree[idx].processing {
                 Some(idx)
@@ -156,25 +207,25 @@ impl<'input> Parser<'input> {
             }
         }) {
             container = *last_child;
-            println!("继续处理 {:?}", self.tree[container].body);
+            // println!("继续处理 {:?}", self.tree[container].body)
             match blocks::process(container, self, &mut line) {
                 BlockProcessing::Processed => return,
                 BlockProcessing::Further => continue,
                 BlockProcessing::Unprocessed => {
                     container = self.tree.get_parent(container);
-                    println!("无法处理，执行返回上一层容器");
+                    // println!("无法处理，执行返回上一层容器")
                     break;
                 }
             }
         }
         self.all_closed = container == self.prev_proc_node;
-        println!("当前容器 #{container}  {:?}", self.tree[container].body);
+        // println!("当前容器 #{container}  {:?}", self.tree[container].body)
         self.last_matched_node = container;
         let mut matched_leaf = !matches!(self.tree[container].body, MarkdownNode::Paragraph)
             && self.tree[container].body.accepts_lines();
         // 查找叶子（可容纳 Inline ）节点
         if !matched_leaf {
-            println!("开始匹配新的节点")
+            // println!("开始匹配新的节点");
         };
         while !matched_leaf {
             if !line.is_indented()
@@ -209,22 +260,47 @@ impl<'input> Parser<'input> {
             && !line.is_blank()
             && matches!(self.tree[self.curr_proc_node].body, MarkdownNode::Paragraph)
         {
-            println!("当前行未结束，存储至之前的 Paragraph");
+            // println!("当前行未结束，存储至之前的 Paragraph")
             self.append_inline(self.curr_proc_node, line);
         } else {
+            // 未匹配新的容器节点，尝试追加之前的节点
+            if self.tree[self.prev_proc_node].body.support_reprocess() && !line.is_end() {
+                blocks::reprocess(self.prev_proc_node, self, &mut line);
+            }
             self.close_unmatched_blocks();
             // 判断是否支持接收纯文本行，只有 Paragraph 、HTML Block、Code Block 支持，部分容器是支持存储空白行
-            let cur_container = &self.tree[container].body;
+            let cur_container = &mut self.tree[container].body;
             if cur_container.accepts_lines() && !line.is_end() {
-                println!("存储当前行剩余内容");
+                // println!("存储当前行剩余内容")
                 if let MarkdownNode::Html(html) = cur_container {
-                    let location = line.start_location();
-                    let sn = line.snapshot();
-                    let is_end = html.is_end(&mut line);
-                    line.resume(sn);
-                    self.append_inline(container, line);
-                    if is_end {
-                        self.finalize(container, location)
+                    let snapshot = line.snapshot();
+                    if let Some((before, after)) = html.scan_end(&mut line) {
+                        // println!("HTML Block 结束 ..{before}..{after}..")
+                        line.resume(snapshot);
+                        // 将 Before 前的内容插入到 HTML
+                        if before > 0 {
+                            let line = line.slice(0, before);
+                            // println!("HTML Block 内容 [0..{before}]{line:?}",)
+                            self.append_text(
+                                line.to_unescape_string(),
+                                (line.start_location(), line.last_token_end_location()),
+                            );
+                        }
+                        // 将 After 后的内容插入到新的 Paragraph
+                        line.skip(after);
+                        self.finalize(container, line.start_location());
+                        if !line.is_end() {
+                            // println!("HTML 剩余 after={after} len={} {:?}", line.len(), line);
+                            let idx =
+                                self.append_block(MarkdownNode::Paragraph, line.start_location());
+                            self.append_inline(idx, line);
+                        }
+                    } else {
+                        line.resume(snapshot);
+                        self.append_text(
+                            line.to_unescape_string(),
+                            (line.start_location(), line.last_token_end_location()),
+                        );
                     }
                 } else {
                     self.append_inline(container, line);
@@ -232,11 +308,11 @@ impl<'input> Parser<'input> {
             }
             // 判断行是否已全部消费或者该行是空白行
             else if !line.is_end() && !line.is_blank() {
-                println!("当前行未结束，创建一个新的 Paragraph 存储");
+                // println!("当前行未结束，创建一个新的 Paragraph 存储")
                 let idx = self.append_block(MarkdownNode::Paragraph, line.start_location());
                 self.append_inline(idx, line);
             } else {
-                println!("当前行没有更多内容了");
+                // println!("当前行没有更多内容了")
             }
         }
     }
@@ -249,15 +325,15 @@ impl<'input> Parser<'input> {
         self.tree.push();
         self.curr_proc_node = idx;
         self.last_location = loc;
-        println!("创建节点 #{idx} {:?}", self.tree[idx].body);
+        // println!("创建节点 #{idx} {:?}", self.tree[idx].body)
         idx
     }
     pub fn append_free_node(&mut self, node: MarkdownNode, loc: Location) -> usize {
         let idx = self.tree.create_node(Node::new(node, loc));
-        println!("创建游离节点 #{idx} {:?}", self.tree[idx].body);
+        // println!("创建游离节点 #{idx} {:?}", self.tree[idx].body)
         idx
     }
-    pub fn append_block_to(
+    pub fn append_to(
         &mut self,
         id: usize,
         node: MarkdownNode,
@@ -265,13 +341,13 @@ impl<'input> Parser<'input> {
     ) -> usize {
         let idx = self.tree.append_child(id, Node::new(node, location.0));
         self.tree[idx].end = location.1;
-        println!("创建节点 #{idx} {:?}", self.tree[idx].body);
+        // println!("创建节点 #{idx} {:?}", self.tree[idx].body)
         idx
     }
     pub fn replace_block(&mut self, node: MarkdownNode, loc: Location) -> Option<usize> {
         self.last_location = loc;
         if let Some(idx) = self.tree.peek_up() {
-            println!("替换节点 {:?} => {:?}", self.tree[idx].body, node);
+            // println!("替换节点 {:?} => {:?}", self.tree[idx].body, node)
             self.tree[idx].body = node;
             Some(idx)
         } else {
@@ -297,7 +373,7 @@ impl<'input> Parser<'input> {
             .tree
             .append(Node::new(content.as_ref().into(), location.0));
         self.tree[idx].end = location.1;
-        println!("创建节点 #{idx} {:?}", self.tree[idx].body);
+        // println!("创建节点 #{idx} {:?}", self.tree[idx].body)
         idx
     }
     /// 插入文本当目标节点，这会自动合并相邻 *仍在处理* 的 Text 节点
@@ -322,7 +398,7 @@ impl<'input> Parser<'input> {
                 .tree
                 .append_child(parent, Node::new(content.as_ref().into(), location.0));
             self.tree[idx].end = location.1;
-            println!("创建节点 #{idx} {:?}", self.tree[idx].body);
+            // println!("创建节点 #{idx} {:?}", self.tree[idx].body)
             idx
         }
     }
@@ -349,16 +425,19 @@ impl<'input> Parser<'input> {
     /// 调用指定节点的 finalize 方法处理并关闭该节点，将当前节点指针移动至父节点
     pub(crate) fn finalize(&mut self, node_id: usize, location: Location) {
         let parent = self.tree.get_parent(node_id);
+        if !self.tree[node_id].processing {
+            return;
+        }
         blocks::after(node_id, self, location);
         let node = &mut self.tree[node_id];
         node.processing = false;
         if parent == self.doc {
-            println!("块 #{node_id} {:?} 解析完成", node.body);
+            // println!("块 #{node_id} {:?} 解析完成", node.body)
         } else {
-            println!("退出节点 #{node_id} {:?}", node.body);
+            // println!("退出节点 #{node_id} {:?}", node.body)
         }
         if Some(node_id) == self.tree.peek_up() {
-            println!("树退出 #{node_id:?}");
+            // println!("树退出 #{node_id:?}")
             self.tree.pop();
         }
         self.curr_proc_node = parent;

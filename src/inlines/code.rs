@@ -2,7 +2,11 @@ use crate::ast::{code, MarkdownNode};
 use crate::inlines::ProcessCtx;
 use crate::tokenizer::Token;
 
-pub(super) fn process(ProcessCtx { line, parser, id, .. }: &mut ProcessCtx) -> bool {
+pub(super) fn process(
+    ProcessCtx {
+        line, parser, id, ..
+    }: &mut ProcessCtx,
+) -> bool {
     let start_offset = line.start_offset;
     let mut code_locations = (line.start_location(), line.end_location());
     let marker_length = line.starts_count(&Token::Backtick);
@@ -26,9 +30,9 @@ pub(super) fn process(ProcessCtx { line, parser, id, .. }: &mut ProcessCtx) -> b
     }
     // 未闭合
     if marker_count != marker_length {
-        return false
+        return false;
     }
-    let parent = parser.append_block_to(
+    let parent = parser.append_to(
         *id,
         MarkdownNode::Code(code::Code::Inline(code::InlineCode {})),
         code_locations,
@@ -36,10 +40,10 @@ pub(super) fn process(ProcessCtx { line, parser, id, .. }: &mut ProcessCtx) -> b
     let (mut text, start, end) = {
         let part = line.slice_raw(
             start_offset + marker_length,
-            line.end_offset - marker_length,
+            line.start_offset - marker_length,
         );
         (
-            part.to_string().replace('\n', " "),
+            part.to_unescape_string().replace('\n', " "),
             part.start_location(),
             part.last_token_end_location(),
         )
@@ -76,7 +80,7 @@ mod tests {
         assert_eq!(ast.to_html(), "<p><code>``</code></p>");
     }
     #[test]
-    fn case_337(){
+    fn case_337() {
         let text = r#"`foo   bar 
 baz`"#;
         let ast = Parser::new(text).parse();

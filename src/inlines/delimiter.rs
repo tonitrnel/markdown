@@ -119,7 +119,6 @@ pub(super) fn before(
         delimiters,
         ..
     }: &mut ProcessCtx,
-    smart_punctuation: bool,
     enabled_gfm_strikethrough: bool,
     enabled_ofm_highlight: bool,
 ) -> bool {
@@ -146,20 +145,20 @@ pub(super) fn before(
             }
         }
     };
-    let node = parser.append_block_to(*id, MarkdownNode::Text(text), locations);
+    let node = parser.append_to(*id, MarkdownNode::Text(text), locations);
     parser.mark_as_processed(node);
-    println!("开始预处理 {scan_result:?}");
+    // println!("开始预处理 {scan_result:?}")
     if (scan_result.2 || scan_result.3)
-        && (smart_punctuation || !matches!(scan_result.0, Token::SingleQuote | Token::DoubleQuote))
+        && (parser.options.smart_punctuation || !matches!(scan_result.0, Token::SingleQuote | Token::DoubleQuote))
         // strikethrough 只允许单个或两个 `~` 符号
         && (!enabled_gfm_strikethrough || scan_result.1 == 1 || scan_result.1 == 2)
         // highlight 只允许两个 `=` 符号
         && (!enabled_ofm_highlight || scan_result.1 == 2)
     {
-        println!(
-            "写入 delimiter ({}, {})#{node} parent = {id}",
-            scan_result.2, scan_result.3
-        );
+        // println!(
+        //     "写入 delimiter ({}, {})#{node} parent = {id}",
+        //     scan_result.2, scan_result.3
+        // );
         *delimiters = Some(DelimiterChain::new(Delimiter {
             token: scan_result.0,
             can_open: scan_result.2,
@@ -187,7 +186,7 @@ pub(super) fn process(
 ) {
     // println!("AST: \n{:?}", parser.tree);
     // if let Some(dc) = delimiters.as_ref() {
-    // println!("Delimiter chain: \n{dc:?}");
+    //     println!("Delimiter chain: \n{dc:?}");
     // }
     let mut openers_bottom = [stack_bottom; 21];
     let mut candidate = delimiters.clone();
@@ -238,11 +237,12 @@ pub(super) fn process(
                     {
                         let opener_delimiter = opener_delimiter.borrow();
                         // 长度为 2 的 closer 无法与长度为 1 的 opener 匹配，或者长度为 1 的 opener 无法与长度为 2 的 closer 匹配
+                        let odd_match = (closer_delimiter.can_open || opener_delimiter.can_close)
+                            && closer_delimiter.length % 3 != 0
+                            && (opener_delimiter.length + closer_delimiter.length) % 3 == 0;
                         if opener_delimiter.can_open
                             && opener_delimiter.token == closer_delimiter.token
-                            && (!(closer_delimiter.can_open || opener_delimiter.can_close)
-                                || closer_delimiter.length % 3 == 0
-                                || (opener_delimiter.length + closer_delimiter.length) % 3 != 0)
+                            && !odd_match
                         {
                             opener_found = true;
                             break;
@@ -254,6 +254,7 @@ pub(super) fn process(
                     }
                 }
             }
+            // println!("⌈---\nopener = {opener:?} \ncloser = {closer:?} \nopener_found = {opener_found}\n⌊---");
             let mut old_closer = closer.clone();
             let closer_token = closer_delimiter.borrow().token;
             match closer_token {
@@ -267,16 +268,18 @@ pub(super) fn process(
                         } else {
                             1
                         };
-                        opener_delimiter.borrow_mut().length -= used_delimiter_nums;
-                        closer_delimiter.borrow_mut().length -= used_delimiter_nums;
+                        let mut opener_char_nums = 0;
+                        let mut closer_char_nums = 0;
                         let opener_inl = opener_delimiter.borrow().node;
                         let closer_inl = closer_delimiter.borrow().node;
                         if let MarkdownNode::Text(text) = &mut parser.tree[opener_inl].body {
                             *text = text[0..text.len() - used_delimiter_nums].to_string();
+                            opener_char_nums = text.len();
                             parser.tree[opener_inl].end.column -= used_delimiter_nums as u64;
                         }
                         if let MarkdownNode::Text(text) = &mut parser.tree[closer_inl].body {
                             *text = text[0..text.len() - used_delimiter_nums].to_string();
+                            closer_char_nums = text.len();
                             parser.tree[closer_inl].end.column -= used_delimiter_nums as u64;
                         }
                         let start_location = parser.tree[opener_inl].end;
@@ -306,35 +309,35 @@ pub(super) fn process(
                         while let Some(item) = temp.filter(|it| it != &closer_inl) {
                             let next = parser.tree.get_next(item);
                             parser.tree.unlink(item);
-                            println!(
-                                "将 {:?}#{item} 插入到 {:?}#{node} ",
-                                parser.tree[item], parser.tree[node]
-                            );
+                            // println!(
+                            //     "将 {:?}#{item} 插入到 {:?}#{node} ",
+                            //     parser.tree[item], parser.tree[node]
+                            // );
                             parser.tree.set_parent(item, node);
                             temp = next;
                         }
 
-                        parser
-                            .tree
-                            .print_link_info("A", parser.tree.get_parent(opener_inl));
+                        // parser
+                        //     .tree
+                        //     .print_link_info("A", parser.tree.get_parent(opener_inl));
                         parser
                             .tree
                             .set_parent(node, parser.tree.get_parent(opener_inl));
-                        parser
-                            .tree
-                            .print_link_info("B", parser.tree.get_parent(opener_inl));
+                        // parser
+                        //     .tree
+                        //     .print_link_info("B", parser.tree.get_parent(opener_inl));
                         parser.tree.set_next(opener_inl, node);
                         parser.tree.set_prev(closer_inl, node);
-                        parser
-                            .tree
-                            .print_link_info("C", parser.tree.get_parent(opener_inl));
-                        println!("喵喵喵 opener_inl = {opener_inl} closer_inl = {closer_inl} node = {node}");
+                        // parser
+                        //     .tree
+                        //     .print_link_info("C", parser.tree.get_parent(opener_inl));
+                        // println!("喵喵喵 opener_inl = {opener_inl} closer_inl = {closer_inl} node = {node}");
 
-                        if opener_delimiter.borrow().length == 0 {
+                        if opener_char_nums == 0 {
                             parser.tree.remove(opener_inl);
                             remove_delimiter(&mut opener)
                         }
-                        if closer_delimiter.borrow().length == 0 {
+                        if closer_char_nums == 0 {
                             parser.tree.remove(closer_inl);
                             let cloned_next = closer_delimiter.borrow().next.clone();
                             remove_delimiter(&mut closer);
@@ -410,76 +413,76 @@ fn remove_delimiter(delimiter_chain: &mut Option<DelimiterChain>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::Parser;
+    use crate::parser::{Parser, ParserOptions};
 
     #[test]
     fn case_350() {
         let text = r#"*foo bar*"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p><em>foo bar</em></p>")
     }
     #[test]
     fn case_351() {
         let text = r#"a * foo bar*"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p>a * foo bar*</p>")
     }
     #[test]
     fn case_357() {
         let text = r#"_foo bar_"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p><em>foo bar</em></p>")
     }
     #[test]
     fn case_378() {
         let text = r#"**foo bar**"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p><strong>foo bar</strong></p>")
     }
     #[test]
     fn case_409() {
         let text = r#"*foo *bar**"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p><em>foo <em>bar</em></em></p>")
     }
     #[test]
     fn case_411() {
         let text = r#"*foo**bar**baz*"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p><em>foo<strong>bar</strong>baz</em></p>")
     }
     #[test]
     fn case_412() {
         let text = r#"*foo**bar*"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p><em>foo**bar</em></p>")
     }
     #[test]
     fn case_413() {
         let text = r#"***foo** bar*"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p><em><strong>foo</strong> bar</em></p>")
     }
     #[test]
     fn case_416() {
         let text = r#"foo***bar***baz"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p>foo<em><strong>bar</strong></em>baz</p>")
     }
     #[test]
     fn case_417() {
         let text = r#"foo******bar*********baz"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             "<p>foo<strong><strong><strong>bar</strong></strong></strong>***baz</p>"
@@ -489,7 +492,7 @@ mod tests {
     fn case_418() {
         let text = r#"*foo **bar *baz* bim** bop*"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             "<p><em>foo <strong>bar <em>baz</em> bim</strong> bop</em></p>"
@@ -499,14 +502,14 @@ mod tests {
     fn case_420() {
         let text = r#"** is not an empty emphasis"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p>** is not an empty emphasis</p>")
     }
     #[test]
     fn case_425() {
         let text = r#"__foo __bar__ baz__"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             "<p><strong>foo <strong>bar</strong> baz</strong></p>"
@@ -516,43 +519,43 @@ mod tests {
     fn case_442() {
         let text = r#"**foo*"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p>*<em>foo</em></p>")
     }
     #[test]
     fn case_443() {
         let text = r#"*foo**"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p><em>foo</em>*</p>")
     }
     #[test]
     fn case_444() {
         let text = r#"***foo**"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p>*<strong>foo</strong></p>")
     }
     #[test]
     fn case_445() {
         let text = r#"****foo*"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p>***<em>foo</em></p>")
     }
     #[test]
     fn case_449() {
         let text = r#"foo _\__"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p>foo <em>_</em></p>")
     }
 
     #[test]
     fn gfm_case_491() {
         let text = r#"~~Hi~~ Hello, ~there~ world!"#;
-        let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_gfm()).parse();
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             "<p><del>Hi</del> Hello, <del>there</del> world!</p>"
@@ -563,23 +566,27 @@ mod tests {
         let text = r#"This ~~has a
 
 new paragraph~~."#;
-        let ast = Parser::new(text).parse();
-        println!("{ast:?}");
-        assert_eq!(ast.to_html(), "<p>This ~~has a</p><p>new paragraph~~.</p>")
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_gfm()).parse();
+        // println!("{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            r#"<p>This ~~has a</p>
+<p>new paragraph~~.</p>"#
+        )
     }
     #[test]
     fn gfm_case_493() {
         let text = r#"This will ~~~not~~~ strike."#;
-        let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_gfm()).parse();
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p>This will ~~~not~~~ strike.</p>")
     }
 
     #[test]
     fn ofm_case_1() {
         let text = r#"==Highlighted text=="#;
-        let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p><mark>Highlighted text</mark></p>")
     }
 }

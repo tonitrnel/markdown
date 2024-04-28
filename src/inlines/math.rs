@@ -46,13 +46,13 @@ pub(super) fn process(
     let text = line.slice(0, end);
     let end_location = line[end - 1].end_location();
     let node = if is_block {
-        parser.append_block_to(
+        parser.append_to(
             *id,
             MarkdownNode::Math(math::Math::Block(math::BlockMath {})),
             (start_location, end_location),
         )
     } else {
-        parser.append_block_to(
+        parser.append_to(
             *id,
             MarkdownNode::Math(math::Math::Inline(math::InlineMath {})),
             (start_location, end_location),

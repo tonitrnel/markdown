@@ -130,27 +130,31 @@ impl table::Table {
         let mut range = Range { start: 0, end: 0 };
         let len = line.len();
         for (idx, item) in line.iter().enumerate() {
-            if idx == 0 && item.token == Token::Pipe {
-                range.start = 1;
-                continue;
-            }
-            if idx + 1 == len {
-                if item.token == Token::Pipe {
-                    range.end = idx;
-                } else {
-                    range.end = len;
+            match item.token {
+                Token::Pipe if idx == 0 => {
+                    range.start = 1;
+                    continue;
                 }
-                ranges.push(range);
-                break;
-            }
-            if item.token == Token::Pipe {
-                range.end = idx;
-                ranges.push(range.clone());
-                range.start = idx + 1;
-                range.end = range.start;
-                continue;
+                Token::Pipe => {
+                    range.end = idx;
+                    ranges.push(range.clone());
+                    range.start = idx + 1;
+                    range.end = range.start;
+                    continue;
+                }
+                _ if idx + 1 == len => {
+                    if item.token == Token::Pipe {
+                        range.end = idx;
+                    } else {
+                        range.end = len;
+                    }
+                    ranges.push(range);
+                    break;
+                }
+                _ => continue,
             }
         }
+        // 该列是否有 Pipe 在开始和结束处
         let optional = {
             if !ranges.is_empty() {
                 !ranges
@@ -183,6 +187,37 @@ impl table::Table {
             None
         }
     }
+    pub(crate) fn reprocess(ProcessCtx { line, parser, id }: ProcessCtx) -> bool {
+        // 找到最近的 TBody 没有则创建
+        let table_id = {
+            if parser.tree[id].body != MarkdownNode::TableBody {
+                parser.append_block(MarkdownNode::TableBody, line.start_location());
+                id
+            } else {
+                parser.tree.get_parent(id)
+            }
+        };
+        let column = if let MarkdownNode::Table(table) = &parser.tree[table_id].body {
+            table.column
+        } else {
+            return false;
+        };
+        let start_location = line.start_location();
+        let end_location = line.last_token_end_location();
+        let row_id = parser.append_block(MarkdownNode::TableRow, start_location);
+        let col_id = parser.append_block(MarkdownNode::TableDataCol, start_location);
+        let col = line.slice(0, line.len());
+        parser.finalize(col_id, end_location);
+        parser.inlines.insert(col_id, vec![col]);
+        for _ in 1..column {
+            let col_id = parser.append_block(MarkdownNode::TableDataCol, end_location);
+            parser.finalize(col_id, end_location);
+        }
+        parser.finalize(row_id, end_location);
+        line.skip_to_end();
+        // println!("再次处理 Table 完成")
+        true
+    }
 }
 impl BlockStrategy for table::Table {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
@@ -208,12 +243,14 @@ impl BlockStrategy for table::Table {
             None => return BlockMatching::Unmatched,
         };
         line.resume(snapshot);
+        let col_len = col_defs.len();
         let table = MarkdownNode::Table(table::Table {
-            column: col_defs.len(),
+            column: col_len,
+            alignments: col_defs.into_iter().map(|it| it.1).collect(),
         });
         let header_cols =
             match Self::parse_columns(&parser.inlines.get(&parser.curr_proc_node).unwrap()[0]) {
-                Some(it) if it.1.len() == col_defs.len() => {
+                Some(it) if it.1.len() == col_len => {
                     parser.inlines.remove(&parser.curr_proc_node);
                     it
                 }
@@ -222,15 +259,14 @@ impl BlockStrategy for table::Table {
         parser.replace_block(table, line.last_token_end_location());
         // 写入表头
         let idx = parser.append_block(MarkdownNode::TableHead, header_cols.0 .0);
+        let row_idx = parser.append_block(MarkdownNode::TableRow, header_cols.0 .0);
         // 写入表头列
-        for (idx, column) in header_cols.1.into_iter().enumerate() {
-            let idx = parser.append_block(
-                MarkdownNode::TableHeadCol(col_defs[idx].1.clone()),
-                column.start_location(),
-            );
+        for column in header_cols.1.into_iter() {
+            let idx = parser.append_block(MarkdownNode::TableHeadCol, column.start_location());
             parser.finalize(idx, column.last_token_end_location());
             parser.inlines.insert(idx, vec![column]);
         }
+        parser.finalize(row_idx, header_cols.0 .1);
         parser.finalize(idx, header_cols.0 .1);
         // 全部消耗
         line.skip_to_end();
@@ -240,20 +276,23 @@ impl BlockStrategy for table::Table {
     }
 
     fn process(ProcessCtx { line, parser, id }: ProcessCtx) -> BlockProcessing {
-        let id = if let MarkdownNode::Table(_) = &parser.tree[id].body {
-            parser.append_block(MarkdownNode::TableBody, line.start_location())
-        } else {
-            id
+        // 找到最近的 TBody 没有则创建
+        {
+            let maybe_body_idx = parser.tree.get_last_child(id).unwrap();
+            if let MarkdownNode::TableBody = &parser.tree[maybe_body_idx].body {
+                maybe_body_idx
+            } else {
+                parser.append_block(MarkdownNode::TableBody, line.start_location())
+            }
         };
-        if MarkdownNode::TableBody != parser.tree[id].body {
+        let column = if let MarkdownNode::Table(table) = &parser.tree[id].body {
+            table.column
+        } else {
             return BlockProcessing::Unprocessed;
         };
-        let column =
-            if let MarkdownNode::Table(table) = &parser.tree[parser.tree.get_parent(id)].body {
-                table.column
-            } else {
-                return BlockProcessing::Unprocessed;
-            };
+        if line.is_blank() {
+            return BlockProcessing::Unprocessed;
+        }
         let row = match Self::parse_columns(line) {
             Some(row) => row,
             None => return BlockProcessing::Unprocessed,
@@ -268,7 +307,7 @@ impl BlockStrategy for table::Table {
         }
         // 为表格填充空白列
         let end_location = row.0 .1;
-        for _ in 0..column.saturating_sub(inserted) {
+        for _ in inserted..column {
             let idx = parser.append_block(MarkdownNode::TableDataCol, end_location);
             parser.finalize(idx, end_location);
         }
@@ -284,19 +323,6 @@ mod tests {
     use crate::line::Line;
     use crate::parser::Parser;
     use crate::tokenizer::{Location, Tokenizer};
-
-    #[test]
-    fn case_temp() {
-        let text = r#"65
-        
-| Left-aligned text | Center-aligned text | Right-aligned text |
-| :---------------- | :-----------------: | -----------------: |
-| Content           |       Content       |           RContent |"#;
-        let ast = Parser::new(text).parse();
-        println!("{ast:?}");
-        // let text = r#"-- | --"#;
-        // let ast = Parser::new(text).
-    }
 
     #[test]
     fn test_scan_columns() {
@@ -350,24 +376,242 @@ mod tests {
     #[test]
     fn test_parse_columns() {
         let text = r#"| Left-aligned text | Center-aligned text | Right-aligned text |"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let row = Table::parse_columns(&mut line);
+        let line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
+        let row = Table::parse_columns(&line);
         assert!(row.is_some());
         let row = row.unwrap();
         assert_eq!(row.0 .1, Location::new(1, 65));
         let cols = row.1.iter().map(|it| it.to_string()).collect::<Vec<_>>();
-        assert_eq!(cols[0], " Left-aligned text ");
-        assert_eq!(cols[1], " Center-aligned text ");
-        assert_eq!(cols[2], " Right-aligned text ");
+        assert_eq!(cols[0], "Left-aligned text");
+        assert_eq!(cols[1], "Center-aligned text");
+        assert_eq!(cols[2], "Right-aligned text");
 
         let text = r#"| Left-aligned text |"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let row = Table::parse_columns(&mut line);
+        let line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
+        let row = Table::parse_columns(&line);
         assert!(row.is_some());
 
         let text = r#"Left-aligned text |"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let row = Table::parse_columns(&mut line);
+        let line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
+        let row = Table::parse_columns(&line);
         assert!(row.is_none());
+    }
+    #[test]
+    fn gfm_case_198() {
+        let ast = Parser::new(
+            r#"| foo | bar |
+| --- | --- |
+| baz | bim |"#,
+        )
+        .parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            r#"<table>
+<thead>
+<tr>
+<th>foo</th>
+<th>bar</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>baz</td>
+<td>bim</td>
+</tr>
+</tbody>
+</table>"#
+        )
+    }
+
+    #[test]
+    fn gfm_case_199() {
+        let ast = Parser::new(
+            r#"| abc | defghi |
+:-: | -----------:
+bar | baz"#,
+        )
+        .parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            r#"<table>
+<thead>
+<tr>
+<th align="center">abc</th>
+<th align="right">defghi</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="center">bar</td>
+<td align="right">baz</td>
+</tr>
+</tbody>
+</table>"#
+        );
+    }
+    #[test]
+    fn gfm_case_200() {
+        let ast = Parser::new(
+            r#"| f\|oo  |
+| ------ |
+| b `\|` az |
+| b **\|** im |"#,
+        )
+        .parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            r#"<table>
+<thead>
+<tr>
+<th>f|oo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>b <code>|</code> az</td>
+</tr>
+<tr>
+<td>b <strong>|</strong> im</td>
+</tr>
+</tbody>
+</table>"#
+        );
+    }
+    #[test]
+    fn gfm_case_201() {
+        let ast = Parser::new(
+            r#"| abc | def |
+| --- | --- |
+| bar | baz |
+> bar"#,
+        )
+        .parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            r#"<table>
+<thead>
+<tr>
+<th>abc</th>
+<th>def</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bar</td>
+<td>baz</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>bar</p>
+</blockquote>"#
+        );
+    }
+    #[test]
+    fn gfm_case_202() {
+        let ast = Parser::new(
+            r#"| abc | def |
+| --- | --- |
+| bar | baz |
+bar
+
+bar"#,
+        )
+        .parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            r#"<table>
+<thead>
+<tr>
+<th>abc</th>
+<th>def</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bar</td>
+<td>baz</td>
+</tr>
+<tr>
+<td>bar</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>bar</p>"#
+        );
+    }
+    #[test]
+    fn gfm_case_203() {
+        let ast = Parser::new(
+            r#"| abc | def |
+| --- |
+| bar |"#,
+        )
+        .parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            r#"<p>| abc | def |
+| --- |
+| bar |</p>"#
+        );
+    }
+    #[test]
+    fn gfm_case_204() {
+        let ast = Parser::new(
+            r#"| abc | def |
+| --- | --- |
+| bar |
+| bar | baz | boo |"#,
+        )
+        .parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            r#"<table>
+<thead>
+<tr>
+<th>abc</th>
+<th>def</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bar</td>
+<td></td>
+</tr>
+<tr>
+<td>bar</td>
+<td>baz</td>
+</tr>
+</tbody>
+</table>"#
+        );
+    }
+    #[test]
+    fn gfm_case_205() {
+        let ast = Parser::new(
+            r#"| abc | def |
+| --- | --- |"#,
+        )
+        .parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            r#"<table>
+<thead>
+<tr>
+<th>abc</th>
+<th>def</th>
+</tr>
+</thead>
+</table>"#
+        );
     }
 }

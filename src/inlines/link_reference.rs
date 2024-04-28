@@ -20,16 +20,16 @@ pub(crate) fn process_link_reference(parser: &mut Parser, node_id: usize) {
         Some(_) => Line::extends(parser.inlines.remove(&node_id).unwrap()),
         _ => return,
     };
-    println!(
-        "检测是否存在 reference #{node_id} => {:?}",
-        parser.inlines.keys().collect::<Vec<_>>()
-    );
-    println!("{:?}", line);
+    // println!(
+    //     "检测是否存在 reference #{node_id} => {:?}",
+    //     parser.inlines.keys().collect::<Vec<_>>()
+    // );
+    // println!("{:?}", line)
     loop {
         let snapshot = line.snapshot();
         match scan_link_reference(&mut line) {
             Some((ref_label, url, title)) => {
-                println!("写入 reference {ref_label:?} ({url:?},{title:?})");
+                // println!("写入 reference {ref_label:?} ({url:?},{title:?})");
                 parser.link_refs.entry(ref_label).or_insert((url, title));
                 continue;
             }
@@ -53,7 +53,7 @@ fn scan_link_reference(line: &mut Line) -> Option<(String, String, Option<String
         }
         _ => return None,
     };
-    println!("scan_link_reference label={ref_label:?}");
+    // println!("scan_link_reference label={ref_label:?}")
     if ref_label.is_empty() || !line.consume(Token::Colon) {
         return None;
     }
@@ -65,7 +65,7 @@ fn scan_link_reference(line: &mut Line) -> Option<(String, String, Option<String
         }
         _ => return None,
     };
-    println!("scan_link_reference url={url:?}");
+    // println!("scan_link_reference url={url:?}")
     let before_title_snapshot = line.snapshot();
     let mut title = {
         let count = link::skip_spaces(line);
@@ -81,7 +81,7 @@ fn scan_link_reference(line: &mut Line) -> Option<(String, String, Option<String
             None
         }
     };
-    println!("scan_link_reference title={title:?} line={line:?}");
+    // println!("scan_link_reference title={title:?} line={line:?}")
     let at_line_end = if !line.only_space_to_end() {
         if title.is_none() {
             false
@@ -111,7 +111,7 @@ mod tests {
 [foo]"#,
         );
         let ast = p.parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/url" title="title">foo</a></p>"#
@@ -127,7 +127,7 @@ mod tests {
 [foo]"#,
         );
         let ast = p.parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/url" title="the title">foo</a></p>"#
@@ -141,7 +141,7 @@ mod tests {
 [Foo*bar\]]"#,
         );
         let ast = p.parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="my_(url)" title="title (with parens)">Foo*bar]</a></p>"#
@@ -157,7 +157,7 @@ mod tests {
 [Foo bar]"#,
         );
         let ast = p.parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="my%20url" title="title">Foo bar</a></p>"#
@@ -175,7 +175,7 @@ line2
 [foo]"#,
         );
         let ast = p.parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/url" title="
@@ -195,10 +195,12 @@ with blank line'
 [foo]"#,
         );
         let ast = p.parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
-            r#"<p>[foo]: /url 'title</p><p>with blank line'</p><p>[foo]</p>"#
+            r#"<p>[foo]: /url 'title</p>
+<p>with blank line'</p>
+<p>[foo]</p>"#
         )
     }
     #[test]
@@ -214,7 +216,7 @@ with blank line'
 [baz]"#,
         );
         let ast = p.parse();
-        println!("{ast:?}");
+        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/foo-url" title="foo">foo</a>,
@@ -223,7 +225,7 @@ with blank line'
         )
     }
     #[test]
-    fn case_44(){
+    fn case_44() {
         let p = Parser::new(
             r#"## 包装日期为2013年3月10日
 超过日期请勿使用"#,

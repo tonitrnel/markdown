@@ -3,90 +3,75 @@ use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, Li
 use crate::tokenizer::Token;
 use std::ops::Range;
 
+#[derive(Debug)]
+enum State {
+    Initial,
+    StartHashes(usize),
+    Content,
+    EndHashes(usize),
+    End(usize),
+}
 impl heading::ATXHeading {
-    fn try_match(line: &mut Line) -> Option<(usize, Range<usize>)> {
+    fn try_match(line: &Line) -> Option<(usize, Range<usize>)> {
         if line.is_indented() {
             return None;
         }
-        line.skip_indent();
-        enum State {
-            Start,
-            HashesCounting,
-            Content,
-            EndHashes,
-            End,
-        }
-        let mut state = State::Start;
-        let mut hash_count = 0;
-        let mut range = Range { start: 0, end: 0 };
-        while let Some(&next) = line.peek() {
-            state = match state {
-                State::Start => {
-                    if next == Token::Crosshatch {
-                        line.next();
-                        hash_count = 1;
-                        State::HashesCounting
-                    } else {
+        let mut state = State::Initial;
+        let mut hash_count = 1;
+        let mut start = 1;
+        for (i, item) in line.iter().enumerate() {
+            // println!("heading: {state:?} {:?}", item.token);
+            match (&state, &item.token) {
+                (State::Initial, Token::Crosshatch) => state = State::StartHashes(i),
+                (State::StartHashes(_), Token::Crosshatch) => (),
+                (State::StartHashes(s), t) if t.is_space_or_tab() => {
+                    let count = i - *s;
+                    if count > 6 {
                         return None;
-                    }
+                    };
+                    hash_count = count;
+                    start = i + 1;
+                    state = State::End(i + 1);
                 }
-                State::HashesCounting => match &next {
-                    Token::Crosshatch => {
-                        range.start = line.start_offset;
-                        hash_count += 1;
-                        line.next();
-                        State::HashesCounting
-                    }
-                    _ if next.is_space_or_tab() => {
-                        if hash_count > 6 {
-                            return None;
-                        };
-                        line.advance_next_nonspace();
-                        range.start = line.start_offset;
-                        State::Content
-                    }
-                    _ => return None,
-                },
-                State::Content => {
-                    if next.is_space_or_tab() {
-                        line.next();
-                        State::End
-                    } else {
-                        line.next();
-                        State::Content
-                    }
+                (State::Content, t) if t.is_space_or_tab() => state = State::End(i),
+                (State::Content, _) => {}
+                (State::End(_), Token::Crosshatch) => {
+                    state = State::EndHashes(i);
                 }
-                State::EndHashes => {
-                    range.end = line.start_offset;
-                    if next == Token::Crosshatch {
-                        line.skip_consecutive_tokens(&Token::Crosshatch);
-                        State::End
-                    } else if next.is_space_or_tab() {
-                        State::End
-                    } else {
-                        State::Content
-                    }
-                }
-                // ## heading 2 ## # ## ### #
-                State::End => {
-                    range.end = line.start_offset;
-                    if next.is_space_or_tab() {
-                        line.advance_next_nonspace();
-                        State::End
-                    } else if next == Token::Crosshatch {
-                        State::EndHashes
-                    } else {
-                        State::Content
-                    }
-                }
-            };
+                (State::End(_), t) if t.is_space_or_tab() => {}
+                (State::End(_), _) => state = State::Content,
+                (State::EndHashes(_), Token::Crosshatch) => {}
+                (State::EndHashes(s), t) if t.is_space_or_tab() => state = State::End(*s),
+                (State::EndHashes(_), _) => state = State::Content,
+                _ => return None,
+            }
         }
-        if hash_count == 0 {
-            return None;
+        let mut end = match state {
+            State::EndHashes(s) | State::End(s) => s,
+            _ => line.len(),
+        };
+        // trim start
+        for i in start..end {
+            if line[i].is_space_or_tab() {
+                continue;
+            }
+            start = i;
+            break;
         }
-        if !matches!(state, State::EndHashes | State::End) {
-            range.end = line.start_offset;
+        // trim end
+        for i in (start..end).rev() {
+            if line[i].is_space_or_tab() {
+                continue;
+            }
+            end = i + 1;
+            break;
         }
+        let range = Range { start, end };
+        // println!(
+        //     "hash_count = {hash_count} {:?}  => {:?}",
+        //     line,
+        //     line.slice(start, end)
+        // );
         Some((hash_count, range))
     }
 }
@@ -104,6 +89,7 @@ impl BlockStrategy for heading::ATXHeading {
     /// ```
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         let location = line[0].location;
+        line.skip_indent();
         if let Some((hash_count, range)) = Self::try_match(line) {
             parser.close_unmatched_blocks();
             let idx = parser.append_block(
@@ -112,7 +98,8 @@ impl BlockStrategy for heading::ATXHeading {
                 })),
                 location,
             );
-            parser.append_inline(idx, line.slice_raw(range.start, range.end));
+            parser.append_inline(idx, line.slice(range.start, range.end));
+            line.skip_to_end();
             BlockMatching::MatchedLeaf
         } else {
             BlockMatching::Unmatched
@@ -218,7 +205,7 @@ baz*
         .trim();
         let ast = Parser::new(text).parse();
         assert_eq!(ast[0].body, MarkdownNode::Document);
-        println!("{ast:?}");
+        // println!("{ast:?}")
         let expected_locations = [
             (Location::new(1, 1), Location::new(2, 10)),
             (Location::new(3, 1), Location::new(4, 10)),
@@ -247,5 +234,233 @@ baz*
         let last = expected_locations.last().unwrap();
         assert_eq!(ast[3].start, last.0);
         assert_eq!(ast[3].end, last.1);
+    }
+
+    // #[test]
+    // fn test_running() {
+    //     let input = "# foo\t#\t";
+    //     let output = r#"g"#;
+    //     let ast = Parser::new(input).parse();
+    //     println!("AST:\n{ast:?}");
+    //     assert_eq!(ast.to_html(), output);
+    // }
+    #[test]
+    fn case_62() {
+        let input = r#"# foo
+## foo
+### foo
+#### foo
+##### foo
+###### foo"#;
+        let output = r#"<h1>foo</h1>
+<h2>foo</h2>
+<h3>foo</h3>
+<h4>foo</h4>
+<h5>foo</h5>
+<h6>foo</h6>"#;
+        let ast = Parser::new(input).parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_63() {
+        let input = r#"####### foo"#;
+        let output = r#"<p>####### foo</p>"#;
+        let ast = Parser::new(input).parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_64() {
+        let input = r#"#5 bolt
+
+#hashtag"#;
+        let output = r#"<p>#5 bolt</p>
+<p>#hashtag</p>"#;
+        let ast = Parser::new(input).parse();
+        // println!("AST:\n{ast:?}")
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_65() {
+        let input = r#"\## foo"#;
+        let output = r#"<p>## foo</p>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_66() {
+        let input = r#"# foo *bar* \*baz\*"#;
+        let output = r#"<h1>foo <em>bar</em> *baz*</h1>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_67() {
+        let input = r#"#                  foo"#;
+        let output = r#"<h1>foo</h1>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_68() {
+        let input = r#" ### foo
+  ## foo
+   # foo"#;
+        let output = r#"<h3>foo</h3>
+<h2>foo</h2>
+<h1>foo</h1>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_69() {
+        let input = r#"    # foo"#;
+        let output = r#"<pre><code># foo
+</code></pre>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_70() {
+        let input = r#"foo
+    # bar"#;
+        let output = r#"<p>foo
+# bar</p>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_71() {
+        let input = r#"## foo ##
+  ###   bar    ###"#;
+        let output = r#"<h2>foo</h2>
+<h3>bar</h3>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_72() {
+        let input = r#"# foo ##################################
+##### foo ##"#;
+        let output = r#"<h1>foo</h1>
+<h5>foo</h5>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_73() {
+        let input = r#"### foo ###"#;
+        let output = r#"<h3>foo</h3>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_74() {
+        let input = r#"### foo ### b"#;
+        let output = r#"<h3>foo ### b</h3>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_75() {
+        let input = r#"# foo#"#;
+        let output = r#"<h1>foo#</h1>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_76() {
+        let input = r#"### foo \###
+## foo #\##
+# foo \#"#;
+        let output = r#"<h3>foo ###</h3>
+<h2>foo ###</h2>
+<h1>foo #</h1>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_77() {
+        let input = r#"****
+## foo
+****"#;
+        let output = r#"<hr />
+<h2>foo</h2>
+<hr />"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_78() {
+        let input = r#"Foo bar
+# baz
+Bar foo"#;
+        let output = r#"<p>Foo bar</p>
+<h1>baz</h1>
+<p>Bar foo</p>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_79() {
+        let input = r#"## 
+#
+### ###"#;
+        let output = r#"<h2></h2>
+<h1></h1>
+<h3></h3>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_80() {
+        let input = r#"Foo *bar*
+=========
+
+Foo *bar*
+---------"#;
+        let output = r#"<h1>Foo <em>bar</em></h1>
+<h2>Foo <em>bar</em></h2>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_81() {
+        let input = r#"Foo *bar
+baz*
+===="#;
+        let output = r#"<h1>Foo <em>bar
+baz</em></h1>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
+    }
+    #[test]
+    fn case_82() {
+        let input = r#"  Foo *bar
+baz*	
+===="#;
+        let output = r#"<h1>Foo <em>bar
+baz</em></h1>"#;
+        let ast = Parser::new(input).parse();
+        println!("AST:\n{ast:?}");
+        assert_eq!(ast.to_html(), output);
     }
 }

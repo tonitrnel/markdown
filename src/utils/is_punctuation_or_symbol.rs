@@ -341,3 +341,13 @@ pub fn is_punctuation_or_symbol(ch: char) -> bool {
         || (129792..=129938).contains(&uc)
         || (129940..=129994).contains(&uc)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test() {
+        println!("{:?}", is_punctuation_or_symbol('。'));
+    }
+}

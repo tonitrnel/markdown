@@ -42,7 +42,7 @@ pub enum MarkdownNode {
     // 链接
     Link(link::Link),
     // 标签
-    Tag,
+    Tag(String),
     // 表情
     Emoji(String),
     // 块引用
@@ -52,7 +52,7 @@ pub enum MarkdownNode {
     // 表格
     Table(table::Table),
     TableHead,
-    TableHeadCol(table::Alignment),
+    TableHeadCol,
     TableBody,
     TableRow,
     TableDataCol,
@@ -86,9 +86,12 @@ impl MarkdownNode {
             MarkdownNode::Table(..) => {
                 matches!(target, MarkdownNode::TableHead | MarkdownNode::TableBody)
             }
-            MarkdownNode::TableHead => matches!(target, MarkdownNode::TableHeadCol(..)),
+            MarkdownNode::TableHead => matches!(target, MarkdownNode::TableRow),
             MarkdownNode::TableBody => matches!(target, MarkdownNode::TableRow),
-            MarkdownNode::TableRow => matches!(target, MarkdownNode::TableDataCol),
+            MarkdownNode::TableRow => matches!(
+                target,
+                MarkdownNode::TableHeadCol | MarkdownNode::TableDataCol
+            ),
             MarkdownNode::FootnoteList => matches!(target, MarkdownNode::Footnote(..)),
             _ => false,
         }
@@ -100,15 +103,18 @@ impl MarkdownNode {
             MarkdownNode::Code(..)
                 | MarkdownNode::Html(..)
                 | MarkdownNode::Paragraph
-                | MarkdownNode::TableHeadCol(..)
+                | MarkdownNode::TableHeadCol
                 | MarkdownNode::TableDataCol
                 | MarkdownNode::Heading(..)
         )
     }
-    pub fn is_inline_node(&self) -> bool {
-        !self.is_block_node()
+    pub fn support_reprocess(&self) -> bool {
+        matches!(self, MarkdownNode::Table(..) | MarkdownNode::TableBody)
     }
-    pub fn is_block_node(&self) -> bool {
+    pub fn is_inline_level(&self) -> bool {
+        !self.is_block_level()
+    }
+    pub fn is_block_level(&self) -> bool {
         matches!(
             self,
             MarkdownNode::Document
@@ -121,7 +127,7 @@ impl MarkdownNode {
                 | MarkdownNode::Code(code::Code::Fenced(..) | code::Code::Indented(..))
                 | MarkdownNode::Table(..)
                 | MarkdownNode::TableHead
-                | MarkdownNode::TableHeadCol(..)
+                | MarkdownNode::TableHeadCol
                 | MarkdownNode::TableBody
                 | MarkdownNode::TableRow
                 | MarkdownNode::TableDataCol
@@ -132,8 +138,19 @@ impl MarkdownNode {
                 | MarkdownNode::Html(html::Html::Block(..))
         )
     }
+    pub fn xml_escape(&self) -> bool {
+        match self {
+            MarkdownNode::Html(html) => html.is_disallowed_raw_html(),
+            _ => true,
+        }
+    }
+    pub fn backslash_escape(&self) -> bool {
+        !matches!(
+            self,
+            MarkdownNode::Code(..) | MarkdownNode::Link(..) | MarkdownNode::Html(..)
+        )
+    }
 }
-
 impl From<heading::HeadingLevel> for MarkdownNode {
     fn from(value: heading::HeadingLevel) -> Self {
         MarkdownNode::Heading(heading::Heading::ATX(heading::ATXHeading { level: value }))

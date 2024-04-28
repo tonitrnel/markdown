@@ -29,7 +29,7 @@ pub(crate) fn process_footnote_list(parser: &mut Parser, node_refcounts: Vec<(us
             if let MarkdownNode::Paragraph = parser.tree[idx].body {
                 break;
             }
-            if parser.tree[idx].body.is_inline_node() {
+            if parser.tree[idx].body.is_inline_level() {
                 last_child = Some(parser.tree.get_parent(idx));
                 break;
             }
@@ -37,7 +37,7 @@ pub(crate) fn process_footnote_list(parser: &mut Parser, node_refcounts: Vec<(us
         }
         let last_child = last_child.unwrap_or(idx);
         for i in 0..ref_count {
-            parser.append_block_to(
+            parser.append_to(
                 last_child,
                 MarkdownNode::Link(link::Link::FootnoteBackref(link::FootnoteBackref {
                     footnote_label: ref_label.clone(),

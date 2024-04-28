@@ -9,10 +9,12 @@ mod delimiter;
 mod emoji;
 mod entity;
 mod footnote;
+mod html;
 mod link;
 mod link_reference;
 mod math;
 mod newline;
+mod tag;
 mod text;
 
 pub(crate) use footnote::process_footnote_list;
@@ -27,7 +29,7 @@ struct ProcessCtx<'a, 'input> {
 }
 
 pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: Line<'input>) {
-    println!("    ({})\"{:?}\"", line.len(), line);
+    // println!("    ({})\"{:?}\"", line.len(), line);
     let mut ctx = ProcessCtx {
         id,
         parser,
@@ -44,19 +46,27 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
             // Code
             Token::Backtick => code::process(&mut ctx),
             // Emphasis, Strong emphasis
-            Token::Asterisk | Token::Underscore => delimiter::before(&mut ctx, false, false, false),
+            Token::Asterisk | Token::Underscore => delimiter::before(&mut ctx, false, false),
             // Strikethrough(GFM)
-            Token::Tilde => delimiter::before(&mut ctx, false, true, false),
+            Token::Tilde if ctx.parser.options.github_flavored => {
+                delimiter::before(&mut ctx, true, false)
+            }
             // Highlight(OFM)
-            Token::Eq => delimiter::before(&mut ctx, false, false, true),
+            Token::Eq if ctx.parser.options.obsidian_flavored => {
+                delimiter::before(&mut ctx, false, true)
+            }
             // Link
             Token::LBracket => bracket::before(&mut ctx, false),
             // Wikilink(OFM)
-            Token::DoubleLBracket => link::process_wikilink(&mut ctx),
+            Token::DoubleLBracket if ctx.parser.options.obsidian_flavored => {
+                link::process_wikilink(&mut ctx)
+            }
             // Image, Embed(OFM)
             Token::ExclamationMark => match ctx.line.get(1) {
                 Some(Token::LBracket) => bracket::before(&mut ctx, true),
-                Some(Token::DoubleLBracket) => link::process_embed(&mut ctx),
+                Some(Token::DoubleLBracket) if ctx.parser.options.obsidian_flavored => {
+                    link::process_embed(&mut ctx)
+                }
                 _ => false,
             },
             // Close
@@ -64,20 +74,33 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
             // Entity
             Token::Ampersand => entity::process(&mut ctx),
             // // AutoLinks, Raw HTML
-            Token::Lt => link::process_autolink(&mut ctx),
-            // // Math
-            Token::Dollar => {
+            Token::Lt => 'multi: {
+                if link::process_autolink(&mut ctx) {
+                    break 'multi true;
+                }
+                ctx.line.resume(&snapshot);
+                if html::process(&mut ctx) {
+                    break 'multi true;
+                }
+                false
+            }
+            // Math
+            Token::Dollar if !ctx.parser.options.default_flavored => {
                 let is_block = ctx.line.validate(1, Token::Dollar);
                 math::process(&mut ctx, is_block)
             }
             // Block id(OFM)
-            Token::Caret => link::process_block_id(&mut ctx),
+            Token::Caret if ctx.parser.options.obsidian_flavored => {
+                link::process_block_id(&mut ctx)
+            }
             // Emoji
-            Token::Colon => emoji::process(&mut ctx),
+            Token::Colon if !ctx.parser.options.default_flavored => emoji::process(&mut ctx),
+            // Tag
+            Token::Crosshatch if ctx.parser.options.obsidian_flavored => tag::process(&mut ctx),
             _ => false,
         };
         if !handled {
-            ctx.line.resume(snapshot);
+            ctx.line.resume(&snapshot);
             if let Some(it) = ctx.line.next_with_location() {
                 ctx.parser.append_text_to(
                     ctx.id,
@@ -88,5 +111,5 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
         }
     }
     delimiter::process(&mut ctx, 0);
-    text::process(&mut ctx, false);
+    text::process(&mut ctx);
 }

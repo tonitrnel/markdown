@@ -43,16 +43,18 @@
 - [x] Math(OFM)
 - [x] Autolinks
 - [ ] Autolinks(GFM)
-- [ ] RawHTML
+- [x] RawHTML
 - [x] Comments(OFM)
-- [ ] DisallowedRawHTML(GFM)
+- [x] DisallowedRawHTML(GFM)
 - [x] Hard line breaks
 - [x] Soft line breaks
 - [x] Emoji
-- [ ] Tag
+- [x] Tag
 - [x] Textual content
 
 **Other**
 
 - [ ] Smart Punctuation
 - [ ] 中文语境优化 [chinese-copywriting-guidelines](https://github.com/sparanoid/chinese-copywriting-guidelines)
+- [ ] 在 delimiter 针对 CJK 符号的特殊处理
+- [ ] 颜色文字 `#fff{这是白色的文本}`、`:red[这是红色的文本]`、`:red{这是红色的背景?}`

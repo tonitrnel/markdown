@@ -94,12 +94,4 @@ mod tests {
         assert_eq!(decode_text(&bytes[..]), "例子");
         println!("{:?}", bytes)
     }
-
-    #[test]
-    fn wtf() {
-        let n = u32::MAX >> 2;
-
-        println!("{}", n.leading_zeros());
-        println!("{:b}", u32::MAX >> 2);
-    }
 }

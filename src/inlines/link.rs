@@ -27,9 +27,9 @@ pub(crate) fn scan_link_or_image<'input>(
     let mut matched = false;
     // println!(" -> scan_link_block");
     // 尝试解析 inline link
-    'scan_link_block: {
+    'scan_link_url: {
         if !line.consume(Token::LParen) {
-            break 'scan_link_block;
+            break 'scan_link_url;
         }
         skip_spaces(line);
         // println!(" -> scan_link_block::scan_link_url");
@@ -42,7 +42,7 @@ pub(crate) fn scan_link_or_image<'input>(
                     true,
                 ))
             }
-            _ => break 'scan_link_block,
+            _ => break 'scan_link_url,
         };
         // println!(" -> scan_link_block::scan_link_title => url = {url:?}");
         title = {
@@ -62,7 +62,7 @@ pub(crate) fn scan_link_or_image<'input>(
         skip_spaces(line);
         // println!(" -> scan_link_block::end_matches => title = {title:?}");
         if !line.consume(Token::RParen) {
-            break 'scan_link_block;
+            break 'scan_link_url;
         };
         matched = true;
     };
@@ -153,6 +153,7 @@ pub(super) fn scan_link_url<'input>(line: &Line<'input>) -> Option<(usize, Line<
                 Token::Whitespace(..) => {
                     break;
                 }
+                t if t.is_control() => break,
                 _ => i += 1,
             }
         }
@@ -371,7 +372,7 @@ pub(super) fn process_wikilink(
     let end = pr.1.max(rrs.1.last().map(|it| it.1).unwrap_or(0)).max(tr.1);
     let end_location = line[end].end_location();
     line.skip(end + 1);
-    parser.append_block_to(
+    parser.append_to(
         *id,
         MarkdownNode::Link(
             link::Wikilink {
@@ -400,7 +401,7 @@ fn extract_ref(line: &Line, range: &(bool, Vec<(usize, usize)>)) -> Option<Refer
                     .iter()
                     .map(|(start, end)| {
                         if start == end {
-                            "".to_string()
+                            String::new()
                         } else {
                             line.slice(*start, *end).to_string()
                         }
@@ -533,7 +534,7 @@ pub(super) fn process_embed(
             ars.iter()
                 .map(|(start, end)| {
                     if start == end {
-                        "".to_string()
+                        String::new()
                     } else {
                         line.slice(*start, *end).to_string()
                     }
@@ -542,7 +543,7 @@ pub(super) fn process_embed(
                     let mut parts = it.split('=');
                     match (parts.next(), parts.next()) {
                         (Some(a), Some(b)) => Some((a.to_string(), b.to_string())),
-                        (Some(a), None) => Some((a.to_string(), "".to_string())),
+                        (Some(a), None) => Some((a.to_string(), String::new())),
                         _ => None,
                     }
                 })
@@ -570,7 +571,7 @@ pub(super) fn process_embed(
             .max(sr.1);
     let end_location = line[end].end_location();
     line.skip(end + 1);
-    parser.append_block_to(
+    parser.append_to(
         *id,
         MarkdownNode::Embed(embed::Embed {
             path,
@@ -594,7 +595,7 @@ pub(super) fn process_autolink(
         let link = line.slice(0, end);
         let end_location = line[end].end_location();
         line.skip(end + 1);
-        let node = parser.append_block_to(
+        let node = parser.append_to(
             *id,
             MarkdownNode::Link(
                 link::DefaultLink {
@@ -616,7 +617,7 @@ pub(super) fn process_autolink(
             unescaped_string.push('\\')
         }
         line.skip(end + 1);
-        let node = parser.append_block_to(
+        let node = parser.append_to(
             *id,
             MarkdownNode::Link(
                 link::DefaultLink {
@@ -720,20 +721,20 @@ fn scan_email(line: &Line) -> Option<usize> {
 mod tests {
     use crate::ast::reference::Reference;
     use crate::ast::{embed, link, MarkdownNode};
-    use crate::parser::Parser;
+    use crate::parser::{Parser, ParserOptions};
 
     #[test]
     fn ofm_case_block_id() {
         let text = r#""You do not rise to the level of your goals. You fall to the level of your systems." by James Clear ^quote-of-the-day"#;
-        let ast = Parser::new(text).parse();
-        println!("{ast:?}");
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        // println!("{ast:?}")
         assert_eq!(ast[1].id, Some("quote-of-the-day".to_string()))
     }
 
     #[test]
     fn ofm_case_wikilink_1() {
         let text = r#"[[Three laws of motion]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(
@@ -749,7 +750,7 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_2() {
         let text = r#"[[Three laws of motion#Second law]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(
@@ -765,7 +766,7 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_3() {
         let text = r#"[[My note#Heading 1#Heading 2]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(
@@ -784,7 +785,7 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_4() {
         let text = r#"[[2023-01-01#^quote-of-the-day]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(
@@ -800,7 +801,7 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_5() {
         let text = r#"[[Internal links|custom display text]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(
@@ -817,7 +818,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_1() {
         let text = r#"![[Internal links]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
@@ -831,7 +832,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_2() {
         let text = r#"![[Internal links#^b15695]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
@@ -845,7 +846,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_3() {
         let text = r#"![[Engelbart.jpg|100x145]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
@@ -859,7 +860,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_4() {
         let text = r#"![[Engelbart.jpg|100]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
@@ -873,7 +874,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_5() {
         let text = r#"![[Document.pdf#page=3]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
@@ -887,7 +888,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_6() {
         let text = r#"![[Document.pdf#page=3&theme=dark]]"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {

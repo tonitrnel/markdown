@@ -2,7 +2,11 @@ use crate::ast::MarkdownNode;
 use crate::inlines::ProcessCtx;
 use crate::tokenizer::{Token, Whitespace};
 
-pub(super) fn process(ProcessCtx { line, parser, id, .. }: &mut ProcessCtx) -> bool {
+pub(super) fn process(
+    ProcessCtx {
+        line, parser, id, ..
+    }: &mut ProcessCtx,
+) -> bool {
     if let Some((child_idx, MarkdownNode::Text(text))) = parser
         .tree
         .get_last_child(*id)
@@ -18,12 +22,12 @@ pub(super) fn process(ProcessCtx { line, parser, id, .. }: &mut ProcessCtx) -> b
             let offset = text.len() - trimmed.len();
             *text = trimmed;
             parser.tree[child_idx].end.column -= offset as u64;
-            parser.append_block_to(*id, node, (line.start_location(), line.end_location()));
+            parser.append_to(*id, node, (line.start_location(), line.end_location()));
             line.next();
             return true;
         }
     }
-    parser.append_block_to(
+    parser.append_to(
         *id,
         MarkdownNode::SoftBreak,
         (line.start_location(), line.end_location()),
@@ -32,15 +36,19 @@ pub(super) fn process(ProcessCtx { line, parser, id, .. }: &mut ProcessCtx) -> b
     true
 }
 
-pub(super) fn process_backslash(ProcessCtx { line, parser, id, .. }: &mut ProcessCtx) ->bool{
+pub(super) fn process_backslash(
+    ProcessCtx {
+        line, parser, id, ..
+    }: &mut ProcessCtx,
+) -> bool {
     if line.validate(1, Token::Whitespace(Whitespace::NewLine("\n"))) {
-        parser.append_block_to(
+        parser.append_to(
             *id,
             MarkdownNode::HardBreak,
             (line.start_location(), line[1].end_location()),
         );
         line.skip(2);
-        return true
+        return true;
     }
     false
 }
@@ -54,8 +62,12 @@ mod tests {
         let text = r#"foo  
 baz"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
-        assert_eq!(ast.to_html(), "<p>foo<br />baz</p>")
+        // println!("{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            "<p>foo<br />
+baz</p>"
+        )
     }
 
     #[test]
@@ -63,7 +75,11 @@ baz"#;
         let text = r#"foo\
 baz"#;
         let ast = Parser::new(text).parse();
-        println!("{ast:?}");
-        assert_eq!(ast.to_html(), "<p>foo<br />baz</p>")
+        // println!("{ast:?}")
+        assert_eq!(
+            ast.to_html(),
+            "<p>foo<br />
+baz</p>"
+        )
     }
 }

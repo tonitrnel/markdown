@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
 
@@ -39,6 +40,8 @@ pub struct Tree<T> {
     forks: Vec<usize>,
     /// 存储当前索引，它可能在树主干上，也可能在树分支上或者没有
     cur: Option<usize>,
+    /// 所有 free 节点的索引
+    frees: HashSet<usize>,
 }
 impl<T> Index<usize> for Tree<T> {
     type Output = T;
@@ -61,7 +64,7 @@ impl<T> IndexMut<usize> for Tree<T> {
     }
 }
 
-impl<T: Debug> Tree<T> {
+impl<T> Tree<T> {
     pub fn new() -> Tree<T> {
         Tree::default()
     }
@@ -71,6 +74,7 @@ impl<T: Debug> Tree<T> {
             nodes: Vec::with_capacity(cap),
             forks: vec![],
             cur: None,
+            frees: HashSet::new(),
         }
     }
     #[allow(unused)]
@@ -90,8 +94,9 @@ impl<T: Debug> Tree<T> {
     /// 返回新节点在树中的索引。
     pub fn append(&mut self, node: T) -> usize {
         let next = self.create_node(node);
+        self.frees.remove(&next);
         // 如果当前索引存在则进行顺序追加
-        if let Some(cur) = self.cur.filter(|idx| !self.is_free_node(*idx)) {
+        if let Some(cur) = self.cur.filter(|idx| !self.is_free_node(idx)) {
             let parent = self.get_parent(cur);
             self.nodes[cur].next = Some(next);
             self.nodes[next].prev = Some(cur);
@@ -110,6 +115,7 @@ impl<T: Debug> Tree<T> {
     }
     pub fn append_child(&mut self, parent: usize, node: T) -> usize {
         let index = self.create_node(node);
+        self.frees.remove(&index);
         if let Some(last_child) = self.nodes[parent].last_child {
             self.nodes[last_child].next = Some(index);
             self.nodes[index].prev = Some(last_child);
@@ -181,6 +187,7 @@ impl<T: Debug> Tree<T> {
             next: None,
             prev: None,
         });
+        self.frees.insert(index);
         index
     }
 
@@ -217,8 +224,9 @@ impl<T: Debug> Tree<T> {
     ///
     /// 注：这会将该节点添加至父节点的 `last_child`
     pub fn set_parent(&mut self, index: usize, parent: usize) {
-        assert_eq!(self.nodes[index].parent, 0, "node must be free node");
+        assert!(self.frees.contains(&index), "node must be free node");
         self.nodes[index].parent = parent;
+        self.frees.remove(&index);
         if let Some(last_child) = self.nodes[parent].last_child {
             assert!(
                 self.nodes[last_child].next.is_none(),
@@ -305,6 +313,7 @@ impl<T: Debug> Tree<T> {
         );
         self.unlink(idx);
         let node = std::mem::take(&mut self.nodes[idx]);
+        self.frees.remove(&idx);
         node.item.unwrap()
     }
     /// 断掉节点的前后关系和父级关系，使该节点成为一个 `free` 节点
@@ -330,6 +339,7 @@ impl<T: Debug> Tree<T> {
             (false, false) => (),
         }
         self.nodes[idx].parent = 0;
+        self.frees.insert(idx);
         // 断开前后节点
         if let Some(prev) = self.nodes[idx].prev {
             self.nodes[prev].next = self.nodes[idx].next
@@ -340,23 +350,22 @@ impl<T: Debug> Tree<T> {
         self.nodes[idx].next = None;
         self.nodes[idx].prev = None;
     }
-    pub fn is_free_node(&self, idx: usize) -> bool {
-        let node = &self.nodes[idx];
-        node.parent == 0 && node.prev.is_none() && node.next.is_none()
+    pub fn is_free_node(&self, idx: &usize) -> bool {
+        self.frees.contains(idx)
     }
-    pub fn print_link_info(&self, title: &str, idx: usize) {
-        println!("[{title}]: ({:?})", self.nodes[idx].last_child);
-        let mut item = self.nodes[idx].first_child;
-        while let Some(next) = item {
-            if let Some(item) = self.nodes[next].item.as_ref() {
-                print!("->#{next}{item:?}");
-            } else {
-                print!("->#{next}<Free>");
-            }
-            item = self.nodes[next].next;
-        }
-        println!();
-    }
+    // pub fn print_link_info(&self, title: &str, idx: usize) {
+    //     println!("[{title}]: ({:?})", self.nodes[idx].last_child);
+    //     let mut item = self.nodes[idx].first_child;
+    //     while let Some(next) = item {
+    //         if let Some(item) = self.nodes[next].item.as_ref() {
+    //             print!("->#{next}{item:?}");
+    //         } else {
+    //             print!("->#{next}<Free>");
+    //         }
+    //         item = self.nodes[next].next;
+    //     }
+    //     println!();
+    // }
 }
 
 impl<T> Default for Tree<T> {
@@ -365,6 +374,7 @@ impl<T> Default for Tree<T> {
             nodes: Vec::new(),
             forks: Vec::new(),
             cur: None,
+            frees: HashSet::new(),
         }
     }
 }

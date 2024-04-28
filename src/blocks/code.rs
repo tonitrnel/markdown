@@ -70,7 +70,11 @@ impl BlockStrategy for code::FencedCode {
             parser.close_unmatched_blocks();
             parser.append_block(
                 MarkdownNode::Code(code::Code::Fenced(code::FencedCode {
-                    language: Some(line.slice_raw(range.start, range.end).to_string()),
+                    language: if marker == Token::Backtick {
+                        Some(line.slice_raw(range.start, range.end).trim().to_string())
+                    } else {
+                        None
+                    },
                     length,
                     indent: line.indent,
                     marker,
@@ -107,10 +111,13 @@ impl BlockStrategy for code::FencedCode {
         if let Some(lines) = parser.inlines.remove(&id) {
             let start = lines[0].start_location();
             let end = lines.last().map(|it| it.last_token_end_location()).unwrap();
-            let literal = lines.into_iter().fold(String::new(), |mut str, it| {
-                let _ = writeln!(str, "{}", it);
+            let mut literal = lines.into_iter().fold(String::new(), |mut str, it| {
+                let _ = it.write_string(&mut str, false);
                 str
             });
+            if !literal.ends_with('\n') {
+                literal.write_char('\n').unwrap();
+            }
             parser.append_text(literal, (start, end));
         }
     }
@@ -152,10 +159,13 @@ impl BlockStrategy for code::IndentedCode {
             }
             let start = lines[0].start_location();
             let end = lines.last().map(|it| it.last_token_end_location()).unwrap();
-            let literal = lines.into_iter().fold(String::new(), |mut str, it| {
-                let _ = writeln!(str, "{}", it);
+            let mut literal = lines.into_iter().fold(String::new(), |mut str, it| {
+                let _ = it.write_string(&mut str, false);
                 str
             });
+            if !literal.ends_with('\n') {
+                literal.write_char('\n').unwrap();
+            }
             parser.append_text(literal, (start, end));
         }
     }
@@ -186,7 +196,7 @@ mod tests {
                 marker: Token::Backtick
             }))
         );
-        println!("{ast:?}");
+        // println!("{ast:?}")
         if let MarkdownNode::Text(text) = &ast[2].body {
             assert_eq!(text, "aaa\n aaa\naaa\n");
         } else {

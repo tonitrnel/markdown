@@ -105,7 +105,21 @@ mod tests {
         let ast = parser.parse();
         assert_eq!(
             ast.to_html(),
-            r##"<p>Here's a simple footnote,<a href="#cont-fn-1" id="cont-fn-ref-1">[1]</a> and here's a longer one.<a href="#cont-fn-bignote" id="cont-fn-ref-bignote">[2]</a></p><section><h2>Footnotes</h2><ol><li id="cont-fn-1"><p>This is the first footnote.<a href="#cont-fn-ref-1">↩</a></p></li><li id="cont-fn-bignote"><p>Here's one with multiple paragraphs and code.</p><p>Indent paragraphs to include them in the footnote.</p><p><code>{ my code }</code></p><p>Add as many paragraphs as you like.<a href="#cont-fn-ref-bignote">↩</a></p></li></ol></section>"##
+            r##"<p>Here's a simple footnote,<a href="#cont-fn-1" id="cont-fn-ref-1">[1]</a> and here's a longer one.<a href="#cont-fn-bignote" id="cont-fn-ref-bignote">[2]</a></p>
+<section>
+<h2>Footnotes</h2>
+<ol>
+<li id="cont-fn-1">
+<p>This is the first footnote.<a href="#cont-fn-ref-1">↩</a></p>
+</li>
+<li id="cont-fn-bignote">
+<p>Here's one with multiple paragraphs and code.</p>
+<p>Indent paragraphs to include them in the footnote.</p>
+<p><code>{ my code }</code></p>
+<p>Add as many paragraphs as you like.<a href="#cont-fn-ref-bignote">↩</a></p>
+</li>
+</ol>
+</section>"##
         );
     }
     #[test]

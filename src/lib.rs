@@ -1,10 +1,10 @@
 mod ast;
 mod blocks;
 mod exts;
+mod inlines;
 mod line;
 pub mod parser;
 mod render;
 mod tokenizer;
 mod tree;
 mod utils;
-mod inlines;

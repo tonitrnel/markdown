@@ -8,7 +8,7 @@ mod callout;
 mod code;
 mod footnote;
 mod heading;
-mod html;
+pub(crate) mod html;
 mod list;
 mod table;
 mod thematic_break;
@@ -113,7 +113,6 @@ pub fn after(id: usize, parser: &mut Parser, location: Location) {
         _ => (),
     }
 }
-
 pub fn matcher<'input>(
     container: usize,
     parser: &mut Parser<'input>,
@@ -146,4 +145,21 @@ pub fn matcher<'input>(
         }
     }
     BlockMatching::Unmatched
+}
+
+pub(crate) fn reprocess<'input>(
+    id: usize,
+    parser: &mut Parser<'input>,
+    line: &mut Line<'input>,
+) -> bool {
+    let snapshot = line.snapshot();
+    let ctx = ProcessCtx { id, parser, line };
+    let processed = match &ctx.parser.tree[ctx.id].body {
+        MarkdownNode::Table(..) | MarkdownNode::TableBody => ast::table::Table::reprocess(ctx),
+        _ => false,
+    };
+    if !processed {
+        line.resume(snapshot);
+    }
+    processed
 }

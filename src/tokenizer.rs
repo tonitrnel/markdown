@@ -1,5 +1,5 @@
 use crate::utils;
-use std::fmt::{self, Write};
+use std::fmt;
 use std::iter::Peekable;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
@@ -110,12 +110,16 @@ pub enum Token<'input> {
     /// Escaped
     ///
     /// No included ascii control characters
+    ///
+    /// `impl Display` logic:
+    /// - `is_ascii_punctuation`: Display escaped `char`
+    /// - other: Display `\` + escaped `char`
     Escaped(char),
     /// More ASCII Control 0x00 - 0x20
     ///
     /// No included `Token::Whitespace`
     Control(char),
-    /// More ASCII Punctuation 0x21 - 0x2F, 0x3A - 0x40
+    /// More ASCII Punctuation `0x21 - 0x2F`,` 0x3A - 0x40` and Unicode
     ///
     /// Exclude `Token::Text | Token::Digest | Token::Escaped | Token::Whitespace | Token::Ordered`
     Punctuation(char),
@@ -134,10 +138,10 @@ impl Token<'_> {
     pub fn is_space_or_tab(&self) -> bool {
         matches!(self, Token::Whitespace(Whitespace::Space | Whitespace::Tab))
     }
-    pub fn is_newline(&self) -> bool{
+    pub fn is_newline(&self) -> bool {
         matches!(self, Token::Whitespace(Whitespace::NewLine(..)))
     }
-    pub fn is_comment(&self) -> bool{
+    pub fn is_comment(&self) -> bool {
         matches!(self, Token::Whitespace(Whitespace::Comment(..)))
     }
     /// 是用于 Markdown Block 相关的 Token
@@ -189,7 +193,7 @@ impl Token<'_> {
     //             | '\\'
     //     )
     // }
-    
+
     pub(crate) fn is_anything_space(&self) -> bool {
         let ch = match self {
             Token::Escaped(_) => return false,
@@ -234,16 +238,80 @@ impl Token<'_> {
     }
     pub(crate) fn is_ascii_alphanumeric(&self) -> bool {
         match self {
-            Token::Text(str) => str.chars().all(|it| it.is_ascii_alphabetic()),
+            Token::Text(_) => self.is_ascii_alphabetic(),
             Token::Digit(..) => true,
             _ => false,
         }
     }
+    pub(crate) fn is_ascii_alphabetic(&self) -> bool {
+        match self {
+            Token::Text(str) => str.chars().all(|it| it.is_ascii_alphabetic()),
+            _ => false,
+        }
+    }
     /// 判断 Token 是否存在于给定的字符串
-    /// 
+    ///
     /// 仅对可转换为 `char` 的 `Token` 生效，其他永远返回 `false`
     pub(crate) fn in_str(&self, str: &str) -> bool {
         str.chars().any(|ch| self.eq(&ch))
+    }
+    pub(crate) fn write<W>(&self, writer: &mut W) -> fmt::Result
+    where
+        W: fmt::Write,
+    {
+        match self {
+            Token::Text(str) => write!(writer, "{str}"),
+            Token::Digit(str) => write!(writer, "{str}"),
+            Token::Whitespace(ws) => write!(writer, "{ws}"),
+            Token::Ordered(u, d) => write!(writer, "{u}{d}"),
+            Token::DoubleLBracket => writer.write_str("[["),
+            Token::DoubleRBracket => writer.write_str("]]"),
+            Token::Crosshatch => writer.write_char('#'),
+            Token::Asterisk => writer.write_char('*'),
+            Token::Underscore => writer.write_char('_'),
+            Token::Tilde => writer.write_char('~'),
+            Token::LBracket => writer.write_char('['),
+            Token::RBracket => writer.write_char(']'),
+            Token::LParen => writer.write_char('('),
+            Token::RParen => writer.write_char(')'),
+            Token::LBrace => writer.write_char('{'),
+            Token::RBrace => writer.write_char('}'),
+            Token::Backtick => writer.write_char('`'),
+            Token::Eq => writer.write_char('='),
+            Token::Ampersand => writer.write_char('&'),
+            Token::Caret => writer.write_char('^'),
+            Token::Pipe => writer.write_char('|'),
+            Token::ExclamationMark => writer.write_char('!'),
+            Token::Hyphen => writer.write_char('-'),
+            Token::Plus => writer.write_char('+'),
+            Token::Lt => writer.write_char('<'),
+            Token::Gt => writer.write_char('>'),
+            Token::Dollar => writer.write_char('$'),
+            Token::Colon => writer.write_char(':'),
+            Token::SingleQuote => writer.write_char('\''),
+            Token::DoubleQuote => writer.write_char('"'),
+            Token::Question => writer.write_char('?'),
+            Token::Semicolon => writer.write_char(';'),
+            Token::Period => writer.write_char('.'),
+            Token::Slash => writer.write_char('/'),
+            Token::Backslash => writer.write_char('\\'),
+            Token::Escaped(ch) => {
+                if ch.is_ascii_punctuation() {
+                    writer.write_char(*ch)
+                } else {
+                    writer.write_char('\\')?;
+                    writer.write_char(*ch)
+                }
+            }
+            Token::Control(ch) => {
+                if ch == &'\u{0000}' {
+                    writer.write_char('\u{FFFD}')
+                } else {
+                    writer.write_char(*ch)
+                }
+            }
+            Token::Punctuation(ch) => writer.write_char(*ch),
+        }
     }
 }
 impl<'input> AsRef<Token<'input>> for Token<'input> {
@@ -251,7 +319,7 @@ impl<'input> AsRef<Token<'input>> for Token<'input> {
         self
     }
 }
-impl<'input> TryFrom<&Token<'input>> for char{
+impl<'input> TryFrom<&Token<'input>> for char {
     type Error = ();
     fn try_from(value: &Token<'input>) -> Result<Self, Self::Error> {
         Ok(match value {
@@ -322,52 +390,7 @@ fn get_digit_count(mut num: u64) -> usize {
 
 impl fmt::Display for Token<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Token::Text(str) => write!(f, "{str}"),
-            Token::Digit(str) => write!(f, "{str}"),
-            Token::Whitespace(ws) => write!(f, "{ws}"),
-            Token::Ordered(u, d) => write!(f, "{u}{d}"),
-            Token::DoubleLBracket => f.write_str("[["),
-            Token::DoubleRBracket => f.write_str("]]"),
-            Token::Crosshatch => f.write_char('#'),
-            Token::Asterisk => f.write_char('*'),
-            Token::Underscore => f.write_char('_'),
-            Token::Tilde => f.write_char('~'),
-            Token::LBracket => f.write_char('['),
-            Token::RBracket => f.write_char(']'),
-            Token::LParen => f.write_char('('),
-            Token::RParen => f.write_char(')'),
-            Token::LBrace => f.write_char('{'),
-            Token::RBrace => f.write_char('}'),
-            Token::Backtick => f.write_char('`'),
-            Token::Eq => f.write_char('='),
-            Token::Ampersand => f.write_char('&'),
-            Token::Caret => f.write_char('^'),
-            Token::Pipe => f.write_char('|'),
-            Token::ExclamationMark => f.write_char('!'),
-            Token::Hyphen => f.write_char('-'),
-            Token::Plus => f.write_char('+'),
-            Token::Lt => f.write_char('<'),
-            Token::Gt => f.write_char('>'),
-            Token::Dollar => f.write_char('$'),
-            Token::Colon => f.write_char(':'),
-            Token::SingleQuote => f.write_char('\''),
-            Token::DoubleQuote => f.write_char('"'),
-            Token::Question => f.write_char('?'),
-            Token::Semicolon => f.write_char(';'),
-            Token::Period => f.write_char('.'),
-            Token::Slash => f.write_char('/'),
-            Token::Backslash => f.write_char('\\'),
-            Token::Escaped(ch) => f.write_char(*ch),
-            Token::Control(ch) => {
-                if ch == &'\u{0000}' {
-                    f.write_char('\u{FFFD}')
-                } else {
-                    f.write_char(*ch)
-                }
-            }
-            Token::Punctuation(ch) => f.write_char(*ch),
-        }
+        self.write(f)
     }
 }
 impl<'input> From<Whitespace<'input>> for Token<'input> {
@@ -421,7 +444,7 @@ impl TokenWithLocation<'_> {
     pub fn is_newline(&self) -> bool {
         self.token.is_newline()
     }
-    pub fn is_special_token(&self) -> bool {
+    pub fn is_block_special_token(&self) -> bool {
         self.token.is_block_special_token()
     }
     pub fn len(&self) -> usize {
@@ -631,7 +654,9 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
             }
         }
         ch if ch.is_ascii_control() => consume_and_return(chars, Token::Control(ch)),
-        ch if ch.is_ascii_punctuation() => consume_and_return(chars, Token::Punctuation(ch)),
+        ch if utils::is_punctuation_or_symbol(ch) => {
+            consume_and_return(chars, Token::Punctuation(ch))
+        }
         ch => {
             let ch_len = ch.len_utf8();
             let start = chars.pos;
