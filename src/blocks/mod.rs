@@ -84,6 +84,13 @@ pub fn process<'input>(
         MarkdownNode::Table(..) => ast::table::Table::process(ctx),
         MarkdownNode::Callout(..) => ast::callout::Callout::process(ctx),
         MarkdownNode::Footnote(..) => ast::footnote::Footnote::process(ctx),
+        MarkdownNode::Paragraph => {
+            if ctx.line.is_blank() {
+                BlockProcessing::Unprocessed
+            } else {
+                BlockProcessing::Further
+            }
+        }
         _ => BlockProcessing::Unprocessed,
     }
 }

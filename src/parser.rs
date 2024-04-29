@@ -207,19 +207,19 @@ impl<'input> Parser<'input> {
             }
         }) {
             container = *last_child;
-            // println!("继续处理 {:?}", self.tree[container].body)
+            // println!("继续处理 {:?}", self.tree[container].body);
             match blocks::process(container, self, &mut line) {
                 BlockProcessing::Processed => return,
                 BlockProcessing::Further => continue,
                 BlockProcessing::Unprocessed => {
                     container = self.tree.get_parent(container);
-                    // println!("无法处理，执行返回上一层容器")
+                    // println!("无法处理，执行返回上一层容器");
                     break;
                 }
             }
         }
         self.all_closed = container == self.prev_proc_node;
-        // println!("当前容器 #{container}  {:?}", self.tree[container].body)
+        // println!("当前容器 #{container}  {:?}", self.tree[container].body);
         self.last_matched_node = container;
         let mut matched_leaf = !matches!(self.tree[container].body, MarkdownNode::Paragraph)
             && self.tree[container].body.accepts_lines();
@@ -309,8 +309,8 @@ impl<'input> Parser<'input> {
             // 判断行是否已全部消费或者该行是空白行
             else if !line.is_end() && !line.is_blank() {
                 // println!("当前行未结束，创建一个新的 Paragraph 存储")
-                let idx = self.append_block(MarkdownNode::Paragraph, line.start_location());
-                self.append_inline(idx, line);
+                container = self.append_block(MarkdownNode::Paragraph, line.start_location());
+                self.append_inline(container, line);
             } else {
                 // println!("当前行没有更多内容了")
             }
@@ -425,17 +425,22 @@ impl<'input> Parser<'input> {
     /// 调用指定节点的 finalize 方法处理并关闭该节点，将当前节点指针移动至父节点
     pub(crate) fn finalize(&mut self, node_id: usize, location: Location) {
         let parent = self.tree.get_parent(node_id);
+        assert_ne!(
+            node_id, self.doc,
+            "Unable call finalize to process the Document Node"
+        );
         if !self.tree[node_id].processing {
+            self.curr_proc_node = parent;
             return;
         }
         blocks::after(node_id, self, location);
         let node = &mut self.tree[node_id];
         node.processing = false;
-        if parent == self.doc {
-            // println!("块 #{node_id} {:?} 解析完成", node.body)
-        } else {
-            // println!("退出节点 #{node_id} {:?}", node.body)
-        }
+        // if parent == self.doc {
+        // println!("块 #{node_id} {:?} 解析完成", node.body)
+        // } else {
+        // println!("退出节点 #{node_id} {:?}", node.body)
+        // }
         if Some(node_id) == self.tree.peek_up() {
             // println!("树退出 #{node_id:?}")
             self.tree.pop();
