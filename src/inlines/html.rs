@@ -18,7 +18,7 @@ pub(super) fn process(
     } else {
         return false;
     };
-    // println!("inlines::html::process len = {len} html_type = {html_type:?}")
+    // println!("inlines::html::process len = {len} html_type = {html_type:?}");
     let end_location = line[len - 1].end_location();
     line.skip(len);
     let (start, end, html) = match &html_type {
@@ -33,13 +33,12 @@ pub(super) fn process(
         }
         html::HtmlType::Type1(..) | html::HtmlType::Type6(..) | html::HtmlType::Type7(..) => {
             let mut html = html::Html::Inline(html_type);
-            let (start, end) = if let Some(r) = html.scan_end(line) {
-                r
+            if let Some((start, end)) = html.scan_end(line) {
+                html.set_flag_is_full();
+                (start, end, html)
             } else {
-                return false;
-            };
-            html.set_flag_is_full();
-            (start, end, html)
+                (0, 0, html)
+            }
         }
     };
     // println!("inlines::html::process html = {html:?}")

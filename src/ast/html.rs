@@ -1,7 +1,4 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
-
-pub type ElementProps = HashMap<String, String>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Html {
@@ -123,7 +120,7 @@ pub enum HtmlType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Element {
     pub name: String,
-    pub props: Option<ElementProps>,
+    pub props: Option<Vec<(String, String)>>,
 }
 
 impl Element {
@@ -136,22 +133,20 @@ impl Element {
     ) -> Self {
         Self {
             name: name.as_ref().to_string(),
-            props: if let Some(props) = props.filter(|it| !it.is_empty()) {
-                let mut map = HashMap::new();
-                for prop in props {
-                    map.insert(prop.0, prop.1.to_string());
-                }
-                Some(map)
-            } else {
-                None
-            },
+            props: props
+                .filter(|it| !it.is_empty())
+                .map(|props| props.into_iter().map(|(n, v)| (n, v.to_string())).collect()),
         }
     }
     pub(crate) fn attr_str(&self) -> String {
         let mut str = String::new();
         if let Some(props) = &self.props {
             for (name, value) in props.iter() {
-                str.push_str(&format!(" {name}=\"{value}\""))
+                if value.is_empty() {
+                    str.push_str(&format!(" {name}"))
+                } else {
+                    str.push_str(&format!(" {name}=\"{value}\""))
+                }
             }
         }
         str

@@ -23,27 +23,23 @@ const HTML_TAGS: [&str; 62] = [
 ];
 const TYPE_1_TAGS: &[&str; 4] = &["pre", "style", "script", "textarea"];
 /// example: `<pre`、`<script` ...
-fn is_begin_type_1(line: &Line) -> Option<(usize, bool, html::Element)> {
-    if let Some((element, end, self_close)) = scanners::scan_html_start(line) {
-        if TYPE_1_TAGS
-            .iter()
-            .any(|it| it.eq(&element.name) && element.props.is_none())
-        {
-            return Some((end, self_close, element));
-        }
+fn is_begin_type_1(scan_start_result: &scanners::ScanStartResult) -> bool {
+    if TYPE_1_TAGS
+        .iter()
+        .any(|it| it.eq(&scan_start_result.0.name) && scan_start_result.0.props.is_none())
+    {
+        return true;
     }
-    None
+    false
 }
-fn is_end_type_1(line: &Line) -> Option<(String, usize)> {
-    if let Some((name, end)) = scanners::scan_html_end(line) {
-        for tag in TYPE_1_TAGS {
-            if !tag.eq_ignore_ascii_case(&name) {
-                continue;
-            }
-            return Some((name, end));
+fn is_end_type_1(scan_end_result: &scanners::ScanEndResult) -> bool {
+    for tag in TYPE_1_TAGS {
+        if !tag.eq_ignore_ascii_case(&scan_end_result.0) {
+            continue;
         }
+        return true;
     }
-    None
+    false
 }
 /// example: `<!--`
 fn is_begin_type_2(line: &Line) -> bool {
@@ -83,24 +79,12 @@ fn is_end_type_5(line: &Line) -> bool {
 }
 
 /// example: `<address>`, `<br/>`
-fn is_begin_type_6(line: &Line) -> Option<(usize, bool, html::Element)> {
-    if let Some((element, end, self_close)) =
-        scanners::scan_html_start(line).filter(|it| is_html_tag(it.0.name.as_bytes()))
-    {
-        Some((end, self_close, element))
-    } else {
-        None
-    }
+fn is_begin_type_6(scan_start_result: &scanners::ScanStartResult) -> bool {
+    is_html_tag(scan_start_result.0.name.as_bytes())
 }
 /// example: `</div>`
-fn is_end_type_6(line: &Line) -> Option<(String, usize)> {
-    if let Some((name, end)) =
-        scanners::scan_html_end(line).filter(|it| is_html_tag(it.0.as_bytes()))
-    {
-        Some((name, end))
-    } else {
-        None
-    }
+fn is_end_type_6(scan_end_result: &scanners::ScanEndResult) -> bool {
+    is_html_tag(scan_end_result.0.as_bytes())
 }
 
 fn is_html_tag(tag: &[u8]) -> bool {
@@ -165,50 +149,63 @@ pub(crate) fn scan_html_type(
         // type 3
         Some(Token::Question) => Some((0, 0, html::HtmlType::Type3)),
         // type 1, 6, 7
-        Some(Token::Text(_)) => Some(
-            if let Some((end, self_close, element)) = is_begin_type_1(line) {
-                (
-                    0,
-                    end,
-                    html::HtmlType::Type1(
-                        element,
-                        if self_close {
-                            html::Flag::SelfClose
-                        } else {
-                            html::Flag::Begin
-                        },
-                    ),
-                )
-            } else if let Some((end, self_close, element)) = is_begin_type_6(line) {
-                (
-                    0,
-                    end,
-                    html::HtmlType::Type6(
-                        element,
-                        if self_close {
-                            html::Flag::SelfClose
-                        } else {
-                            html::Flag::Begin
-                        },
-                    ),
-                )
-            } else if let Some((element, end, self_close)) = scanners::scan_html_start(line) {
-                (
-                    0,
-                    end,
-                    html::HtmlType::Type7(
-                        element,
-                        if self_close {
-                            html::Flag::SelfClose
-                        } else {
-                            html::Flag::Begin
-                        },
-                    ),
-                )
-            } else {
-                return None;
-            },
-        ),
+        Some(Token::Text(_)) => {
+            let scan_start_result = scanners::scan_html_start(line);
+            Some(
+                if scan_start_result
+                    .as_ref()
+                    .filter(|it| is_begin_type_1(it))
+                    .is_some()
+                {
+                    let (element, end, self_close) = scan_start_result.unwrap();
+                    (
+                        0,
+                        end,
+                        html::HtmlType::Type1(
+                            element,
+                            if self_close {
+                                html::Flag::SelfClose
+                            } else {
+                                html::Flag::Begin
+                            },
+                        ),
+                    )
+                } else if scan_start_result
+                    .as_ref()
+                    .filter(|it| is_begin_type_6(it))
+                    .is_some()
+                {
+                    let (element, end, self_close) = scan_start_result.unwrap();
+                    (
+                        0,
+                        end,
+                        html::HtmlType::Type6(
+                            element,
+                            if self_close {
+                                html::Flag::SelfClose
+                            } else {
+                                html::Flag::Begin
+                            },
+                        ),
+                    )
+                } else if let Some((element, end, self_close)) = scan_start_result {
+                    (
+                        0,
+                        end,
+                        html::HtmlType::Type7(
+                            element,
+                            if self_close {
+                                html::Flag::SelfClose
+                            } else {
+                                html::Flag::Begin
+                            },
+                        ),
+                    )
+                } else {
+                    return None;
+                },
+            )
+        }
         // type 6 end, type 7 end
         Some(Token::Slash) => {
             // 如果是 Block 就直接扫描当前行最后一个
@@ -226,13 +223,19 @@ pub(crate) fn scan_html_type(
             if last > 0 {
                 line.skip(last);
             }
-            let r = if let Some((name, end)) = is_end_type_6(line) {
+            let scan_end_result = scanners::scan_html_end(line);
+            let r = if scan_end_result
+                .as_ref()
+                .filter(|it| is_end_type_6(it))
+                .is_some()
+            {
+                let (name, end) = scan_end_result.unwrap();
                 Some((
                     last,
                     end,
                     html::HtmlType::Type6(html::Element::new(name), html::Flag::End),
                 ))
-            } else if let Some((name, end)) = scanners::scan_html_end(line) {
+            } else if let Some((name, end)) = scan_end_result {
                 Some((
                     last,
                     end,
@@ -263,7 +266,10 @@ impl html::Html {
             html::Html::Block(html::HtmlType::Type1(element, flag @ html::Flag::Begin)) => {
                 for maybe_end in scanners::scan_identifier(line, &[Token::Lt, Token::Slash]) {
                     line.skip(maybe_end - prev_maybe_end);
-                    if let Some((_, end)) = is_end_type_1(line).filter(|it| it.0.eq(&element.name))
+                    let scan_end_result = scanners::scan_html_end(line);
+                    if let Some((_, end)) = scan_end_result
+                        .filter(is_end_type_1)
+                        .filter(|it| it.0.eq(&element.name))
                     {
                         *flag = html::Flag::Full;
                         return Some((maybe_end, maybe_end + end));
@@ -314,7 +320,10 @@ impl html::Html {
             html::Html::Block(html::HtmlType::Type6(element, flag @ html::Flag::Begin)) => {
                 for maybe_end in scanners::scan_identifier(line, &[Token::Lt, Token::Slash]) {
                     line.skip(maybe_end - prev_maybe_end);
-                    if let Some((_, end)) = is_end_type_6(line).filter(|it| it.0.eq(&element.name))
+                    let scan_end_result = scanners::scan_html_end(line);
+                    if let Some((_, end)) = scan_end_result
+                        .filter(is_end_type_6)
+                        .filter(|it| it.0.eq(&element.name))
                     {
                         *flag = html::Flag::Full;
                         return Some((maybe_end, maybe_end + end));
@@ -326,10 +335,10 @@ impl html::Html {
                 // println!("扫描 HTML Block 是否结束 {:?}", line)
                 for maybe_end in scanners::scan_identifier(line, &[Token::Lt, Token::Slash]) {
                     line.skip(maybe_end - prev_maybe_end);
-                    println!(
-                        "maybe_end = {maybe_end} result={:?}",
-                        scanners::scan_html_end(line)
-                    );
+                    // println!(
+                    //     "maybe_end = {maybe_end} result={:?}",
+                    //     scanners::scan_html_end(line)
+                    // );
                     if let Some((_, end)) =
                         scanners::scan_html_end(line).filter(|it| it.0.eq(&element.name))
                     {
@@ -365,6 +374,7 @@ impl BlockStrategy for html::Html {
         } else {
             return BlockMatching::Unmatched;
         };
+        // println!("{:?}", block_type);
         match &block_type {
             html::HtmlType::Type1(..)
             | html::HtmlType::Type2
@@ -399,11 +409,18 @@ impl BlockStrategy for html::Html {
                 // Link Reference Definition 是基于 Paragraph 解析，不过是否应该约束 Type 7 以大写字符开始，
                 // 就像 JSX 组件那样，这也是编写该库的目的之一
                 if matches!(block_type, html::HtmlType::Type7(..))
-                    && !(parser.tree[container].body != MarkdownNode::Paragraph
-                        && !(!parser.all_closed
+                    && (parser.tree[container].body == MarkdownNode::Paragraph
+                        || (!parser.all_closed
                             && !line.is_blank()
                             && parser.current_proc().body == MarkdownNode::Paragraph))
                 {
+                    // println!(
+                    //     "AAA => body = {:?}, all_closed = {}, is_blank = {}, current_proc = {:?}",
+                    //     parser.tree[container].body,
+                    //     parser.all_closed,
+                    //     line.is_blank(),
+                    //     parser.current_proc().body
+                    // );
                     return BlockMatching::Unmatched;
                 }
                 parser.close_unmatched_blocks();
@@ -569,13 +586,15 @@ mod scanners {
             )
         }
     }
+    pub(super) type ScanStartResult = (html::Element, usize, bool);
+    pub(super) type ScanEndResult = (String, usize);
     /// 扫描 HTML 标签
     ///
     /// 返回：
     /// - html::Element
     /// - usize: 结束位置
     /// - bool: 是否为 self close tag
-    pub(super) fn scan_html_start(line: &Line) -> Option<(html::Element, usize, bool)> {
+    pub(super) fn scan_html_start(line: &Line) -> Option<ScanStartResult> {
         let iter = line.iter().skip(1).enumerate();
         let mut name = String::new();
         let mut attrs = Vec::<(String, Cow<str>)>::new();
@@ -586,6 +605,7 @@ mod scanners {
             line.validate(pos, Token::Gt)
                 || (line.validate(pos, Token::Slash) && line.validate(pos + 1, Token::Gt))
         };
+        // println!("000000000000000000000000000000000000000000000000000000");
         for (i, item) in iter {
             // 因为 skip 导致 pos 实际上小了
             let i = i + 1;
@@ -617,7 +637,7 @@ mod scanners {
                     break;
                 }
                 // enter <in attr>(未进入任何属性状态)
-                (State::InAttr(InAttr::Attr(None)), Token::Text(str)) if str.is_ascii() => {
+                (State::InAttr(InAttr::Attr(_)), Token::Text(str)) if str.is_ascii() => {
                     state = State::InAttr(InAttr::InName(i))
                 }
                 // advance to <in attr name>
@@ -629,6 +649,7 @@ mod scanners {
                     state =
                         State::InAttr(InAttr::InValue(AttrQuote::None, Some(*attr_index), i + 1))
                 }
+                (State::InAttr(InAttr::Attr(_)), Token::Whitespace(..)) => {}
                 // exit <in attr>
                 (State::InAttr(InAttr::Attr(_)), Token::Gt | Token::Slash) if is_close_tag(i) => {
                     state = State::Initial;
@@ -758,7 +779,9 @@ mod scanners {
                 _ => return None,
             }
         }
-        // println!("is_begin_type_7 exit state={state:?} name = {name:?} attrs = {attrs:?}")
+        // println!(
+        //     "is_begin_type_7 finish state={state:?} name = {name:?} attrs = {attrs:?} end = {end}"
+        // );
         if matches!(state, State::Initial) && end > 0 {
             Some((
                 html::Element::new_with_props(name, Some(attrs)),
@@ -769,7 +792,7 @@ mod scanners {
             None
         }
     }
-    pub(super) fn scan_html_end(line: &Line) -> Option<(String, usize)> {
+    pub(super) fn scan_html_end(line: &Line) -> Option<ScanEndResult> {
         // println!("scan_html_end line = {line:?}")
         if !line.validate(0, Token::Lt) || !line.validate(1, Token::Slash) {
             return None;
