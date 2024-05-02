@@ -60,7 +60,7 @@ pub(super) fn process(
         )
     };
     // 如果以空格开始和结束则剥离一个空格
-    if text.starts_with(' ') && text.ends_with(' ') {
+    if text.starts_with(' ') && text.ends_with(' ') && text.len() > 2 {
         // 空格仅占 1 个字节，因此不必转为 chars
         text = text[1..text.len() - 1].to_string()
     }

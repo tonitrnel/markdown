@@ -20,43 +20,49 @@ impl BlockStrategy for list::ListItem {
             Some(Token::Hyphen) => list::List::Bullet(list::BulletList {
                 marker: Token::Hyphen,
                 padding: 1,
-                marker_offset: line.indent,
+                marker_offset: line.indent_spaces(),
                 tight: true,
             }),
             Some(Token::Plus) => list::List::Bullet(list::BulletList {
                 marker: Token::Plus,
                 padding: 1,
-                marker_offset: line.indent,
+                marker_offset: line.indent_spaces(),
                 tight: true,
             }),
             Some(Token::Asterisk) => list::List::Bullet(list::BulletList {
                 marker: Token::Asterisk,
                 padding: 1,
-                marker_offset: line.indent,
+                marker_offset: line.indent_spaces(),
                 tight: true,
             }),
             Some(it @ Token::Ordered(ordered, d)) => list::List::Ordered(list::OrderedList {
                 start: ordered,
                 delimiter: d,
                 padding: it.len(),
-                marker_offset: line.indent,
+                marker_offset: line.indent_spaces(),
                 tight: true,
             }),
             _ => return BlockMatching::Unmatched,
         };
+        let spaces_after_marker = {
+            let count = line.starts_count_matches(|it| it.is_space_or_tab());
+            line.iter().take(count).fold(0, |a, b| match &b.token {
+                Token::Whitespace(ws) => a + ws.len(),
+                _ => a,
+            })
+        };
         // 必需后跟空格
-        if !(line.consume(|it: &Token| it.is_space_or_tab()) || line.is_end()) {
+        if spaces_after_marker == 0 && !line.is_end() {
             return BlockMatching::Unmatched;
         }
-        let spaces_after_marker = 1 + line.starts_count_matches(|it| it.is_space_or_tab());
         // 计算 padding (W + space + rest spaces)
-        line.skip(spaces_after_marker - 1);
+        line.skip_spaces(spaces_after_marker);
         if !(1..5).contains(&spaces_after_marker) || line.is_end() {
             cur_list.set_padding(cur_list.padding() + 1)
         } else {
             cur_list.set_padding(cur_list.padding() + spaces_after_marker)
         }
-        let sn = line.snapshot();
+        let snapshot = line.snapshot();
         if matches!(cur_list, list::List::Bullet(..))
             && spaces_after_marker <= 4
             && line.consume(|it: &Token| it == &Token::LBracket)
@@ -68,21 +74,21 @@ impl BlockStrategy for list::ListItem {
                     checked: false,
                     quested: false,
                     padding,
-                    marker_offset: line.indent,
+                    marker_offset: line.indent_spaces(),
                     tight: true,
                 }),
                 Some(Token::Text("?")) => Some(list::TaskList {
                     checked: false,
                     quested: true,
                     padding,
-                    marker_offset: line.indent,
+                    marker_offset: line.indent_spaces(),
                     tight: true,
                 }),
                 Some(Token::Text(s)) if s.chars().count() == 1 => Some(list::TaskList {
                     checked: true,
                     quested: false,
                     padding,
-                    marker_offset: line.indent,
+                    marker_offset: line.indent_spaces(),
                     tight: true,
                 }),
                 _ => None,
@@ -94,7 +100,7 @@ impl BlockStrategy for list::ListItem {
             {
                 cur_list = list::List::Task(task_list.unwrap())
             } else {
-                line.resume(sn);
+                line.resume(snapshot);
             }
         }
         // 空白列表不能打断段落
@@ -139,21 +145,29 @@ impl BlockStrategy for list::ListItem {
         } else {
             return BlockProcessing::Unprocessed;
         };
-
-        if line.is_blank() {
+        // println!(
+        //     "[A] indent = {}, padding = {}, marker_offset = {} is_blank = {}\n{:?}",
+        //     line.indent_spaces(),
+        //     list.padding(),
+        //     list.marker_offset(),
+        //     line.is_blank(),
+        //     line
+        // );
+        return if line.is_blank() {
             // 如果当前容器存在子节点则跳过空白，否则返回 BlockProcessing::Unprocessed
             if parser.tree.get_first_child(list_idx).is_none() {
                 return BlockProcessing::Unprocessed;
             }
             line.advance_next_nonspace();
-        } else if line.indent >= list.padding() + list.marker_offset() {
-            line.skip(list.padding() + list.marker_offset());
+            BlockProcessing::Further
+        } else if line.indent_spaces() >= list.padding() + list.marker_offset() {
+            line.skip_spaces(list.padding() + list.marker_offset());
             line.re_find_indent();
-        // println!("line = '{line}' {:?}", line.get_raw(0));
+            // println!("line = '{line}' {:?}", line.get_raw(0));
+            BlockProcessing::Further
         } else {
-            return BlockProcessing::Unprocessed;
-        }
-        BlockProcessing::Further
+            BlockProcessing::Unprocessed
+        };
     }
 }
 
@@ -270,6 +284,7 @@ mod tests {
 2.
 3. bar"#;
         let ast = Parser::new(text).parse();
+        println!("{ast:?}");
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,

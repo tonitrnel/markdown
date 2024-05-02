@@ -10,6 +10,7 @@ impl BlockStrategy for block_quote::BlockQuote {
             line.next();
             // optional following space.
             line.consume(|it: &Token| it.is_space_or_tab());
+            line.re_find_indent();
             parser.close_unmatched_blocks();
             parser.append_block(
                 MarkdownNode::BlockQuote(block_quote::BlockQuote {}),

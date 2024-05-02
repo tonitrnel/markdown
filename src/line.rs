@@ -4,23 +4,63 @@ use std::iter::{Skip, Take};
 use std::ops::{Index, Range};
 use std::slice::Iter;
 
-pub struct Line<'input> {
-    inner: Vec<TokenWithLocation<'input>>,
-    pub(super) start_offset: usize,
-    pub(super) end_offset: usize,
-    pub(super) indent: usize,
-    skipped_indent: bool,
+#[derive(Clone, Default)]
+struct IndentationInfo {
+    /// 一个 Tab 等同 4 个 spaces
+    total_spaces: u16,
+    /// tokens length
+    len: usize,
+    skipped: bool,
 }
 
+impl<'input> IndentationInfo {
+    fn new<I>(iter: I, len: usize) -> Self
+    where
+        I: Iterator<Item = &'input TokenWithLocation<'input>>,
+    {
+        let mut total_tokens = 0;
+        let mut total_spaces = 0;
+        for (i, item) in iter.enumerate() {
+            match &item.token {
+                Token::Whitespace(Whitespace::Space) => total_spaces += 1,
+                Token::Whitespace(Whitespace::Tab) => total_spaces += 4,
+                _ => {
+                    total_tokens = i;
+                    break;
+                }
+            }
+        }
+        if total_tokens == 0 && total_spaces > 0 {
+            total_tokens = len;
+        }
+        Self {
+            total_spaces,
+            len: total_tokens,
+            skipped: false,
+        }
+    }
+}
+
+pub struct Line<'input> {
+    inner: Vec<TokenWithLocation<'input>>,
+    indentation: IndentationInfo,
+    blank: bool,
+    start_location: Location,
+    pub(super) start_offset: usize,
+    pub(super) end_offset: usize,
+}
 impl<'input> Line<'input> {
     /// 从 TokenIterator 中提取一行
     pub fn extract(iter: &mut TokenIterator<'input>) -> Option<Self> {
-        let mut tokens = Vec::new();
+        let mut tokens = Vec::<TokenWithLocation<'input>>::new();
         for it in iter {
             match &it.token {
                 Token::Whitespace(Whitespace::NewLine(_)) => {
-                    // tokens.push(it);
-                    return Some(Line::new_with_search_next_nonspace(tokens));
+                    let start_location = tokens
+                        .first()
+                        .map(|it| it.location)
+                        .unwrap_or_else(|| it.location);
+                    return Some(Line::new_with_search_next_nonspace(tokens, start_location));
                 }
                 _ => tokens.push(it),
             }
@@ -28,26 +68,33 @@ impl<'input> Line<'input> {
         if tokens.is_empty() {
             None
         } else {
-            Some(Line::new_with_search_next_nonspace(tokens))
+            let start_location = tokens[0].location;
+            Some(Line::new_with_search_next_nonspace(tokens, start_location))
         }
     }
-    pub fn new(tokens: Vec<TokenWithLocation<'input>>) -> Self {
+    pub fn new(inner: Vec<TokenWithLocation<'input>>) -> Self {
         Self {
             start_offset: 0,
-            end_offset: tokens.len(),
-            indent: 0,
-            inner: tokens,
-            skipped_indent: false,
+            end_offset: inner.len(),
+            inner,
+            start_location: Location::default(),
+            indentation: IndentationInfo::default(),
+            blank: false,
         }
     }
-    pub fn new_with_search_next_nonspace(tokens: Vec<TokenWithLocation<'input>>) -> Self {
-        let next_nonspace = Line::find_next_nonspace(tokens.iter()).unwrap_or(tokens.len());
+    pub fn new_with_search_next_nonspace(
+        inner: Vec<TokenWithLocation<'input>>,
+        start_location: Location,
+    ) -> Self {
+        let indentation = IndentationInfo::new(inner.iter(), inner.len());
+        let blank = indentation.len == inner.len();
         Self {
             start_offset: 0,
-            end_offset: tokens.len(),
-            indent: next_nonspace,
-            inner: tokens,
-            skipped_indent: false,
+            end_offset: inner.len(),
+            inner,
+            start_location,
+            indentation,
+            blank,
         }
     }
     pub fn extends(lines: Vec<Line<'input>>) -> Self {
@@ -72,8 +119,8 @@ impl<'input> Line<'input> {
     ///
     /// 用于容器嵌套时
     pub fn re_find_indent(&mut self) {
-        self.indent = self.starts_count_matches(|it| it.is_space_or_tab());
-        self.skipped_indent = false;
+        self.indentation = IndentationInfo::new(self.iter(), self.len());
+        self.blank = self.indentation.len == self.len();
     }
     /// 当前行长度
     pub fn len(&self) -> usize {
@@ -86,6 +133,9 @@ impl<'input> Line<'input> {
             .take(self.end_offset - self.start_offset)
     }
     pub fn starts_with(&self, token: &Token, len: usize) -> bool {
+        if self.len() < len {
+            return false;
+        }
         self.iter().take(len).all(|it| &it.token == token)
     }
     pub fn ends_with(&self, token: &Token, len: usize) -> bool {
@@ -219,33 +269,48 @@ impl<'input> Line<'input> {
         self.start_offset += len;
         self
     }
-    /// 跳过指定长度的空白 Tokens，如果长度不足则将忽略
+    /// 跳过指定的空白字符数量
+    ///
+    /// 这将计算空白字符数量对应的 Tokens 数量并跳过
     pub fn skip_spaces(&mut self, len: usize) -> &mut Self {
-        for i in self.start_offset..self.start_offset + len {
-            if self
-                .get_raw(i)
-                .map(|it| it.is_space_or_tab())
-                .unwrap_or(false)
-            {
-                self.start_offset = i + 1;
-            } else {
-                break;
+        if len == 0 {
+            return self;
+        }
+        let mut len2 = len;
+        let mut end = 0;
+        for (i, item) in self.iter().enumerate() {
+            match &item.token {
+                Token::Whitespace(ws @ (Whitespace::Space | Whitespace::Tab)) => {
+                    if ws.spaces_len() > len2 {
+                        end = i;
+                        break;
+                    }
+                    len2 -= ws.spaces_len();
+                }
+                _ => {
+                    end = i;
+                    break;
+                }
             }
         }
+        if end == 0 && len2 != len {
+            end = self.len();
+        }
+        self.start_offset += end;
         self
     }
     /// 跳过缩进
     pub fn skip_indent(&mut self) -> &mut Self {
-        if self.skipped_indent {
+        if self.indentation.skipped {
             return self;
         }
         // 当 start_offset > self.indent 可能是父级容器重新查找 indent 的原因，因此需要添加 skipped_indent 进行判断防止重复调用
-        if self.start_offset >= self.indent {
-            self.start_offset += self.indent;
+        if self.start_offset >= self.indentation.len {
+            self.start_offset += self.indentation.len;
         } else {
-            self.start_offset = self.indent;
+            self.start_offset = self.indentation.len;
         }
-        self.skipped_indent = true;
+        self.indentation.skipped = true;
         self
     }
     /// 跳至行结束，等同与标记该行已结束
@@ -273,13 +338,10 @@ impl<'input> Line<'input> {
     }
     /// 前进到下一个非空白的 token 字符
     pub fn advance_next_nonspace(&mut self) -> &Self {
-        let next_nonspace = Line::find_next_nonspace(
-            self.inner
-                .iter()
-                .skip(self.start_offset)
-                .take(self.end_offset - self.start_offset),
-        )
-        .unwrap_or(0);
+        let next_nonspace = self
+            .iter()
+            .position(|it| !it.is_space_or_tab())
+            .unwrap_or(0);
         if next_nonspace > 0 {
             self.start_offset += next_nonspace;
         }
@@ -289,8 +351,7 @@ impl<'input> Line<'input> {
     pub fn reset(&mut self) -> &Self {
         self.start_offset = 0;
         self.end_offset = self.inner.len();
-        self.indent = Line::find_next_nonspace(self.inner.iter()).unwrap_or(self.inner.len());
-        self.skipped_indent = false;
+        self.indentation = IndentationInfo::new(self.inner.iter(), self.inner.len());
         self
     }
     /// 行已全部消费
@@ -299,16 +360,24 @@ impl<'input> Line<'input> {
     }
     /// 空白行，该行不包含任何内容或全部为红白字符
     pub fn is_blank(&self) -> bool {
-        self.len() == 0 || self.indent >= self.end_offset
+        self.blank
     }
     /// 缩进是否大于 4 个，如果是应该使用 IndentedCode 解析
     pub fn is_indented(&self) -> bool {
-        self.indent >= 4
+        self.indentation.total_spaces >= 4
+    }
+    /// 获取缩进的空白字符数量，一个 `\t` 将等于 `4` 个空白字符数量
+    pub fn indent_spaces(&self) -> usize {
+        self.indentation.total_spaces as usize
+    }
+    /// 获取缩进的 Token 数量，即每行开头的 `\x20` 和 `\t`
+    pub fn indent_len(&self) -> usize {
+        self.indentation.len
     }
     /// 根据指定的 start 和 end 创建一个切片副本，如果要忽略偏移请使用 `slice_raw`
     pub fn slice(&self, start: usize, end: usize) -> Line<'input> {
         // 有没有不用克隆直接使用 start_offset 和 end_offset 创建切片的方法？
-        Line::new_with_search_next_nonspace(
+        Line::new(
             self.iter()
                 .skip(start)
                 .take(end.saturating_sub(start))
@@ -318,7 +387,7 @@ impl<'input> Line<'input> {
     }
     /// 忽略偏移，从原始 vector 上进行切片
     pub fn slice_raw(&self, start: usize, end: usize) -> Line<'input> {
-        Line::new_with_search_next_nonspace(
+        Line::new(
             self.inner
                 .iter()
                 .skip(start)
@@ -334,8 +403,7 @@ impl<'input> Line<'input> {
                 start: self.start_offset,
                 end: self.end_offset,
             },
-            self.indent,
-            self.skipped_indent,
+            self.indentation.clone(),
         )
     }
     /// 从快照恢复到之前的位置
@@ -343,8 +411,9 @@ impl<'input> Line<'input> {
         let snapshot = snapshot.as_ref();
         self.start_offset = snapshot.0.start;
         self.end_offset = snapshot.0.end;
-        self.indent = snapshot.1;
-        self.skipped_indent = snapshot.2;
+        self.indentation.total_spaces = snapshot.1.total_spaces;
+        self.indentation.len = snapshot.1.len;
+        self.indentation.skipped = snapshot.1.skipped;
         self
     }
     /// 安全的获取引用
@@ -362,6 +431,9 @@ impl<'input> Line<'input> {
 
     /// 获取当前Token的开始位置
     pub fn start_location(&self) -> Location {
+        if self.end_offset == 0 {
+            return self.start_location;
+        }
         if self.is_end() {
             self.inner[self.end_offset - 1].end_location()
         } else {
@@ -370,31 +442,20 @@ impl<'input> Line<'input> {
     }
     /// 获取当前Token的结束位置
     pub fn end_location(&self) -> Location {
+        if self.end_offset == 0 {
+            let mut end_location = self.start_location();
+            end_location.column += 1;
+            return end_location;
+        }
         self.inner[self.start_offset.min(self.end_offset - 1)].end_location()
     }
     /// 获取当前行最后一个 Token 的结束位置
     pub fn last_token_end_location(&self) -> Location {
-        self.inner[self.end_offset - 1].end_location()
-    }
-    /// 替换所有匹配的项为指定内容
-    ///
-    /// 注意：这可能会导致 Location 不准确，非必要不要使用
-    #[allow(unused)]
-    pub fn replace<P: ConsumePredicate<'input> + Copy>(&self, from: P, to: Token<'input>) -> Self {
-        let result = self
-            .iter()
-            .map(|it| {
-                if from.evaluate(it.token) {
-                    TokenWithLocation {
-                        token: to,
-                        location: it.location,
-                    }
-                } else {
-                    *it
-                }
-            })
-            .collect();
-        Self::new_with_search_next_nonspace(result)
+        if self.end_offset == 0 {
+            self.end_location()
+        } else {
+            self.inner[self.end_offset - 1].end_location()
+        }
     }
     /// Escape specified characters
     pub fn to_escaped_string(&self, escaped_chars: &[char]) -> String {
@@ -439,7 +500,7 @@ impl Display for Line<'_> {
 }
 
 impl Debug for Line<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{:?}",
@@ -488,9 +549,9 @@ impl<'input> Index<usize> for Line<'input> {
     }
 }
 #[derive(Clone)]
-pub struct LineSnapshot(Range<usize>, usize, bool);
+pub struct LineSnapshot(Range<usize>, IndentationInfo);
 impl Debug for LineSnapshot {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "LineSnapshot {{ start: {}, end: {} }}",
@@ -604,19 +665,5 @@ mod tests {
         assert_eq!(line.peek(), Some(&Token::Digit("12")));
         assert_eq!(line.next(), Some(Token::Digit("12")));
         assert_eq!(line.peek(), Some(&Token::Text("你")));
-    }
-
-    #[test]
-    fn test_replace() {
-        let tokens = Tokenizer::new("hello\r\nworld\r\n")
-            .tokenize()
-            .collect::<Vec<_>>();
-        let line = Line::new(tokens);
-        let replaced = line.replace(
-            Token::Whitespace(Whitespace::NewLine("\r\n")),
-            Token::Whitespace(Whitespace::NewLine("\n")),
-        );
-        assert_eq!(line.to_string(), "hello\r\nworld\r\n");
-        assert_eq!(replaced.to_string(), "hello\nworld\n");
     }
 }

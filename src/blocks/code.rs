@@ -1,86 +1,98 @@
 use std::fmt::Write;
-use std::ops::Range;
 
 use crate::ast::{code, MarkdownNode};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, Line, ProcessCtx};
 use crate::parser::Parser;
 use crate::tokenizer::Token;
+use crate::utils;
+
+#[derive(Debug)]
+enum State {
+    // ``` regexp: ^`{3,}(?!.*`)
+    MarkerBackticks,
+    // ~~~ regexp: ^~{3,}
+    MarkerTilde,
+    InLanguage(bool), // Loose = false, Strict = true
+}
 
 impl code::FencedCode {
-    fn try_match(line: &mut Line) -> Option<(Token<'static>, usize, Range<usize>)> {
-        if line.is_indented() {
-            return None;
-        }
-        line.skip_indent();
-        let mark = match line.next() {
-            Some(Token::Backtick) => Token::Backtick,
-            Some(Token::Tilde) => Token::Tilde,
+    fn try_match(line: &Line) -> Option<(Token<'static>, usize, String)> {
+        let (marker, mut state) = match line.peek() {
+            Some(Token::Backtick) => (Token::Backtick, State::MarkerBackticks),
+            Some(Token::Tilde) => (Token::Tilde, State::MarkerTilde),
             _ => return None,
         };
-        let mut count = 1;
-        let mut language_range = Range { start: 0, end: 0 };
-        enum State {
-            Start,
-            // ``` regexp: ^`{3,}(?!.*`)
-            StrictLanguageStatement,
-            // ~~~ regexp: ^~{3,}
-            LooseLanguageStatement,
-            End,
-        }
-        let mut state: State = State::Start;
-        while let Some(&next) = line.peek() {
-            state = match state {
-                State::Start => {
-                    if next == mark {
-                        count += 1;
-                        line.next();
-                        State::Start
-                    } else {
-                        language_range.start = line.start_offset;
-                        if count < 3 {
-                            return None;
-                        }
-                        if mark == Token::Backtick {
-                            State::StrictLanguageStatement
-                        } else {
-                            State::LooseLanguageStatement
-                        }
-                    }
+        let mut marker_length = 0;
+        let mut language_range = (0, line.len());
+        for (i, item) in line.iter().enumerate() {
+            match (&state, &item.token) {
+                (State::MarkerBackticks, Token::Backtick) => {}
+                (State::MarkerBackticks, _) if i >= 3 => {
+                    marker_length = i;
+                    language_range.0 = i;
+                    state = State::InLanguage(true);
                 }
-                State::LooseLanguageStatement => State::End,
-                State::StrictLanguageStatement => {
-                    if next == Token::Backtick {
-                        return None;
-                    } else {
-                        line.next();
-                        State::StrictLanguageStatement
-                    }
+                (State::MarkerTilde, Token::Tilde) => {}
+                (State::MarkerTilde, _) if i >= 3 => {
+                    marker_length = i;
+                    language_range.0 = i;
+                    state = State::InLanguage(false);
                 }
-                State::End => break,
+                (State::InLanguage(true), Token::Backtick) => return None,
+                (State::InLanguage(_), _) => {}
+                _ => return None,
             }
         }
-        language_range.end = line.end_offset;
-        Some((mark, count, language_range))
+        match state {
+            State::MarkerBackticks | State::MarkerTilde => {
+                marker_length = line.len();
+                language_range.0 = line.len();
+            }
+            _ => (),
+        }
+        if marker_length < 3 {
+            return None;
+        }
+        // println!(
+        //     "marker = {marker:?} count={count} {:?} state={state:?}",
+        //     language_range
+        // );
+        Some((
+            marker,
+            marker_length,
+            if language_range.0 == language_range.1 {
+                String::new()
+            } else {
+                line.slice(language_range.0, language_range.1)
+                    .trim()
+                    .to_string()
+            },
+        ))
     }
 }
 impl BlockStrategy for code::FencedCode {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         let location = line[0].location;
-        if let Some((marker, length, range)) = Self::try_match(line) {
+        if line.is_indented() {
+            return BlockMatching::Unmatched;
+        }
+        line.skip_indent();
+        if let Some((marker, marker_length, language)) = Self::try_match(line) {
             parser.close_unmatched_blocks();
             parser.append_block(
                 MarkdownNode::Code(code::Code::Fenced(code::FencedCode {
-                    language: if marker == Token::Backtick {
-                        Some(line.slice_raw(range.start, range.end).trim().to_string())
+                    language: if !language.is_empty() {
+                        Some(utils::entities::unescape_string(language))
                     } else {
                         None
                     },
-                    length,
-                    indent: line.indent,
+                    length: marker_length,
+                    indent: line.indent_spaces(),
                     marker,
                 })),
                 location,
             );
+            line.skip_to_end();
             BlockMatching::MatchedLeaf
         } else {
             BlockMatching::Unmatched
@@ -96,6 +108,11 @@ impl BlockStrategy for code::FencedCode {
         } else {
             return BlockProcessing::Unprocessed;
         };
+        // println!("{line:?}");
+        if line.is_indented() || line.is_blank() {
+            line.skip_spaces(container.indent);
+            return BlockProcessing::Further;
+        }
         // 检查当前行是否满足结束代码块的条件
         let location = line.start_location();
         let length = line.skip_indent().starts_count(&container.marker);
@@ -134,7 +151,7 @@ impl BlockStrategy for code::IndentedCode {
             return BlockMatching::Unmatched;
         };
         let location = line.start_location();
-        line.skip(4);
+        line.skip_spaces(4);
         parser.close_unmatched_blocks();
         parser.append_block(
             MarkdownNode::Code(code::Code::Indented(code::IndentedCode {})),
@@ -144,10 +161,8 @@ impl BlockStrategy for code::IndentedCode {
     }
 
     fn process(ProcessCtx { line, .. }: ProcessCtx) -> BlockProcessing {
-        if line.is_indented() {
-            line.skip(4);
-            BlockProcessing::Further
-        } else if line.is_blank() {
+        if line.is_indented() || line.is_blank() {
+            line.skip_spaces(4);
             BlockProcessing::Further
         } else {
             BlockProcessing::Unprocessed

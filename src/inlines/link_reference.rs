@@ -30,7 +30,10 @@ pub(crate) fn process_link_reference(parser: &mut Parser, node_id: usize) {
         match scan_link_reference(&mut line) {
             Some((ref_label, url, title)) => {
                 // println!("写入 reference {ref_label:?} ({url:?},{title:?})");
-                parser.link_refs.entry(ref_label).or_insert((url, title));
+                parser
+                    .link_refs
+                    .entry(ref_label)
+                    .or_insert((url, title.map(utils::entities::unescape_string)));
                 continue;
             }
             _ => {

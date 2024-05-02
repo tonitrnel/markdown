@@ -198,7 +198,7 @@ impl<'input> Parser<'input> {
     fn incorporate_line(&mut self, mut line: Line<'input>) {
         let mut container = self.doc;
         self.prev_proc_node = self.curr_proc_node;
-        // println!("检查是否存在正在处理的节点")
+        println!("检查是否存在正在处理的节点");
         while let Some(last_child) = &self.tree.get_last_child(container).and_then(|idx| {
             if self.tree[idx].processing {
                 Some(idx)
@@ -207,19 +207,19 @@ impl<'input> Parser<'input> {
             }
         }) {
             container = *last_child;
-            // println!("继续处理 {:?}", self.tree[container].body);
+            println!("继续处理 {:?}", self.tree[container].body);
             match blocks::process(container, self, &mut line) {
                 BlockProcessing::Processed => return,
                 BlockProcessing::Further => continue,
                 BlockProcessing::Unprocessed => {
                     container = self.tree.get_parent(container);
-                    // println!("无法处理，执行返回上一层容器");
+                    println!("无法处理，执行返回上一层容器");
                     break;
                 }
             }
         }
         self.all_closed = container == self.prev_proc_node;
-        // println!("当前容器 #{container}  {:?}", self.tree[container].body);
+        println!("当前容器 #{container}  {:?}", self.tree[container].body);
         self.last_matched_node = container;
         let mut matched_leaf = !matches!(self.tree[container].body, MarkdownNode::Paragraph)
             && self.tree[container].body.accepts_lines();
@@ -230,7 +230,7 @@ impl<'input> Parser<'input> {
         while !matched_leaf {
             if !line.is_indented()
                 && !line
-                    .get(line.indent)
+                    .get(line.indent_len())
                     .map(|it| it.is_block_special_token())
                     .unwrap_or(false)
             {
@@ -256,6 +256,7 @@ impl<'input> Parser<'input> {
                 }
             }
         }
+
         if !self.all_closed
             && !line.is_blank()
             && matches!(self.tree[self.curr_proc_node].body, MarkdownNode::Paragraph)
@@ -270,7 +271,7 @@ impl<'input> Parser<'input> {
             self.close_unmatched_blocks();
             // 判断是否支持接收纯文本行，只有 Paragraph 、HTML Block、Code Block 支持，部分容器是支持存储空白行
             let cur_container = &mut self.tree[container].body;
-            if cur_container.accepts_lines() && !line.is_end() {
+            if cur_container.accepts_lines() && (!line.is_end() || line.is_blank()) {
                 // println!("存储当前行剩余内容")
                 if let MarkdownNode::Html(html) = cur_container {
                     let snapshot = line.snapshot();
@@ -302,7 +303,11 @@ impl<'input> Parser<'input> {
                             (line.start_location(), line.last_token_end_location()),
                         );
                     }
-                } else {
+                } else if !line.is_end() || line.is_blank() {
+                    // println!(
+                    //     "add line #{container} processing={} {line:?}",
+                    //     self.tree[container].processing
+                    // );
                     self.append_inline(container, line);
                 }
             }
@@ -436,11 +441,12 @@ impl<'input> Parser<'input> {
         blocks::after(node_id, self, location);
         let node = &mut self.tree[node_id];
         node.processing = false;
-        // if parent == self.doc {
-        // println!("块 #{node_id} {:?} 解析完成", node.body)
-        // } else {
-        // println!("退出节点 #{node_id} {:?}", node.body)
-        // }
+        #[cfg(debug_assertions)]
+        if parent == self.doc {
+            println!("块 #{node_id} {:?} 解析完成", node.body)
+        } else {
+            println!("退出节点 #{node_id} {:?}", node.body)
+        }
         if Some(node_id) == self.tree.peek_up() {
             // println!("树退出 #{node_id:?}")
             self.tree.pop();

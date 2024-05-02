@@ -51,7 +51,7 @@ pub(crate) fn scan_link_or_image<'input>(
                 match scan_link_title(line) {
                     Some((size, _line)) => {
                         line.skip(size);
-                        Some(_line.to_string())
+                        Some(utils::entities::unescape_string(_line.to_string()))
                     }
                     _ => None,
                 }

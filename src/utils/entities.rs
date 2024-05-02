@@ -2233,7 +2233,7 @@ pub(crate) fn unescape_string(str: impl AsRef<str>) -> String {
         }
         unescaped
     } else {
-        str.to_string()
+        str.to_owned()
     }
 }
 pub(crate) fn escape_xml(str: impl AsRef<str>) -> String {

@@ -19,7 +19,14 @@ impl Whitespace<'_> {
             Whitespace::Space => 1,
             Whitespace::Tab => 1,
             Whitespace::NewLine(s) => s.len(),
-            Whitespace::Comment(c) => c.len() + 4,
+            Whitespace::Comment(_) => 0,
+        }
+    }
+    pub fn spaces_len(&self) -> usize {
+        match self {
+            Whitespace::Space => 1,
+            Whitespace::Tab => 4,
+            _ => 0,
         }
     }
 }

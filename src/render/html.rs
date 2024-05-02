@@ -39,7 +39,10 @@ where
                 }
                 ast::code::Code::Fenced(code) => (
                     if let Some(language) = &code.language {
-                        Owned(format!("<pre><code class=\"language-{}\">", language))
+                        Owned(format!(
+                            "<pre><code class=\"language-{}\">",
+                            language.split(' ').nth(0).unwrap_or("")
+                        ))
                     } else {
                         Borrowed("<pre><code>")
                     },
@@ -89,11 +92,11 @@ where
             }
             MarkdownNode::Footnote(footnote) => {
                 let id = format!("cont-fn-{}", footnote.label);
-                Some((Owned(format!("<li id={id:?}>\n")), Borrowed("</li>")))
+                Some((Owned(format!("<li id={id:?}>\n")), Borrowed("\n</li>")))
             }
             MarkdownNode::FootnoteList => Some((
                 Borrowed("<section>\n<h2>Footnotes</h2>\n<ol>\n"),
-                Borrowed("</ol>\n</section>"),
+                Borrowed("\n</ol>\n</section>"),
             )),
             MarkdownNode::Image(image::Image { url, title }) => {
                 write!(self.writer, "<img src={url:?} alt=\"")?;
@@ -162,7 +165,7 @@ where
                 _ => Some((Borrowed(""), Borrowed(""))),
             },
             MarkdownNode::BlockQuote(_) => {
-                Some((Borrowed("<blockquote>\n"), Borrowed("</blockquote>")))
+                Some((Borrowed("<blockquote>\n"), Borrowed("\n</blockquote>")))
             }
             MarkdownNode::Text(_) => {
                 self.write_text(
@@ -233,7 +236,7 @@ where
     }
     fn write_close(&mut self, close: Cow<str>, idx: usize) -> fmt::Result {
         let is_block = self.tree[idx].body.is_block_level();
-        let non_final_block = Some(idx) != self.tree.get_last_child(0);
+        let non_final_block = Some(idx) != self.tree.get_last_child(self.tree.get_parent(idx));
         if !close.is_empty() && is_block && non_final_block {
             writeln!(self.writer, "{}", close)
         } else {
@@ -298,9 +301,6 @@ where
     ) -> fmt::Result {
         let newline = if tight { "" } else { "\n" };
         write!(self.writer, "<li>{newline}")?;
-        if !tight {
-            writeln!(self.writer, "<p>")?;
-        }
         if let Some((checked, _)) = task {
             if checked {
                 writeln!(self.writer, r#"<input type="checkbox" disabled checked />"#)?;
@@ -308,18 +308,15 @@ where
                 writeln!(self.writer, r#"<input type="checkbox" disabled />"#)?;
             }
         }
-        // 如果是 Paragraph 节点则跳过，因为 Paragraph 由 tight 控制，已在上面输出了
         if let Some(child_idx) = self.tree.get_first_child(idx).and_then(|idx| {
-            if self.tree[idx].body == MarkdownNode::Paragraph {
+            // 如果是 Paragraph 节点则跳过，因为 tight 状态下不输出 Paragraph
+            if self.tree[idx].body == MarkdownNode::Paragraph && tight {
                 self.tree.get_first_child(idx)
             } else {
                 Some(idx)
             }
         }) {
             self.write_html(child_idx)?;
-        }
-        if !tight {
-            writeln!(self.writer, "</p>")?;
         }
         if let Some(next_idx) = self.tree.get_next(idx) {
             writeln!(self.writer, "{newline}</li>")?;

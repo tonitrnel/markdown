@@ -45,7 +45,7 @@ impl BlockStrategy for footnote::Footnote {
     }
     fn process(ProcessCtx { line, .. }: ProcessCtx) -> BlockProcessing {
         if line.is_indented() {
-            line.skip(4);
+            line.skip(line.indent_len());
             line.re_find_indent();
             BlockProcessing::Further
         } else if line.is_blank() {

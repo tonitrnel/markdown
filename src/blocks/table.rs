@@ -222,7 +222,7 @@ impl table::Table {
 impl BlockStrategy for table::Table {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         // 匹配表格第二行，忽略缩进
-        line.skip(line.indent);
+        line.skip(line.indent_len());
         if !line.validate(0, |it: &Token| {
             matches!(it, Token::Pipe | Token::Hyphen | Token::Colon)
         }) {
