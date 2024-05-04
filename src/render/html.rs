@@ -164,9 +164,14 @@ where
                 }
                 _ => Some((Borrowed(""), Borrowed(""))),
             },
-            MarkdownNode::BlockQuote(_) => {
-                Some((Borrowed("<blockquote>\n"), Borrowed("\n</blockquote>")))
-            }
+            MarkdownNode::BlockQuote => Some((
+                Borrowed("<blockquote>\n"),
+                if self.tree.get_first_child(idx).is_some() {
+                    Borrowed("\n</blockquote>")
+                } else {
+                    Borrowed("</blockquote>")
+                },
+            )),
             MarkdownNode::Text(_) => {
                 self.write_text(
                     idx,
@@ -273,7 +278,14 @@ where
                 self.write_close("\n</ul>".into(), idx)?;
             }
             list::List::Ordered(ordered) => {
-                self.write_open("<ol>\n".into(), idx)?;
+                self.write_open(
+                    if ordered.start == 1 {
+                        Borrowed("<ol>\n")
+                    } else {
+                        Owned(format!("<ol start=\"{}\">\n", ordered.start))
+                    },
+                    idx,
+                )?;
                 if let Some(child_idx) = self.tree.get_first_child(idx) {
                     self.writer_list_item(child_idx, ordered.tight, None)?;
                 }
@@ -299,7 +311,20 @@ where
         tight: bool,
         task: Option<(bool, bool)>,
     ) -> fmt::Result {
-        let newline = if tight { "" } else { "\n" };
+        let newline = if !tight
+            || self
+                .tree
+                .get_first_child(idx)
+                .map(|idx| {
+                    self.tree[idx].body.is_block_level()
+                        && self.tree[idx].body != MarkdownNode::Paragraph
+                })
+                .unwrap_or(false)
+        {
+            "\n"
+        } else {
+            ""
+        };
         write!(self.writer, "<li>{newline}")?;
         if let Some((checked, _)) = task {
             if checked {
@@ -308,15 +333,21 @@ where
                 writeln!(self.writer, r#"<input type="checkbox" disabled />"#)?;
             }
         }
-        if let Some(child_idx) = self.tree.get_first_child(idx).and_then(|idx| {
-            // 如果是 Paragraph 节点则跳过，因为 tight 状态下不输出 Paragraph
-            if self.tree[idx].body == MarkdownNode::Paragraph && tight {
-                self.tree.get_first_child(idx)
-            } else {
-                Some(idx)
-            }
-        }) {
+        if let Some((Some(child_idx), child_sibling_idx)) =
+            self.tree.get_first_child(idx).map(|idx| {
+                let child_sibling_idx = self.tree.get_next(idx);
+                // 如果是 Paragraph 节点则跳过，因为 tight 状态下不输出 Paragraph
+                if self.tree[idx].body == MarkdownNode::Paragraph && tight {
+                    (self.tree.get_first_child(idx), child_sibling_idx)
+                } else {
+                    (Some(idx), None)
+                }
+            })
+        {
             self.write_html(child_idx)?;
+            if let Some(child_sibling_idx) = child_sibling_idx {
+                self.write_html(child_sibling_idx)?;
+            }
         }
         if let Some(next_idx) = self.tree.get_next(idx) {
             writeln!(self.writer, "{newline}</li>")?;

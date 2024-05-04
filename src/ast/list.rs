@@ -1,6 +1,8 @@
 use crate::tokenizer::Token;
+use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(tag = "variant", rename_all = "kebab-case")]
 pub enum List {
     Bullet(BulletList),
     Ordered(OrderedList),
@@ -64,33 +66,33 @@ impl List {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct BulletList {
-    pub marker: Token<'static>,
-    pub padding: usize,
-    pub marker_offset: usize,
+    pub(crate) marker: Token<'static>,
+    pub(crate) padding: usize,
+    pub(crate) marker_offset: usize,
     pub tight: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct OrderedList {
     pub start: u64,
-    pub delimiter: char,
-    pub padding: usize,
-    pub marker_offset: usize,
+    pub(crate) delimiter: char,
+    pub(crate) padding: usize,
+    pub(crate) marker_offset: usize,
     pub tight: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct TaskList {
-    pub checked: bool, // - [x] task text
-    pub quested: bool, // - [?] task text
-    pub padding: usize,
-    pub marker_offset: usize,
+    pub(crate) checked: bool, // - [x] task text
+    pub(crate) quested: bool, // - [?] task text
+    pub(crate) padding: usize,
+    pub(crate) marker_offset: usize,
     pub tight: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct ListItem {
     pub order: Option<u64>,    // 1. xxx
     pub checked: Option<bool>, // - [x] task text

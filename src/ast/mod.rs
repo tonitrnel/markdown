@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 pub mod block_quote;
 pub mod callout;
 pub mod code;
@@ -13,7 +15,8 @@ pub mod reference;
 pub mod table;
 pub mod thematic_break;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
 pub enum MarkdownNode {
     // 根节点
     Document,
@@ -46,7 +49,7 @@ pub enum MarkdownNode {
     // 表情
     Emoji(String),
     // 块引用
-    BlockQuote(block_quote::BlockQuote),
+    BlockQuote,
     // 代码
     Code(code::Code),
     // 表格
@@ -79,7 +82,7 @@ impl MarkdownNode {
         match self {
             MarkdownNode::List(..) => matches!(target, MarkdownNode::ListItem(..)),
             MarkdownNode::Document
-            | MarkdownNode::BlockQuote(..)
+            | MarkdownNode::BlockQuote
             | MarkdownNode::Callout(..)
             | MarkdownNode::Footnote(..)
             | MarkdownNode::ListItem(..) => !matches!(target, MarkdownNode::ListItem(..)),
@@ -123,7 +126,7 @@ impl MarkdownNode {
                 | MarkdownNode::Heading(..)
                 | MarkdownNode::List(..)
                 | MarkdownNode::ListItem(..)
-                | MarkdownNode::BlockQuote(..)
+                | MarkdownNode::BlockQuote
                 | MarkdownNode::Code(code::Code::Fenced(..) | code::Code::Indented(..))
                 | MarkdownNode::Table(..)
                 | MarkdownNode::TableHead

@@ -1,6 +1,7 @@
 use crate::ast::reference::Reference;
+use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct Embed {
     pub path: String,
     pub size: Option<(u32, Option<u32>)>,

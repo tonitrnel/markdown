@@ -1,33 +1,35 @@
 use crate::ast::reference::Reference;
+use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(tag = "variant", rename_all = "kebab-case")]
 pub enum Link {
     Default(DefaultLink),
     Wikilink(Wikilink),
     Footnote(FootnoteLink),
     FootnoteBackref(FootnoteBackref),
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct DefaultLink {
     pub url: String,
     pub title: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct Wikilink {
     pub path: String,
     pub text: Option<String>,
     pub reference: Option<Reference>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct FootnoteLink {
     pub footnote_label: String,
     pub index: usize,
     pub ref_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct FootnoteBackref {
     pub footnote_label: String,
     pub index: usize,

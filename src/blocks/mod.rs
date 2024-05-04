@@ -73,9 +73,7 @@ pub fn process<'input>(
         MarkdownNode::Heading(ast::heading::Heading::SETEXT(..)) => {
             ast::heading::SetextHeading::process(ctx)
         }
-        MarkdownNode::BlockQuote(ast::block_quote::BlockQuote {}) => {
-            ast::block_quote::BlockQuote::process(ctx)
-        }
+        MarkdownNode::BlockQuote => ast::block_quote::BlockQuote::process(ctx),
         MarkdownNode::Code(ast::code::Code::Fenced(..)) => ast::code::FencedCode::process(ctx),
         MarkdownNode::Code(ast::code::Code::Indented(..)) => ast::code::IndentedCode::process(ctx),
         MarkdownNode::Html(..) => ast::html::Html::process(ctx),
@@ -105,9 +103,7 @@ pub fn after(id: usize, parser: &mut Parser, location: Location) {
         MarkdownNode::Heading(ast::heading::Heading::SETEXT(..)) => {
             ast::heading::SetextHeading::after(id, parser)
         }
-        MarkdownNode::BlockQuote(ast::block_quote::BlockQuote {}) => {
-            ast::block_quote::BlockQuote::after(id, parser)
-        }
+        MarkdownNode::BlockQuote => ast::block_quote::BlockQuote::after(id, parser),
         MarkdownNode::Code(ast::code::Code::Fenced(..)) => ast::code::FencedCode::after(id, parser),
         MarkdownNode::Code(ast::code::Code::Indented(..)) => {
             ast::code::IndentedCode::after(id, parser)

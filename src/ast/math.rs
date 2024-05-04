@@ -1,9 +1,12 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(tag = "variant", rename_all = "kebab-case")]
 pub enum Math {
     Inline(InlineMath),
     Block(BlockMath),
 }
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InlineMath{}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BlockMath{}
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct InlineMath {}
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct BlockMath {}

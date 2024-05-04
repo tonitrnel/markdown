@@ -1,8 +1,9 @@
 use crate::utils;
+use serde::Serialize;
 use std::fmt;
 use std::iter::Peekable;
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub enum Whitespace<'input> {
     /// 空格
     Space,
@@ -42,7 +43,7 @@ impl fmt::Display for Whitespace<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub enum Token<'input> {
     /// Text
     Text(&'input str),
@@ -406,7 +407,7 @@ impl<'input> From<Whitespace<'input>> for Token<'input> {
     }
 }
 
-#[derive(Eq, PartialEq, Clone, Copy)]
+#[derive(Serialize, Eq, PartialEq, Clone, Copy)]
 pub struct Location {
     /// Line number, starting from 1
     pub line: u64,

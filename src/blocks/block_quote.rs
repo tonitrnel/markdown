@@ -12,10 +12,7 @@ impl BlockStrategy for block_quote::BlockQuote {
             line.consume(|it: &Token| it.is_space_or_tab());
             line.re_find_indent();
             parser.close_unmatched_blocks();
-            parser.append_block(
-                MarkdownNode::BlockQuote(block_quote::BlockQuote {}),
-                location,
-            );
+            parser.append_block(MarkdownNode::BlockQuote, location);
             return BlockMatching::MatchedContainer;
         }
         BlockMatching::Unmatched
@@ -50,10 +47,7 @@ mod tests {
         .trim();
         let ast = Parser::new(text).parse();
         assert_eq!(ast[0].body, MarkdownNode::Document);
-        assert_eq!(
-            ast[1].body,
-            MarkdownNode::BlockQuote(block_quote::BlockQuote {})
-        );
+        assert_eq!(ast[1].body, MarkdownNode::BlockQuote);
         assert_eq!(
             ast[2].body,
             MarkdownNode::Heading(ast::heading::Heading::ATX(ast::heading::ATXHeading {

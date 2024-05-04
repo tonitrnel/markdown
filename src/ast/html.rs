@@ -1,6 +1,9 @@
+use serde::ser::SerializeMap;
+use serde::{Serialize, Serializer};
 use std::borrow::Cow;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(tag = "variant")]
 pub enum Html {
     Block(HtmlType),
     Inline(HtmlType),
@@ -13,6 +16,20 @@ pub enum Flag {
     // 如果在同一个容器扫描到结束标志则标记这个 HTML 为完整
     Full,
     SelfClose,
+}
+impl Serialize for Flag {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let value = match self {
+            Flag::Begin => "begin",
+            Flag::End => "end",
+            Flag::Full => "full",
+            Flag::SelfClose => "self-close",
+        };
+        serializer.serialize_str(value)
+    }
 }
 
 const DISALLOWED_TAG_NAMES: [&str; 9] = [
@@ -117,6 +134,35 @@ pub enum HtmlType {
     Type7(Element, Flag),
 }
 
+impl Serialize for HtmlType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut obj = serializer.serialize_map(Some(4))?;
+        match self {
+            HtmlType::Type1(..) => obj.serialize_entry("type", "type1")?,
+            HtmlType::Type2 => obj.serialize_entry("type", "type2")?,
+            HtmlType::Type3 => obj.serialize_entry("type", "type3")?,
+            HtmlType::Type4 => obj.serialize_entry("type", "type4")?,
+            HtmlType::Type5 => obj.serialize_entry("type", "type5")?,
+            HtmlType::Type6(..) => obj.serialize_entry("type", "type6")?,
+            HtmlType::Type7(..) => obj.serialize_entry("type", "type7")?,
+        }
+        match self {
+            HtmlType::Type1(element, flag)
+            | HtmlType::Type6(element, flag)
+            | HtmlType::Type7(element, flag) => {
+                obj.serialize_entry("name", &element.name)?;
+                obj.serialize_entry("props", &element.props)?;
+                obj.serialize_entry("flag", flag)?;
+            }
+            _ => (),
+        }
+        obj.end()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Element {
     pub name: String,
@@ -138,6 +184,7 @@ impl Element {
                 .map(|props| props.into_iter().map(|(n, v)| (n, v.to_string())).collect()),
         }
     }
+    #[cfg(feature = "html")]
     pub(crate) fn attr_str(&self) -> String {
         let mut str = String::new();
         if let Some(props) = &self.props {

@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, PartialEq, Eq)]
+use serde::Serialize;
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub enum HeadingLevel {
     H1 = 1,
     H2,
@@ -8,18 +10,18 @@ pub enum HeadingLevel {
     H6,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged)]
 pub enum Heading {
     ATX(ATXHeading),
     SETEXT(SetextHeading),
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct ATXHeading {
     pub level: HeadingLevel,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct SetextHeading {
     pub level: HeadingLevel,
 }

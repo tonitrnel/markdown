@@ -1,3 +1,4 @@
+use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
 
@@ -8,6 +9,7 @@ use crate::tokenizer::{Location, Token, TokenIterator, Tokenizer};
 use crate::tree::Tree;
 use crate::{blocks, exts, inlines};
 
+#[derive(Serialize)]
 pub struct Node {
     pub body: MarkdownNode,
     pub start: Location,
@@ -123,16 +125,17 @@ impl<'input> Parser<'input> {
     }
     pub fn parse(mut self) -> Tree<Node> {
         self.tree.push();
-        // let start = std::time::Instant::now();
-        // println!("块解析开始")
         self.parse_blocks();
-        // println!("块解析结束[{}ms]", start.elapsed().as_millis());
-        // let start = std::time::Instant::now();
-        // println!("行解析开始")
         self.parse_inlines();
-        // println!("行解析结束[{}ms]", start.elapsed().as_millis());
         self.tree.pop();
         self.tree
+    }
+    pub fn parse_with_tags(mut self) -> (Tree<Node>, HashSet<String>) {
+        self.tree.push();
+        self.parse_blocks();
+        self.parse_inlines();
+        self.tree.pop();
+        (self.tree, self.tags)
     }
     pub fn parse_frontmatter(&mut self) -> Option<serde_yaml::Value> {
         exts::frontmatter::parse(self)
@@ -321,7 +324,7 @@ impl<'input> Parser<'input> {
             }
         }
     }
-    pub fn append_block(&mut self, node: MarkdownNode, loc: Location) -> usize {
+    pub(crate) fn append_block(&mut self, node: MarkdownNode, loc: Location) -> usize {
         // 如果当前处理中的节点无法容纳插入的节点则退回当上一层
         while !self.tree[self.curr_proc_node].body.can_contain(&node) {
             self.finalize(self.curr_proc_node, loc)
@@ -333,12 +336,12 @@ impl<'input> Parser<'input> {
         // println!("创建节点 #{idx} {:?}", self.tree[idx].body)
         idx
     }
-    pub fn append_free_node(&mut self, node: MarkdownNode, loc: Location) -> usize {
+    pub(crate) fn append_free_node(&mut self, node: MarkdownNode, loc: Location) -> usize {
         let idx = self.tree.create_node(Node::new(node, loc));
         // println!("创建游离节点 #{idx} {:?}", self.tree[idx].body)
         idx
     }
-    pub fn append_to(
+    pub(crate) fn append_to(
         &mut self,
         id: usize,
         node: MarkdownNode,
@@ -349,7 +352,7 @@ impl<'input> Parser<'input> {
         // println!("创建节点 #{idx} {:?}", self.tree[idx].body)
         idx
     }
-    pub fn replace_block(&mut self, node: MarkdownNode, loc: Location) -> Option<usize> {
+    pub(crate) fn replace_block(&mut self, node: MarkdownNode, loc: Location) -> Option<usize> {
         self.last_location = loc;
         if let Some(idx) = self.tree.peek_up() {
             // println!("替换节点 {:?} => {:?}", self.tree[idx].body, node)
@@ -359,10 +362,10 @@ impl<'input> Parser<'input> {
             None
         }
     }
-    pub fn append_inline(&mut self, block_idx: usize, line: Line<'input>) {
+    pub(crate) fn append_inline(&mut self, block_idx: usize, line: Line<'input>) {
         self.inlines.entry(block_idx).or_default().push(line)
     }
-    pub fn append_text(
+    pub(crate) fn append_text(
         &mut self,
         content: impl AsRef<str>,
         location: (Location, Location),
@@ -382,7 +385,7 @@ impl<'input> Parser<'input> {
         idx
     }
     /// 插入文本当目标节点，这会自动合并相邻 *仍在处理* 的 Text 节点
-    pub fn append_text_to(
+    pub(crate) fn append_text_to(
         &mut self,
         parent: usize,
         content: impl AsRef<str>,
@@ -407,13 +410,13 @@ impl<'input> Parser<'input> {
             idx
         }
     }
-    pub fn mark_as_processed(&mut self, idx: usize) {
+    pub(crate) fn mark_as_processed(&mut self, idx: usize) {
         self.tree[idx].processing = false;
     }
-    pub fn current_proc(&self) -> &Node {
+    pub(crate) fn current_proc(&self) -> &Node {
         &self.tree[self.curr_proc_node]
     }
-    pub fn close_unmatched_blocks(&mut self) {
+    pub(crate) fn close_unmatched_blocks(&mut self) {
         if self.all_closed {
             return;
         }
