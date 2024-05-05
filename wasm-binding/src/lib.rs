@@ -1,12 +1,8 @@
 mod types;
 
 use markdown::{MarkdownNode, Node, Parser, ParserOptions, Tree};
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
-
-#[wasm_bindgen]
-pub struct Markdown {
-    inner: Parser<'static>,
-}
 
 #[wasm_bindgen]
 extern "C" {
@@ -58,7 +54,7 @@ fn kind(node: &MarkdownNode) -> &'static str {
 #[wasm_bindgen(skip_typescript)]
 pub struct AstNode {
     tree_idx: usize,
-    inner: &'static Tree<Node>,
+    inner: Rc<Tree<Node>>,
     kind: &'static str,
 }
 
@@ -95,7 +91,7 @@ impl AstNode {
             AstNode {
                 tree_idx: next,
                 kind: kind(&node.body),
-                inner: self.inner,
+                inner: self.inner.clone(),
             }
         })
     }
@@ -106,14 +102,14 @@ impl AstNode {
             AstNode {
                 tree_idx: child,
                 kind: kind(&node.body),
-                inner: self.inner,
+                inner: self.inner.clone(),
             }
         })
     }
 }
 #[wasm_bindgen]
 pub struct Document {
-    ast: &'static Tree<Node>,
+    ast: Rc<Tree<Node>>,
     tags: Vec<String>,
 }
 
@@ -125,7 +121,7 @@ impl Document {
         AstNode {
             tree_idx: 0,
             kind: kind(&node.body),
-            inner: self.ast,
+            inner: self.ast.clone(),
         }
     }
     #[wasm_bindgen(getter)]
@@ -137,31 +133,36 @@ impl Document {
 }
 
 #[wasm_bindgen]
+pub struct Markdown {
+    inner: Parser<'static>,
+    leaked_ptr: &'static str,
+}
+
+#[wasm_bindgen]
 impl Markdown {
     #[wasm_bindgen(constructor)]
     pub fn new(text: String) -> Markdown {
-        let text = text.into_boxed_str();
+        let text = Box::leak(text.into_boxed_str());
         let inner = Parser::<'static>::new_with_options(
-            Box::leak(text),
+            text,
             ParserOptions::new()
                 .enabled_gfm()
                 .enabled_ofm()
                 .enabled_cjk_autocorrect(),
         );
-        Self { inner }
+        Self {
+            inner,
+            leaked_ptr: text,
+        }
     }
-    pub fn parse_frontmatter(&mut self) -> Option<Frontmatter> {
-        self.inner.parse_frontmatter().map(|value| {
-            serde_wasm_bindgen::to_value(&value)
-                .unwrap()
-                .unchecked_into::<Frontmatter>()
-        })
-    }
-    pub fn parse(self) -> Document {
+    pub fn parse(mut self) -> Document {
         let (ast, tags) = self.inner.parse_with_tags();
-        let boxed_ast = Box::new(ast);
+        unsafe {
+            // 销毁 text
+            let _ = Box::from_raw(&mut self.leaked_ptr);
+        }
         Document {
-            ast: Box::leak(boxed_ast),
+            ast: Rc::new(ast),
             tags: tags.into_iter().collect(),
         }
     }
