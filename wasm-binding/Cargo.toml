@@ -2,6 +2,9 @@
 name = "wasm-binding"
 version = "0.1.0"
 edition = "2021"
+description = "markdown wasm binding"
+repository = "https://github.com/tonitrnel/markdown"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
