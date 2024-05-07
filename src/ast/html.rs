@@ -184,7 +184,7 @@ impl Element {
                 .map(|props| props.into_iter().map(|(n, v)| (n, v.to_string())).collect()),
         }
     }
-    #[cfg(feature = "html")]
+    #[cfg_attr(not(test), cfg(feature = "html"))]
     pub(crate) fn attr_str(&self) -> String {
         let mut str = String::new();
         if let Some(props) = &self.props {

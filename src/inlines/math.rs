@@ -61,7 +61,7 @@ pub(super) fn process(
     line.skip(end);
     parser.append_text_to(
         node,
-        expression.to_string(),
+        expression.to_unescape_string(),
         (
             expression.start_location(),
             expression.last_token_end_location(),
@@ -73,6 +73,7 @@ pub(super) fn process(
 #[cfg(test)]
 mod tests {
     use crate::parser::Parser;
+    use crate::ParserOptions;
 
     #[test]
     fn ext_case_1() {
@@ -89,5 +90,11 @@ $$"#;
         let text = r#"This is an inline math expression $e^{2i\pi} = 1$."#;
         let ast = Parser::new(text).parse();
         println!("{ast:?}")
+    }
+    #[test]
+    fn ext_case_3() {
+        let text = r#"$\begin{cases} a = 1\\ b = 2 \end{cases}$"#;
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm()).parse();
+        println!("{:?}", ast)
     }
 }

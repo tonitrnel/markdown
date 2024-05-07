@@ -560,12 +560,14 @@ impl Debug for LineSnapshot {
     }
 }
 
+#[cfg(feature = "serde_yaml")]
 pub struct TokenIteratorGuard<'a, 'input> {
     committed: bool,
     pub original: &'a mut TokenIterator<'input>,
     snapshot: TokenIterator<'input>,
 }
 
+#[cfg(feature = "serde_yaml")]
 impl<'a, 'input> TokenIteratorGuard<'a, 'input> {
     pub fn new(original: &'a mut TokenIterator<'input>) -> Self {
         TokenIteratorGuard {
@@ -582,6 +584,7 @@ impl<'a, 'input> TokenIteratorGuard<'a, 'input> {
     }
 }
 
+#[cfg(feature = "serde_yaml")]
 impl<'a, 'input> Drop for TokenIteratorGuard<'a, 'input> {
     fn drop(&mut self) {
         if self.committed {

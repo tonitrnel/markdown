@@ -64,7 +64,7 @@ impl<T> IndexMut<usize> for Tree<T> {
     }
 }
 
-impl<T> Tree<T> {
+impl<T: Debug> Tree<T> {
     pub fn new() -> Tree<T> {
         Tree::default()
     }
@@ -225,6 +225,11 @@ impl<T> Tree<T> {
     /// 注：这会将该节点添加至父节点的 `last_child`
     pub fn set_parent(&mut self, index: usize, parent: usize) {
         assert!(self.frees.contains(&index), "node must be free node");
+        // #[cfg(debug_assertions)]
+        // println!(
+        //     "set node #{index} parse，from {} to #{parent}",
+        //     self.nodes[index].parent
+        // );
         self.nodes[index].parent = parent;
         self.frees.remove(&index);
         if let Some(last_child) = self.nodes[parent].last_child {
@@ -283,7 +288,9 @@ impl<T> Tree<T> {
         assert_eq!(
             self.get_parent(index),
             self.get_parent(prev),
-            "Must have the same parent"
+            "Must have the same parent, left = #{index}{:?} right = #{prev}{:?}",
+            self.nodes[index].item,
+            self.nodes[prev].item
         );
         // 断开 prev 节点关系
         self.unlink(prev);
@@ -353,19 +360,20 @@ impl<T> Tree<T> {
     pub fn is_free_node(&self, idx: &usize) -> bool {
         self.frees.contains(idx)
     }
-    // pub fn print_link_info(&self, title: &str, idx: usize) {
-    //     println!("[{title}]: ({:?})", self.nodes[idx].last_child);
-    //     let mut item = self.nodes[idx].first_child;
-    //     while let Some(next) = item {
-    //         if let Some(item) = self.nodes[next].item.as_ref() {
-    //             print!("->#{next}{item:?}");
-    //         } else {
-    //             print!("->#{next}<Free>");
-    //         }
-    //         item = self.nodes[next].next;
-    //     }
-    //     println!();
-    // }
+    #[cfg(debug_assertions)]
+    pub fn print_link_info(&self, title: &str, idx: usize) {
+        println!("[{title}]: ({:?})", self.nodes[idx].last_child);
+        let mut item = self.nodes[idx].first_child;
+        while let Some(next) = item {
+            if let Some(item) = self.nodes[next].item.as_ref() {
+                print!("->#{next}{item:?}");
+            } else {
+                print!("->#{next}<Free>");
+            }
+            item = self.nodes[next].next;
+        }
+        println!();
+    }
 }
 
 impl<T> Default for Tree<T> {

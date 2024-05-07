@@ -4,10 +4,13 @@ use std::fmt::{Debug, Formatter};
 
 use crate::ast::MarkdownNode;
 use crate::blocks::{BlockMatching, BlockProcessing};
+#[allow(unused)]
+#[cfg_attr(not(test), cfg(feature = "html"))]
+use crate::exts;
 use crate::line::Line;
 use crate::tokenizer::{Location, Token, TokenIterator, Tokenizer};
 use crate::tree::Tree;
-use crate::{blocks, exts, inlines};
+use crate::{blocks, inlines};
 
 #[derive(Serialize)]
 pub struct Node {
@@ -46,9 +49,6 @@ pub struct ParserOptions {
 }
 
 impl ParserOptions {
-    pub fn new() -> Self {
-        Self::default()
-    }
     pub fn enabled_gfm(self) -> Self {
         Self {
             github_flavored: true,
@@ -137,6 +137,7 @@ impl<'input> Parser<'input> {
         self.tree.pop();
         (self.tree, self.tags)
     }
+    #[cfg(feature = "frontmatter")]
     pub fn parse_frontmatter(&mut self) -> Option<serde_yaml::Value> {
         exts::frontmatter::parse(self)
     }
@@ -173,7 +174,7 @@ impl<'input> Parser<'input> {
             }
             let mut line = Line::extends(lines.unwrap());
             line.trim_end_matches(|it: &Token| matches!(it, Token::Whitespace(..)));
-            // println!("#{idx} {:?} {:?}", self.tree[idx].body, line);
+            println!("#{idx} {:?} {:?}", self.tree[idx].body, line);
             inlines::process(idx, self, line);
         }
         self.parse_footnote_list();
@@ -201,7 +202,7 @@ impl<'input> Parser<'input> {
     fn incorporate_line(&mut self, mut line: Line<'input>) {
         let mut container = self.doc;
         self.prev_proc_node = self.curr_proc_node;
-        println!("检查是否存在正在处理的节点");
+        // println!("检查是否存在正在处理的节点");
         while let Some(last_child) = &self.tree.get_last_child(container).and_then(|idx| {
             if self.tree[idx].processing {
                 Some(idx)
@@ -210,19 +211,19 @@ impl<'input> Parser<'input> {
             }
         }) {
             container = *last_child;
-            println!("继续处理 {:?}", self.tree[container].body);
+            // println!("继续处理 {:?}", self.tree[container].body);
             match blocks::process(container, self, &mut line) {
                 BlockProcessing::Processed => return,
                 BlockProcessing::Further => continue,
                 BlockProcessing::Unprocessed => {
                     container = self.tree.get_parent(container);
-                    println!("无法处理，执行返回上一层容器");
+                    // println!("无法处理，执行返回上一层容器");
                     break;
                 }
             }
         }
         self.all_closed = container == self.prev_proc_node;
-        println!("当前容器 #{container}  {:?}", self.tree[container].body);
+        // println!("当前容器 #{container}  {:?}", self.tree[container].body);
         self.last_matched_node = container;
         let mut matched_leaf = !matches!(self.tree[container].body, MarkdownNode::Paragraph)
             && self.tree[container].body.accepts_lines();
@@ -338,7 +339,8 @@ impl<'input> Parser<'input> {
     }
     pub(crate) fn append_free_node(&mut self, node: MarkdownNode, loc: Location) -> usize {
         let idx = self.tree.create_node(Node::new(node, loc));
-        // println!("创建游离节点 #{idx} {:?}", self.tree[idx].body)
+        // #[cfg(debug_assertions)]
+        // println!("创建游离节点 #{idx} {:?}", self.tree[idx].body);
         idx
     }
     pub(crate) fn append_to(
@@ -455,41 +457,5 @@ impl<'input> Parser<'input> {
             self.tree.pop();
         }
         self.curr_proc_node = parent;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let text = r#"# Block formatting
-
-You can also use Markdown to create various text blocks, such as:
-
-- Block quotes - Start a line with `﹥` followed by a space.
-
-- Headings:
-
-    1. Heading 1 - Start a line with `#` followed by a space.
-
-    2. Heading 2 - Start a line with `##` followed by a space.
-
-    3. Heading 3 - Start a line with `###` followed by a space.
-
-- Lists, including nested ones:
-
-    - Numbered lists - Start a line with `1.` or `1)` followed by a space.
-
-    - Bulleted lists - Start a line with `*` or `-` followed by a space.
-
-    - To-do lists - Start a line with `[ ]` or `[x]` followed by a space to insert an unchecked or checked list item.
-
-- Code blocks - Start a line with ` ˋˋˋ `.
-
-- Horizontal lines - Start a line with `---`"#;
-        let ast = Parser::new(text).parse();
-        println!("AST\n---------------------------------------\n{ast:?}---------------------------------------")
     }
 }

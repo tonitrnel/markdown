@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn ofm_case_block_id() {
         let text = r#""You do not rise to the level of your goals. You fall to the level of your systems." by James Clear ^quote-of-the-day"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         // println!("{ast:?}")
         assert_eq!(ast[1].id, Some("quote-of-the-day".to_string()))
     }
@@ -734,7 +734,7 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_1() {
         let text = r#"[[Three laws of motion]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(
@@ -750,7 +750,7 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_2() {
         let text = r#"[[Three laws of motion#Second law]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(
@@ -766,7 +766,7 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_3() {
         let text = r#"[[My note#Heading 1#Heading 2]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(
@@ -785,7 +785,7 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_4() {
         let text = r#"[[2023-01-01#^quote-of-the-day]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(
@@ -801,7 +801,7 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_5() {
         let text = r#"[[Internal links|custom display text]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(
@@ -818,7 +818,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_1() {
         let text = r#"![[Internal links]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
@@ -832,7 +832,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_2() {
         let text = r#"![[Internal links#^b15695]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
@@ -846,7 +846,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_3() {
         let text = r#"![[Engelbart.jpg|100x145]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
@@ -860,7 +860,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_4() {
         let text = r#"![[Engelbart.jpg|100]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
@@ -874,7 +874,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_5() {
         let text = r#"![[Document.pdf#page=3]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
@@ -888,7 +888,7 @@ mod tests {
     #[test]
     fn ofm_case_embed_6() {
         let text = r#"![[Document.pdf#page=3&theme=dark]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(embed::Embed {
