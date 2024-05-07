@@ -17,7 +17,13 @@ pub(super) struct Delimiter<'input> {
     pub(super) position: usize,
     pub(super) node: usize,
 }
-#[derive(Clone)]
+impl PartialEq for Delimiter<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.node == other.node
+    }
+}
+
+#[derive(Clone, PartialEq)]
 pub(super) struct DelimiterChain<'input>(Rc<RefCell<Delimiter<'input>>>);
 impl<'a, 'input> DelimiterChain<'input> {
     pub(super) fn new(delimiter: Delimiter<'input>) -> Self {
@@ -314,7 +320,7 @@ pub(super) fn process(
                             loc
                         };
                         let mut temp = parser.tree.get_next(opener_inl);
-                        // 将 opener_inl 和 closer_inl 的节点全部压入 node 形成 opener_inl, node, closer_inl 平行的结构
+                        // 将 opener_inl 和 closer_inl 之间的节点全部压入 node 形成 opener_inl, node, closer_inl 平行的结构
                         while let Some(item) = temp.filter(|it| it != &closer_inl) {
                             let next = parser.tree.get_next(item);
                             parser.tree.unlink(item);
@@ -325,6 +331,7 @@ pub(super) fn process(
                             parser.tree.set_parent(item, node);
                             temp = next;
                         }
+                        // println!("喵喵喵 opener_inl = {opener_inl} closer_inl = {closer_inl} node = {node}");
 
                         // parser
                         //     .tree
@@ -335,13 +342,23 @@ pub(super) fn process(
                         // parser
                         //     .tree
                         //     .print_link_info("B", parser.tree.get_parent(opener_inl));
+                        assert_eq!(
+                            parser.tree.get_parent(opener_inl),
+                            parser.tree.get_parent(closer_inl),
+                            "Unexpected error: opener #{opener_inl} and closer #{closer_inl} do not have the same parent."
+                        );
                         parser.tree.set_next(opener_inl, node);
                         parser.tree.set_prev(closer_inl, node);
                         // parser
                         //     .tree
                         //     .print_link_info("C", parser.tree.get_parent(opener_inl));
-                        // println!("喵喵喵 opener_inl = {opener_inl} closer_inl = {closer_inl} node = {node}");
 
+                        // open_inl 和 closer_inl 之间的 delimiter 已经被作为 Text 压入 node 了，
+                        // 因此如果存在则需要删除防止出现不匹配的情况
+                        if opener_delimiter.borrow().next.as_ref() != Some(closer_delimiter) {
+                            opener_delimiter.borrow_mut().next = closer.clone();
+                            closer_delimiter.borrow_mut().prev = opener.clone();
+                        }
                         if opener_char_nums == 0 {
                             parser.tree.remove(opener_inl);
                             remove_delimiter(&mut opener)
@@ -406,6 +423,7 @@ fn remove_delimiter(delimiter_chain: &mut Option<DelimiterChain>) {
         Some(d) => d,
         None => return,
     };
+    // println!("移除 delimiter #{}", delimiter.borrow().node);
     // try change previous pointer
     if let Some(previous) = delimiter.borrow().prev.as_ref() {
         previous.borrow_mut().next = delimiter.borrow().next.clone();
@@ -563,7 +581,7 @@ mod tests {
     #[test]
     fn gfm_case_491() {
         let text = r#"~~Hi~~ Hello, ~there~ world!"#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_gfm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm()).parse();
         // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
@@ -575,7 +593,7 @@ mod tests {
         let text = r#"This ~~has a
 
 new paragraph~~."#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_gfm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm()).parse();
         // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
@@ -586,7 +604,7 @@ new paragraph~~."#;
     #[test]
     fn gfm_case_493() {
         let text = r#"This will ~~~not~~~ strike."#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_gfm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm()).parse();
         // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p>This will ~~~not~~~ strike.</p>")
     }
@@ -594,8 +612,19 @@ new paragraph~~."#;
     #[test]
     fn ofm_case_1() {
         let text = r#"==Highlighted text=="#;
-        let ast = Parser::new_with_options(text, ParserOptions::new().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         // println!("{ast:?}")
         assert_eq!(ast.to_html(), "<p><mark>Highlighted text</mark></p>")
+    }
+
+    #[test]
+    fn test_crisscross() {
+        let text = r#"**bold _italic** ending_"#;
+        let ast = Parser::new(text).parse();
+        println!("{ast:?}");
+        assert_eq!(
+            ast.to_html(),
+            "<p><strong>bold _italic</strong> ending_</p>"
+        );
     }
 }
