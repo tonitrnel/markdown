@@ -35,13 +35,20 @@ impl BlockStrategy for list::ListItem {
                 marker_offset: line.indent_spaces(),
                 tight: true,
             }),
-            Some(it @ Token::Ordered(ordered, d)) => list::List::Ordered(list::OrderedList {
-                start: ordered,
-                delimiter: d,
-                padding: it.len(),
-                marker_offset: line.indent_spaces(),
-                tight: true,
-            }),
+            Some(Token::Digit(start)) if start.len() < 10 => match line.next() {
+                Some(ch @ (Token::RParen | Token::Period))
+                    if line.is_end() || line.validate(0, |t: &Token| t.is_space_or_tab()) =>
+                {
+                    list::List::Ordered(list::OrderedList {
+                        start: start.parse::<u64>().unwrap(),
+                        delimiter: if ch == Token::RParen { '(' } else { '.' },
+                        padding: start.len() + 1,
+                        marker_offset: line.indent_spaces(),
+                        tight: true,
+                    })
+                }
+                _ => return BlockMatching::Unmatched,
+            },
             _ => return BlockMatching::Unmatched,
         };
         let spaces_after_marker = {

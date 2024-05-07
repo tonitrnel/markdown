@@ -51,8 +51,6 @@ pub enum Token<'input> {
     Digit(&'input str),
     /// Whitespace
     Whitespace(Whitespace<'input>),
-    /// Ordered, like: `1. `, `2. `, `3) `
-    Ordered(u64, char),
     /// Crosshatch `#`
     Crosshatch,
     /// Asterisk `*`
@@ -129,7 +127,7 @@ pub enum Token<'input> {
     Control(char),
     /// More ASCII Punctuation `0x21 - 0x2F`,` 0x3A - 0x40` and Unicode
     ///
-    /// Exclude `Token::Text | Token::Digest | Token::Escaped | Token::Whitespace | Token::Ordered`
+    /// Exclude `Token::Text | Token::Digest | Token::Escaped | Token::Whitespace`
     Punctuation(char),
 }
 impl Token<'_> {
@@ -139,7 +137,6 @@ impl Token<'_> {
             Token::Digit(s) => s.len(),
             Token::Whitespace(ws) => ws.len(),
             Token::DoubleLBracket | Token::DoubleRBracket | Token::Escaped(_) => 2,
-            Token::Ordered(n, _) => get_digit_count(*n) + 1,
             _ => 1,
         }
     }
@@ -169,8 +166,7 @@ impl Token<'_> {
                 // HTML Tag
                 | Token::Lt
                 | Token::Gt
-                // Ordered Task or Task
-                | Token::Ordered(..)
+                | Token::Digit(..)
                 | Token::Hyphen
                 // Table
                 | Token::Pipe
@@ -207,7 +203,7 @@ impl Token<'_> {
             Token::Escaped(_) => return false,
             Token::Control(ch) => Some(*ch),
             Token::Text(str) => str.chars().last(),
-            Token::Ordered(_, _) | Token::Digit(_) => return false,
+            Token::Digit(_) => return false,
             Token::Whitespace(..) => return true,
             _ => return false,
         };
@@ -232,9 +228,7 @@ impl Token<'_> {
         match self {
             Token::Escaped(ch) => utils::is_punctuation_or_symbol(*ch),
             Token::Text(_) => false,
-            Token::Ordered(_, _) | Token::Control(_) | Token::Digit(_) | Token::Whitespace(_) => {
-                false
-            }
+            Token::Control(_) | Token::Digit(_) | Token::Whitespace(_) => false,
             _ => true,
         }
     }
@@ -271,7 +265,6 @@ impl Token<'_> {
             Token::Text(str) => write!(writer, "{str}"),
             Token::Digit(str) => write!(writer, "{str}"),
             Token::Whitespace(ws) => write!(writer, "{ws}"),
-            Token::Ordered(u, d) => write!(writer, "{u}{d}"),
             Token::DoubleLBracket => writer.write_str("[["),
             Token::DoubleRBracket => writer.write_str("]]"),
             Token::Crosshatch => writer.write_char('#'),
@@ -365,7 +358,6 @@ impl<'input> TryFrom<&Token<'input>> for char {
             Token::Punctuation(ch) => *ch,
             Token::Text(..)
             | Token::Digit(..)
-            | Token::Ordered(..)
             | Token::Whitespace(..)
             | Token::DoubleRBracket
             | Token::DoubleLBracket => return Err(()),
@@ -375,25 +367,12 @@ impl<'input> TryFrom<&Token<'input>> for char {
 impl<'input> PartialEq<char> for Token<'input> {
     fn eq(&self, other: &char) -> bool {
         match self {
-            Token::Text(_) | Token::Digit(_) | Token::Ordered(..) | Token::Escaped(_) => false,
+            Token::Text(_) | Token::Digit(_) | Token::Escaped(_) => false,
             Token::Control(ch) => ch == other,
             Token::Punctuation(ch) => ch == other,
             _ => char::try_from(self).map(|ch| &ch == other).unwrap_or(false),
         }
     }
-}
-
-fn get_digit_count(mut num: u64) -> usize {
-    if num == 0 {
-        return 1;
-    }
-
-    let mut count = 0usize;
-    while num > 0 {
-        num /= 10;
-        count += 1;
-    }
-    count
 }
 
 impl fmt::Display for Token<'_> {
@@ -441,19 +420,9 @@ pub struct TokenWithLocation<'input> {
 }
 
 impl TokenWithLocation<'_> {
-    /// 是当前列开头
-    pub fn is_column_start(&self) -> bool {
-        self.location.is_column_start()
-    }
     /// 是空白或制表符
     pub fn is_space_or_tab(&self) -> bool {
         self.token.is_space_or_tab()
-    }
-    pub fn is_newline(&self) -> bool {
-        self.token.is_newline()
-    }
-    pub fn is_block_special_token(&self) -> bool {
-        self.token.is_block_special_token()
     }
     pub fn len(&self) -> usize {
         self.token.len()
@@ -627,23 +596,7 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
         '.' => consume_and_return(chars, Token::Period),
         '0'..='9' => {
             let s = peeking_take_while(chars, |ch| ch.is_ascii_digit(), None);
-            match chars.peek() {
-                Some(d @ '.' | d @ ')') => {
-                    let d = *d;
-                    let cloned = chars.clone();
-                    chars.next();
-                    match chars.peek() {
-                        Some(' ' | '\n') if s.len() < 10 => {
-                            Some(Token::Ordered(s.parse::<u64>().unwrap(), d))
-                        }
-                        _ => {
-                            *chars = cloned;
-                            Some(Token::Digit(s))
-                        }
-                    }
-                }
-                _ => Some(Token::Digit(s)),
-            }
+            Some(Token::Digit(s))
         }
         '%' => {
             chars.next();
@@ -782,7 +735,7 @@ mod tests {
         let tokens = Tokenizer::new("2) hello world")
             .tokenize()
             .collect::<Vec<_>>();
-        assert_eq!(tokens[0].token, Token::Ordered(2, ')'));
+        assert_eq!(tokens[0].token, Token::Digit("2"));
         let tokens = Tokenizer::new("1234567890) hello world")
             .tokenize()
             .collect::<Vec<_>>();
