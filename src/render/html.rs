@@ -20,7 +20,7 @@ where
     fn new(tree: &'input Tree<Node>, writer: &'input mut W) -> Self {
         Self { tree, writer }
     }
-    fn write_html(&mut self, idx: usize) -> fmt::Result {
+    fn render(&mut self, idx: usize) -> fmt::Result {
         let pair = match &self.tree[idx].body {
             MarkdownNode::Document => Some((Borrowed(""), Borrowed(""))),
             MarkdownNode::Paragraph => Some((Borrowed("<p>"), Borrowed("</p>"))),
@@ -222,8 +222,13 @@ where
             }
             self.write_close(close, idx)?;
         }
-        if let Some(next_idx) = self.tree.get_next(idx) {
-            self.write_html(next_idx)?;
+        Ok(())
+    }
+    fn write_html(&mut self, idx: usize) -> fmt::Result {
+        let mut next = Some(idx);
+        while let Some(next_idx) = next {
+            self.render(next_idx)?;
+            next = self.tree.get_next(next_idx);
         }
         Ok(())
     }
