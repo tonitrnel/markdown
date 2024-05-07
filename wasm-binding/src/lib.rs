@@ -66,7 +66,12 @@ impl AstNode {
     }
     #[wasm_bindgen(getter)]
     pub fn content(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner[self.tree_idx].body).unwrap()
+        serde_wasm_bindgen::to_value(&self.inner[self.tree_idx].body).unwrap_or_else(|e| {
+            panic!(
+                "Failed to serialize content of node with index {}: {}",
+                self.tree_idx, e
+            )
+        })
     }
     #[wasm_bindgen(getter)]
     pub fn kind(&self) -> String {
@@ -75,13 +80,23 @@ impl AstNode {
     #[wasm_bindgen(getter)]
     pub fn start(&self) -> Location {
         serde_wasm_bindgen::to_value(&self.inner[self.tree_idx].start)
-            .unwrap()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to serialize start location of node with index {}: {}",
+                    self.tree_idx, e
+                )
+            })
             .unchecked_into::<Location>()
     }
     #[wasm_bindgen(getter)]
     pub fn end(&self) -> Location {
         serde_wasm_bindgen::to_value(&self.inner[self.tree_idx].end)
-            .unwrap()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to serialize end location of node with index {}: {}",
+                    self.tree_idx, e
+                )
+            })
             .unchecked_into::<Location>()
     }
     #[wasm_bindgen(getter)]
@@ -127,7 +142,7 @@ impl Document {
     #[wasm_bindgen(getter)]
     pub fn tags(&self) -> Tags {
         serde_wasm_bindgen::to_value(&self.tags)
-            .unwrap()
+            .expect("Failed to serialize tags of document")
             .unchecked_into::<Tags>()
     }
 }
@@ -145,7 +160,7 @@ impl Markdown {
         let text = Box::leak(text.into_boxed_str());
         let inner = Parser::<'static>::new_with_options(
             text,
-            ParserOptions::new()
+            ParserOptions::default()
                 .enabled_gfm()
                 .enabled_ofm()
                 .enabled_cjk_autocorrect(),
@@ -156,6 +171,7 @@ impl Markdown {
         }
     }
     pub fn parse(mut self) -> Document {
+        // console_error_panic_hook::set_once();
         let (ast, tags) = self.inner.parse_with_tags();
         unsafe {
             // 销毁 text

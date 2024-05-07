@@ -19,12 +19,24 @@ export type Reference = {
     readonly value: string
 }
 export interface Node{
+    // 释放该节点，不需要主动调用
     free(): void,
+    // block 标识符, 只有 block 节点会有
+    //
+    // see https://help.obsidian.md/Linking+notes+and+files/Internal+links#Link+to+a+block+in+a+note
     readonly id: string | undefined,
+    // 节点起始位置
     readonly start: Location,
+    // 节点结束位置
     readonly end: Location,
+    // 下一个节点，DocumentNode 没有
     readonly next: AstNode | undefined,
+    // 第一个子节点，TextNode 没有
     readonly child: AstNode | undefined
+    // 该节点的种类，根据该值确定 content 的结构
+    readonly kind: string;
+    // 节点的内容，可能没有，取决于节点的 kind
+    readonly content?: unknown
 }
 export interface DocumentNode extends Node{
     readonly kind: "document"
