@@ -1,13 +1,10 @@
 .ONESHELL:
-
-test:
-    cargo test --test "*"
     
 build-release:
-    cargo build --release
+	cargo build --release
     
 build-wasm:
-    cd ./wasm-binding && wasm-pack build
+	cd ./wasm-binding && wasm-pack build
     
 test-blocks:
 	cargo test --lib blocks

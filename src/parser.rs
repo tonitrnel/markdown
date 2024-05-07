@@ -105,8 +105,14 @@ impl<'input> Parser<'input> {
         let mut tree = Tree::<Node>::new();
         // println!("创建 Document 节点")
         let doc = tree.append(Node::new(MarkdownNode::Document, Location::default()));
+        // let start = std::time::Instant::now();
+        let tokens = Tokenizer::new(text).tokenize();
+        // println!(
+        //     "tokenizer, elapsed: {}ms",
+        //     start.elapsed().as_micros() as f64 / 1000.0
+        // );
         Self {
-            tokens: Tokenizer::new(text).tokenize(),
+            tokens,
             inlines: BTreeMap::new(),
             options,
             link_refs: HashMap::new(),
@@ -125,8 +131,18 @@ impl<'input> Parser<'input> {
     }
     pub fn parse(mut self) -> Tree<Node> {
         self.tree.push();
+        // let start = std::time::Instant::now();
         self.parse_blocks();
+        // println!(
+        //     "parse_blocks, elapsed: {}ms",
+        //     start.elapsed().as_micros() as f64 / 1000.0
+        // );
+        // let start = std::time::Instant::now();
         self.parse_inlines();
+        // println!(
+        //     "parse_inlines, elapsed: {}ms",
+        //     start.elapsed().as_micros() as f64 / 1000.0
+        // );
         self.tree.pop();
         self.tree
     }
@@ -142,10 +158,7 @@ impl<'input> Parser<'input> {
         exts::frontmatter::parse(self)
     }
     fn parse_blocks(&mut self) {
-        // let mut i = 0;
         while let Some(line) = Line::extract(&mut self.tokens) {
-            // println!("处理第 {i} 行")
-            // i += 1;
             let last_location = if line.is_blank() {
                 self.last_location
             } else {
@@ -174,7 +187,7 @@ impl<'input> Parser<'input> {
             }
             let mut line = Line::extends(lines.unwrap());
             line.trim_end_matches(|it: &Token| matches!(it, Token::Whitespace(..)));
-            println!("#{idx} {:?} {:?}", self.tree[idx].body, line);
+            // println!("#{idx} {:?} {:?}", self.tree[idx].body, line);
             inlines::process(idx, self, line);
         }
         self.parse_footnote_list();
@@ -239,11 +252,6 @@ impl<'input> Parser<'input> {
                     .unwrap_or(false)
             {
                 line.advance_next_nonspace();
-                // println!(
-                //     "非特殊 indent = {}, {:?}",
-                //     line.indent,
-                //     line.get(line.indent)
-                // );
                 break;
             }
             match blocks::matcher(container, self, &mut line) {
@@ -446,12 +454,12 @@ impl<'input> Parser<'input> {
         blocks::after(node_id, self, location);
         let node = &mut self.tree[node_id];
         node.processing = false;
-        #[cfg(debug_assertions)]
-        if parent == self.doc {
-            println!("块 #{node_id} {:?} 解析完成", node.body)
-        } else {
-            println!("退出节点 #{node_id} {:?}", node.body)
-        }
+        // #[cfg(debug_assertions)]
+        // if parent == self.doc {
+        //     println!("块 #{node_id} {:?} 解析完成", node.body)
+        // } else {
+        //     println!("退出节点 #{node_id} {:?}", node.body)
+        // }
         if Some(node_id) == self.tree.peek_up() {
             // println!("树退出 #{node_id:?}")
             self.tree.pop();

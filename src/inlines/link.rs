@@ -978,4 +978,15 @@ mod tests {
         let ast = Parser::new(text).parse();
         assert_eq!(ast.to_html(), r#"<p>&lt;foo+@bar.example.com&gt;</p>"#)
     }
+    #[test]
+    fn test() {
+        let text = r#"
+![[wallhaven-5wk153.jpg]]
+
+[孤独な巡礼](https://music.163.com/#/song?id=448065)
+
+> 时境变迁，思绪万千"#;
+        let ast = Parser::new(text).parse();
+        println!("{ast:?}");
+    }
 }
