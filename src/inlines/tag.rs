@@ -8,11 +8,11 @@ pub(super) fn process(
     }: &mut ProcessCtx,
 ) -> bool {
     let start_location = line.start_location();
-    if !(line.start_offset == 0
-        || line
+    if line.start_offset > 0
+        && line
             .get_raw(line.start_offset - 1)
-            .map(|it| it.is_newline() || it.is_space_or_tab())
-            .unwrap_or(false))
+            .map(|it| !it.is_newline() && !it.is_space_or_tab())
+            .unwrap_or(true)
     {
         return false;
     }
@@ -26,11 +26,10 @@ pub(super) fn process(
                 continue;
             }
             Token::Digit(..) | Token::Underscore | Token::Hyphen | Token::Slash => continue,
-            Token::Whitespace(..) => {
+            _ => {
                 end = i;
                 break;
             }
-            _ => return false,
         }
     }
     if end == 0 {
