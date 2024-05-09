@@ -14,6 +14,7 @@ impl List {
         match (self, target) {
             (List::Ordered(a), List::Ordered(b)) => a.delimiter == b.delimiter,
             (List::Bullet(a), List::Bullet(b)) => a.marker == b.marker,
+            (List::Task(_), List::Task(_)) => true,
             _ => false,
         }
     }
