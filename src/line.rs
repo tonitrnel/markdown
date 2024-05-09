@@ -54,13 +54,11 @@ impl<'input> Line<'input> {
     pub fn extract(iter: &mut TokenIterator<'input>) -> Option<Self> {
         let mut tokens = Vec::<TokenWithLocation<'input>>::with_capacity(16);
         for it in iter {
-            match &it.token {
-                Token::Whitespace(Whitespace::NewLine(_)) => {
-                    let start_location =
-                        tokens.first().map(|it| it.location).unwrap_or(it.location);
-                    return Some(Line::new_with_search_next_nonspace(tokens, start_location));
-                }
-                _ => tokens.push(it),
+            if it.token.is_newline() {
+                let start_location = tokens.first().map(|it| it.location).unwrap_or(it.location);
+                return Some(Line::new_with_search_next_nonspace(tokens, start_location));
+            } else {
+                tokens.push(it)
             }
         }
         if tokens.is_empty() {

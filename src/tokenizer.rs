@@ -11,8 +11,6 @@ pub enum Whitespace<'input> {
     NewLine(&'input str),
     /// 制表符
     Tab,
-    /// 注释, use `%%` symbol (inline, comment)
-    Comment(&'input str),
 }
 impl Whitespace<'_> {
     pub fn len(&self) -> usize {
@@ -20,7 +18,6 @@ impl Whitespace<'_> {
             Whitespace::Space => 1,
             Whitespace::Tab => 1,
             Whitespace::NewLine(s) => s.len(),
-            Whitespace::Comment(_) => 0,
         }
     }
     pub fn spaces_len(&self) -> usize {
@@ -38,7 +35,6 @@ impl fmt::Display for Whitespace<'_> {
             Whitespace::Space => f.write_str(" "),
             Whitespace::NewLine(s) => f.write_str(s),
             Whitespace::Tab => f.write_str("\t"),
-            Whitespace::Comment(_str) => write!(f, ""),
         }
     }
 }
@@ -75,6 +71,8 @@ pub enum Token<'input> {
     LBrace,
     /// Right brace `}`
     RBrace,
+    /// DoublePercent `%%`
+    DoublePercent,
     /// BackQuote `` ` ``
     Backtick,
     /// Equal `=`
@@ -136,7 +134,10 @@ impl Token<'_> {
             Token::Text(s) => s.chars().count(),
             Token::Digit(s) => s.len(),
             Token::Whitespace(ws) => ws.len(),
-            Token::DoubleLBracket | Token::DoubleRBracket | Token::Escaped(_) => 2,
+            Token::DoubleLBracket
+            | Token::DoubleRBracket
+            | Token::DoublePercent
+            | Token::Escaped(..) => 2,
             _ => 1,
         }
     }
@@ -145,9 +146,6 @@ impl Token<'_> {
     }
     pub fn is_newline(&self) -> bool {
         matches!(self, Token::Whitespace(Whitespace::NewLine(..)))
-    }
-    pub fn is_comment(&self) -> bool {
-        matches!(self, Token::Whitespace(Whitespace::Comment(..)))
     }
     /// 是用于 Markdown Block 相关的 Token
     pub fn is_block_special_token(&self) -> bool {
@@ -226,7 +224,7 @@ impl Token<'_> {
     // Checks if the value is a UTF8 punctuation character:
     pub(crate) fn is_punctuation(&self) -> bool {
         match self {
-            Token::Escaped(ch) => utils::is_punctuation_or_symbol(*ch),
+            Token::Escaped(ch) => utils::is_punctuation(*ch),
             Token::Text(_) => false,
             Token::Control(_) | Token::Digit(_) | Token::Whitespace(_) => false,
             _ => true,
@@ -258,8 +256,8 @@ impl Token<'_> {
         str.chars().any(|ch| self.eq(&ch))
     }
     pub(crate) fn write<W>(&self, writer: &mut W) -> fmt::Result
-    where
-        W: fmt::Write,
+        where
+            W: fmt::Write,
     {
         match self {
             Token::Text(str) => write!(writer, "{str}"),
@@ -277,6 +275,7 @@ impl Token<'_> {
             Token::RParen => writer.write_char(')'),
             Token::LBrace => writer.write_char('{'),
             Token::RBrace => writer.write_char('}'),
+            Token::DoublePercent => writer.write_str("%%"),
             Token::Backtick => writer.write_char('`'),
             Token::Eq => writer.write_char('='),
             Token::Ampersand => writer.write_char('&'),
@@ -360,7 +359,8 @@ impl<'input> TryFrom<&Token<'input>> for char {
             | Token::Digit(..)
             | Token::Whitespace(..)
             | Token::DoubleRBracket
-            | Token::DoubleLBracket => return Err(()),
+            | Token::DoubleLBracket
+            | Token::DoublePercent => return Err(()),
         })
     }
 }
@@ -408,9 +408,6 @@ impl Location {
     pub fn new(line: u64, column: u64) -> Self {
         Self { line, column }
     }
-    pub fn is_column_start(&self) -> bool {
-        self.column == 1
-    }
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -421,15 +418,19 @@ pub struct TokenWithLocation<'input> {
 
 impl TokenWithLocation<'_> {
     /// 是空白或制表符
+    #[inline]
     pub fn is_space_or_tab(&self) -> bool {
         self.token.is_space_or_tab()
     }
+    #[inline]
     pub fn len(&self) -> usize {
         self.token.len()
     }
+    #[inline]
     pub fn start_location(&self) -> Location {
         self.location
     }
+    #[inline]
     pub fn end_location(&self) -> Location {
         Location {
             line: self.location.line,
@@ -602,26 +603,13 @@ fn next_token<'input>(chars: &mut StatefulChars<'input>, recursion: bool) -> Opt
             chars.next();
             if let Some('%') = chars.peek() {
                 chars.next();
-                let start = chars.pos;
-                let mut end = start;
-                while let Some(ch) = chars.next() {
-                    if ch == '%' && chars.peek() == Some(&'%') {
-                        chars.next();
-                        break;
-                    }
-                    end = chars.pos;
-                }
-                Some(Token::Whitespace(Whitespace::Comment(
-                    &chars.content[start..end],
-                )))
+                Some(Token::DoublePercent)
             } else {
                 Some(Token::Punctuation('%'))
             }
         }
         ch if ch.is_ascii_control() => consume_and_return(chars, Token::Control(ch)),
-        ch if utils::is_punctuation_or_symbol(ch) => {
-            consume_and_return(chars, Token::Punctuation(ch))
-        }
+        ch if utils::is_punctuation(ch) => consume_and_return(chars, Token::Punctuation(ch)),
         ch => {
             let ch_len = ch.len_utf8();
             let start = chars.pos;

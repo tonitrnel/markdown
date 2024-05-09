@@ -108,6 +108,11 @@ impl<T: Debug> Tree<T> {
                 self.nodes[parent].first_child = Some(next)
             }
             self.nodes[next].prev = self.nodes[parent].last_child;
+            // 如果前一个节点为空则补充
+            if let Some(prev) = self.nodes[next].prev {
+                assert!(self.nodes[prev].next.is_none());
+                self.nodes[prev].next = Some(next)
+            }
             self.nodes[parent].last_child = Some(next);
         }
         self.cur = Some(next);
@@ -211,7 +216,7 @@ impl<T: Debug> Tree<T> {
 
     /// 获取节点数量
     pub fn len(&self) -> usize {
-        self.nodes.len()
+        self.nodes.iter().filter(|it| it.item.is_some()).count()
     }
 
     /// 获取上级节点的位置

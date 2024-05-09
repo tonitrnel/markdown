@@ -216,13 +216,11 @@ impl<'input> Parser<'input> {
         let mut container = self.doc;
         self.prev_proc_node = self.curr_proc_node;
         // println!("检查是否存在正在处理的节点");
-        while let Some(last_child) = &self.tree.get_last_child(container).and_then(|idx| {
-            if self.tree[idx].processing {
-                Some(idx)
-            } else {
-                None
-            }
-        }) {
+        while let Some(last_child) = &self
+            .tree
+            .get_last_child(container)
+            .filter(|idx| self.tree[*idx].processing)
+        {
             container = *last_child;
             // println!("继续处理 {:?}", self.tree[container].body);
             match blocks::process(container, self, &mut line) {
@@ -241,9 +239,9 @@ impl<'input> Parser<'input> {
         let mut matched_leaf = !matches!(self.tree[container].body, MarkdownNode::Paragraph)
             && self.tree[container].body.accepts_lines();
         // 查找叶子（可容纳 Inline ）节点
-        if !matched_leaf {
-            // println!("开始匹配新的节点");
-        };
+        // if !matched_leaf {
+        //     println!("开始匹配新的节点");
+        // };
         while !matched_leaf {
             if !line.is_indented()
                 && !line
@@ -342,7 +340,15 @@ impl<'input> Parser<'input> {
         self.tree.push();
         self.curr_proc_node = idx;
         self.last_location = loc;
-        // println!("创建节点 #{idx} {:?}", self.tree[idx].body)
+        // println!(
+        //     "创建节点 #{idx} {:?} ↑ {:?} ← {:?} 🤣 {:?}",
+        //     self.tree[idx].body,
+        //     self.tree.get_parent(idx),
+        //     self.tree.get_prev(idx),
+        //     self.tree
+        //         .get_prev(idx)
+        //         .and_then(|idx| self.tree.get_next(idx))
+        // );
         idx
     }
     pub(crate) fn append_free_node(&mut self, node: MarkdownNode, loc: Location) -> usize {
