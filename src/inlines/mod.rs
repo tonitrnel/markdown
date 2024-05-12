@@ -5,6 +5,7 @@ use crate::tokenizer::{Token, Whitespace};
 
 mod bracket;
 mod code;
+mod comment;
 mod delimiter;
 mod emoji;
 mod entity;
@@ -29,7 +30,13 @@ struct ProcessCtx<'a, 'input> {
 }
 
 pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: Line<'input>) {
-    // println!("    ({})\"{:?}\"", line.len(), line);
+    // println!(
+    //     "    ({})↩({})@{:?}\"{:?}\"",
+    //     line.len(),
+    //     parser.tree.get_parent(id),
+    //     parser.tree[parser.tree.get_parent(id)].body,
+    //     line
+    // );
     let mut ctx = ProcessCtx {
         id,
         parser,
@@ -97,6 +104,21 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: 
             Token::Colon if !ctx.parser.options.default_flavored => emoji::process(&mut ctx),
             // Tag
             Token::Crosshatch if ctx.parser.options.obsidian_flavored => tag::process(&mut ctx),
+            // Comment
+            Token::DoublePercent if ctx.parser.options.obsidian_flavored => {
+                comment::process(&mut ctx)
+            }
+            // Token::Text(protocol @ "http")
+            // | Token::Text(protocol @ "https")
+            // | Token::Text(protocol @ "mailto")
+            // | Token::Text(protocol @ "xmpp")
+            //     if ctx.parser.options.github_flavored =>
+            // {
+            //     link::process_autolink_with_protocol(protocol, &mut ctx)
+            // }
+            // Token::Text(prefix @ "www") if ctx.parser.options.github_flavored => {
+            //     link::process_autolink_with_prefix(prefix, &mut ctx)
+            // }
             _ => false,
         };
         if !handled {

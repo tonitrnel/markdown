@@ -246,7 +246,7 @@ impl<'input> Parser<'input> {
             if !line.is_indented()
                 && !line
                     .get(line.indent_len())
-                    .map(|it| it.is_block_special_token())
+                    .map(|it| it.is_special_token())
                     .unwrap_or(false)
             {
                 line.advance_next_nonspace();

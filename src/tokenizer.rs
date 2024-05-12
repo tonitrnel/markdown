@@ -128,6 +128,29 @@ pub enum Token<'input> {
     /// Exclude `Token::Text | Token::Digest | Token::Escaped | Token::Whitespace`
     Punctuation(char),
 }
+
+static SPECIAL_TOKENS: [Token; 13] = [
+    // Heading
+    Token::Crosshatch,
+    // Code
+    Token::Backtick,
+    Token::Tilde,
+    // List item、Thematic breaks
+    Token::Hyphen,
+    Token::Asterisk,
+    Token::Underscore,
+    Token::Plus,
+    Token::Eq,
+    // Tag
+    Token::Lt,
+    Token::Gt,
+    // Table
+    Token::Pipe,
+    Token::Colon,
+    // Footnote
+    Token::LBracket,
+];
+
 impl Token<'_> {
     pub fn len(&self) -> usize {
         match self {
@@ -148,54 +171,12 @@ impl Token<'_> {
         matches!(self, Token::Whitespace(Whitespace::NewLine(..)))
     }
     /// 是用于 Markdown Block 相关的 Token
-    pub fn is_block_special_token(&self) -> bool {
-        matches!(
-            self,
-            // ATX Heading
-            Token::Crosshatch
-                // Fenced code
-                | Token::Backtick
-                | Token::Tilde
-                // Thematic breaks
-                | Token::Asterisk
-                | Token::Underscore
-                | Token::Plus
-                | Token::Eq
-                // HTML Tag
-                | Token::Lt
-                | Token::Gt
-                | Token::Digit(..)
-                | Token::Hyphen
-                // Table
-                | Token::Pipe
-                | Token::Colon
-                // Footnote
-                | Token::LBracket
-        )
+    pub fn is_special_token(&self) -> bool {
+        if SPECIAL_TOKENS.contains(self) {
+            return true;
+        }
+        matches!(self, Token::Digit(..))
     }
-    // pub fn is_special_char(ch: &char) -> bool {
-    //     matches!(
-    //         ch,
-    //         '#' | '`'
-    //             | '~'
-    //             | '*'
-    //             | '_'
-    //             | '+'
-    //             | '-'
-    //             | '='
-    //             | '<'
-    //             | '>'
-    //             | '|'
-    //             | ':'
-    //             | '!'
-    //             | '&'
-    //             | '['
-    //             | ']'
-    //             | '.'
-    //             | '\\'
-    //     )
-    // }
-
     pub(crate) fn is_anything_space(&self) -> bool {
         let ch = match self {
             Token::Escaped(_) => return false,
@@ -256,8 +237,8 @@ impl Token<'_> {
         str.chars().any(|ch| self.eq(&ch))
     }
     pub(crate) fn write<W>(&self, writer: &mut W) -> fmt::Result
-        where
-            W: fmt::Write,
+    where
+        W: fmt::Write,
     {
         match self {
             Token::Text(str) => write!(writer, "{str}"),
@@ -352,12 +333,12 @@ impl<'input> TryFrom<&Token<'input>> for char {
             Token::Period => '.',
             Token::Slash => '/',
             Token::Backslash => '\\',
-            Token::Escaped(ch) => *ch,
             Token::Control(ch) => *ch,
             Token::Punctuation(ch) => *ch,
             Token::Text(..)
             | Token::Digit(..)
             | Token::Whitespace(..)
+            | Token::Escaped(..)
             | Token::DoubleRBracket
             | Token::DoubleLBracket
             | Token::DoublePercent => return Err(()),
