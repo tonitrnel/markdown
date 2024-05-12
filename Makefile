@@ -21,5 +21,19 @@ test-blocks:
 	cargo test --test link_reference_definitions
 	cargo test --test tabs
 
+test-basics:
+	cargo test --lib blocks
+	cargo test --lib inlines
+
 test-inlines:
 	cargo test --lib inlines
+
+test-passed: test-basics
+	cargo test --test escapes
+	cargo test --test entity
+	cargo test --test thematic_breaks
+	cargo test --test headings
+	cargo test --test code
+	cargo test --test paragraphs
+	cargo test --test blank_lines
+	cargo test --test block_quotes

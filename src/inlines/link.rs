@@ -638,6 +638,77 @@ pub(super) fn process_autolink(
         false
     }
 }
+// pub(super) fn process_autolink_with_protocol(
+//     protocol: &str,
+//     ProcessCtx {
+//         id, line, parser, ..
+//     }: &mut ProcessCtx,
+// ) -> bool {
+//     todo!()
+//     // if !line.validate(1, Token::Colon) {
+//     //     return false;
+//     // };
+//     // match protocol {
+//     //     "http" | "https" => scan_valid_domain(),
+//     //     "mailto" | "xmpp" => scan_valid_domain(),
+//     //     _ => return false,
+//     // }
+//     // let start_location = line.start_location();
+//     // line.skip(2);
+//     // true
+// }
+// pub(super) fn process_autolink_with_prefix(
+//     prefix: &str,
+//     ProcessCtx {
+//         id, line, parser, ..
+//     }: &mut ProcessCtx,
+// ) -> bool {
+//     if !line.validate(1, Token::Period) {
+//         return false;
+//     };
+//     let start_location = line.start_location();
+//     line.skip(2);
+//     true
+// }
+// #[derive(Debug)]
+// enum ValidDomain {
+//     Initial,
+//     InLabel,
+//     Dot,
+// }
+// /// 规则：
+// /// 由字母、数字、`_`和`-`组成，由`.`分割，必需有一个 `.` 并且最后两段不能出现 `_`
+// fn scan_valid_domain(line: &Line) -> Option<usize> {
+//     let mut state = ValidDomain::Initial;
+//     let mut flags = [false; 3]; // 0,1 最后两段是否存在 `_`, 2 存在 `.`
+//     let mut end = 0;
+//     for (i, item) in line.iter().enumerate() {
+//         match (&state, &item.token) {
+//             (ValidDomain::Initial, Token::Text(..) | Token::Digit(..)) => {
+//                 state = ValidDomain::InLabel
+//             }
+//             (ValidDomain::Initial, _) => return None,
+//             (ValidDomain::InLabel, Token::Text(..) | Token::Digit(..) | Token::Hyphen) => continue,
+//             (ValidDomain::InLabel, Token::Underscore) => {
+//                 flags[i % 2] = true;
+//                 continue;
+//             }
+//             (ValidDomain::InLabel, Token::Period) => state = ValidDomain::Dot,
+//             (ValidDomain::Dot, Token::Text(..) | Token::Digit(..)) => {
+//                 flags[2] = true;
+//                 state = ValidDomain::InLabel
+//             }
+//             _ => {
+//                 end = i;
+//                 break;
+//             }
+//         }
+//     }
+//     if end == 0 {
+//         end = line.len()
+//     }
+//     todo!()
+// }
 
 fn scan_url(line: &Line) -> Option<(usize, bool)> {
     let mut end = 0;

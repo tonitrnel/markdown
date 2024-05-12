@@ -299,23 +299,14 @@ where
             list::List::Task(task) => {
                 self.write_open("<ul>".into(), idx)?;
                 if let Some(child_idx) = self.tree.get_first_child(idx) {
-                    self.writer_list_item(
-                        child_idx,
-                        task.tight,
-                        Some((task.checked, task.quested)),
-                    )?;
+                    self.writer_list_item(child_idx, task.tight, task.task)?;
                 }
                 self.write_close("\n</ul>".into(), idx)?;
             }
         }
         Ok(())
     }
-    fn writer_list_item(
-        &mut self,
-        idx: usize,
-        tight: bool,
-        task: Option<(bool, bool)>,
-    ) -> fmt::Result {
+    fn writer_list_item(&mut self, idx: usize, tight: bool, task: Option<char>) -> fmt::Result {
         let newline = if !tight
             || self
                 .tree
@@ -331,11 +322,11 @@ where
             ""
         };
         write!(self.writer, "<li>{newline}")?;
-        if let Some((checked, _)) = task {
-            if checked {
-                writeln!(self.writer, r#"<input type="checkbox" disabled checked />"#)?;
-            } else {
+        if let Some(ch) = task {
+            if ch == ' ' {
                 writeln!(self.writer, r#"<input type="checkbox" disabled />"#)?;
+            } else {
+                writeln!(self.writer, r#"<input type="checkbox" disabled checked />"#)?;
             }
         }
         if let Some((Some(child_idx), child_sibling_idx)) =
