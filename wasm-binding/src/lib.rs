@@ -1,17 +1,21 @@
-mod types;
-
-use markdown::{MarkdownNode, Node, Parser, ParserOptions, Tree};
-use std::rc::Rc;
+use serde::Serialize;
 use wasm_bindgen::prelude::*;
+
+use markdown::{Location, MarkdownNode, Node, Parser, ParserOptions, Tree};
+
+mod types;
 
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(typescript_type = "Frontmatter")]
     pub type Frontmatter;
-    #[wasm_bindgen(typescript_type = "Location")]
-    pub type Location;
+    // #[wasm_bindgen(typescript_type = "Location")]
+    // pub type Location;
     #[wasm_bindgen(typescript_type = "Tags")]
     pub type Tags;
+
+    #[wasm_bindgen(typescript_type = "AstNode")]
+    pub type TAstNode;
 }
 
 fn kind(node: &MarkdownNode) -> &'static str {
@@ -51,93 +55,54 @@ fn kind(node: &MarkdownNode) -> &'static str {
     }
 }
 
-#[wasm_bindgen(skip_typescript)]
+#[derive(Serialize)]
 pub struct AstNode {
-    tree_idx: usize,
-    inner: Rc<Tree<Node>>,
-    kind: &'static str,
+    id: Option<String>,
+    kind: String,
+    content: MarkdownNode,
+    start: Location,
+    end: Location,
+    children: Vec<AstNode>,
+}
+
+impl From<&Node> for AstNode {
+    fn from(value: &Node) -> Self {
+        Self {
+            id: value.id.to_owned(),
+            kind: kind(&value.body).to_string(),
+            start: value.start,
+            end: value.end,
+            content: value.body.clone(),
+            children: Vec::new(),
+        }
+    }
 }
 
 #[wasm_bindgen]
-impl AstNode {
-    #[wasm_bindgen(getter)]
-    pub fn id(&self) -> Option<String> {
-        self.inner[self.tree_idx].id.clone()
-    }
-    #[wasm_bindgen(getter)]
-    pub fn content(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.inner[self.tree_idx].body).unwrap_or_else(|e| {
-            panic!(
-                "Failed to serialize content of node with index {}: {}",
-                self.tree_idx, e
-            )
-        })
-    }
-    #[wasm_bindgen(getter)]
-    pub fn kind(&self) -> String {
-        self.kind.to_string()
-    }
-    #[wasm_bindgen(getter)]
-    pub fn start(&self) -> Location {
-        serde_wasm_bindgen::to_value(&self.inner[self.tree_idx].start)
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to serialize start location of node with index {}: {}",
-                    self.tree_idx, e
-                )
-            })
-            .unchecked_into::<Location>()
-    }
-    #[wasm_bindgen(getter)]
-    pub fn end(&self) -> Location {
-        serde_wasm_bindgen::to_value(&self.inner[self.tree_idx].end)
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to serialize end location of node with index {}: {}",
-                    self.tree_idx, e
-                )
-            })
-            .unchecked_into::<Location>()
-    }
-    #[wasm_bindgen(getter)]
-    pub fn next(&self) -> Option<AstNode> {
-        self.inner.get_next(self.tree_idx).map(|next| {
-            let node = &self.inner[next];
-            AstNode {
-                tree_idx: next,
-                kind: kind(&node.body),
-                inner: self.inner.clone(),
-            }
-        })
-    }
-    #[wasm_bindgen(getter)]
-    pub fn child(&self) -> Option<AstNode> {
-        self.inner.get_first_child(self.tree_idx).map(|child| {
-            let node = &self.inner[child];
-            AstNode {
-                tree_idx: child,
-                kind: kind(&node.body),
-                inner: self.inner.clone(),
-            }
-        })
-    }
-}
-#[wasm_bindgen]
 pub struct Document {
-    ast: Rc<Tree<Node>>,
+    ast: Tree<Node>,
     tags: Vec<String>,
+}
+
+fn transform_ast(ast: &Tree<Node>, index: usize, children: &mut Vec<AstNode>) {
+    let mut next = ast.get_first_child(index);
+    while let Some(next_idx) = next {
+        let mut tree = AstNode::from(&ast[next_idx]);
+        transform_ast(ast, next_idx, &mut tree.children);
+        children.push(tree);
+        next = ast.get_next(next_idx)
+    }
 }
 
 #[wasm_bindgen]
 impl Document {
     #[wasm_bindgen(getter)]
-    pub fn document(&self) -> AstNode {
-        let node = &self.ast[0];
-        AstNode {
-            tree_idx: 0,
-            kind: kind(&node.body),
-            inner: self.ast.clone(),
-        }
+    pub fn tree(self) -> TAstNode {
+        let mut tree = AstNode::from(&self.ast[0]);
+        transform_ast(&self.ast, 0, &mut tree.children);
+        serde_wasm_bindgen::to_value(&tree)
+            .unwrap()
+            .unchecked_into::<TAstNode>()
     }
     #[wasm_bindgen(getter)]
     pub fn tags(&self) -> Tags {
@@ -145,41 +110,26 @@ impl Document {
             .expect("Failed to serialize tags of document")
             .unchecked_into::<Tags>()
     }
-}
 
-#[wasm_bindgen]
-pub struct Markdown {
-    inner: Parser<'static>,
-    leaked_ptr: &'static str,
-}
-
-#[wasm_bindgen]
-impl Markdown {
-    #[wasm_bindgen(constructor)]
-    pub fn new(text: String) -> Markdown {
-        let text = Box::leak(text.into_boxed_str());
-        let inner = Parser::<'static>::new_with_options(
-            text,
-            ParserOptions::default()
-                .enabled_gfm()
-                .enabled_ofm()
-                .enabled_cjk_autocorrect(),
-        );
-        Self {
-            inner,
-            leaked_ptr: text,
-        }
+    #[wasm_bindgen(getter)]
+    pub fn total_nodes(&self) -> u32 {
+        self.ast.len() as u32
     }
-    pub fn parse(mut self) -> Document {
-        // console_error_panic_hook::set_once();
-        let (ast, tags) = self.inner.parse_with_tags();
-        unsafe {
-            // 销毁 text
-            let _ = Box::from_raw(&mut self.leaked_ptr);
-        }
-        Document {
-            ast: Rc::new(ast),
-            tags: tags.into_iter().collect(),
-        }
+}
+
+#[wasm_bindgen]
+pub fn parse(text: String) -> Document {
+    // console_error_panic_hook::set_once();
+    let parser = Parser::new_with_options(
+        &text,
+        ParserOptions::default()
+            .enabled_gfm()
+            .enabled_ofm()
+            .enabled_cjk_autocorrect(),
+    );
+    let (ast, tags) = parser.parse_with_tags();
+    Document {
+        ast,
+        tags: tags.into_iter().collect(),
     }
 }
