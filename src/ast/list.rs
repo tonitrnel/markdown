@@ -86,16 +86,44 @@ pub struct OrderedList {
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct TaskList {
-    pub(crate) checked: bool, // - [x] task text
-    pub(crate) quested: bool, // - [?] task text
+    pub(crate) task: Option<char>, // - [ ] task char
     pub(crate) padding: usize,
     pub(crate) marker_offset: usize,
     pub tight: bool,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-pub struct ListItem {
-    pub order: Option<u64>,    // 1. xxx
-    pub checked: Option<bool>, // - [x] task text
-    pub quested: Option<bool>, // - [?] task text
+#[serde(untagged)]
+pub enum ListItem {
+    Bullet(BulletItem),
+    Ordered(OrderedItem),
+    Task(TaskItem),
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct BulletItem {}
+impl From<BulletItem> for ListItem {
+    fn from(value: BulletItem) -> Self {
+        ListItem::Bullet(value)
+    }
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct OrderedItem {
+    pub start: u64,
+}
+impl From<OrderedItem> for ListItem {
+    fn from(value: OrderedItem) -> Self {
+        ListItem::Ordered(value)
+    }
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct TaskItem {
+    pub task: Option<char>,
+}
+impl From<TaskItem> for ListItem {
+    fn from(value: TaskItem) -> Self {
+        ListItem::Task(value)
+    }
 }

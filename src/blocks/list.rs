@@ -12,6 +12,11 @@ impl BlockStrategy for list::ListItem {
         }: BeforeCtx,
     ) -> BlockMatching {
         let location = line[0].location;
+        // println!(
+        //     "A is_indented = {} body {:?}",
+        //     line.is_indented(),
+        //     parser.tree[parser.tree.get_parent(container)].body
+        // );
         if line.is_indented() && !matches!(parser.tree[container].body, MarkdownNode::List(..)) {
             return BlockMatching::Unmatched;
         }
@@ -77,27 +82,37 @@ impl BlockStrategy for list::ListItem {
             // - [x] task item
             let padding = cur_list.padding() + 4;
             let task_list = match line.next() {
+                Some(Token::RBracket) => None,
                 Some(Token::Whitespace(Whitespace::Space)) => Some(list::TaskList {
-                    checked: false,
-                    quested: false,
+                    task: Some(' '),
                     padding,
                     marker_offset: line.indent_spaces(),
                     tight: true,
                 }),
-                Some(Token::Text("?")) => Some(list::TaskList {
-                    checked: false,
-                    quested: true,
-                    padding,
-                    marker_offset: line.indent_spaces(),
-                    tight: true,
-                }),
-                Some(Token::Text(s)) if s.chars().count() == 1 => Some(list::TaskList {
-                    checked: true,
-                    quested: false,
-                    padding,
-                    marker_offset: line.indent_spaces(),
-                    tight: true,
-                }),
+                Some(token @ (Token::Text(str) | Token::Digit(str))) => {
+                    if token.len() == 1 {
+                        Some(list::TaskList {
+                            task: str.chars().next(),
+                            padding,
+                            marker_offset: line.indent_spaces(),
+                            tight: true,
+                        })
+                    } else {
+                        None
+                    }
+                }
+                Some(token) if token.len() == 1 && !token.is_control() => {
+                    if let Ok(char) = char::try_from(&token) {
+                        Some(list::TaskList {
+                            task: Some(char),
+                            padding,
+                            marker_offset: line.indent_spaces(),
+                            tight: true,
+                        })
+                    } else {
+                        None
+                    }
+                }
                 _ => None,
             };
             // 后跟 ] 和 空格
@@ -117,21 +132,9 @@ impl BlockStrategy for list::ListItem {
             return BlockMatching::Unmatched;
         }
         let cur_item = match &cur_list {
-            list::List::Ordered(list) => list::ListItem {
-                order: Some(list.start),
-                checked: None,
-                quested: None,
-            },
-            list::List::Task(list) => list::ListItem {
-                order: None,
-                checked: Some(list.checked),
-                quested: Some(list.quested),
-            },
-            _ => list::ListItem {
-                order: None,
-                checked: None,
-                quested: None,
-            },
+            list::List::Ordered(list) => list::OrderedItem { start: list.start }.into(),
+            list::List::Task(list) => list::TaskItem { task: list.task }.into(),
+            _ => list::BulletItem {}.into(),
         };
         let cur_list_node = MarkdownNode::List(cur_list);
         parser.close_unmatched_blocks();
@@ -170,7 +173,6 @@ impl BlockStrategy for list::ListItem {
         } else if line.indent_spaces() >= list.padding() + list.marker_offset() {
             line.skip_spaces(list.padding() + list.marker_offset());
             line.re_find_indent();
-            // println!("line = '{line}' {:?}", line.get_raw(0));
             BlockProcessing::Further
         } else {
             BlockProcessing::Unprocessed
@@ -305,11 +307,7 @@ mod tests {
         );
         assert_eq!(
             ast[2].body,
-            MarkdownNode::ListItem(list::ListItem {
-                order: Some(1),
-                checked: None,
-                quested: None
-            })
+            MarkdownNode::ListItem(list::OrderedItem { start: 1 }.into())
         );
         assert_eq!(ast[2].start, Location::new(1, 1));
         assert_eq!(ast[2].end, Location::new(1, 7));
@@ -318,21 +316,13 @@ mod tests {
         assert_eq!(ast[3].end, Location::new(1, 7));
         assert_eq!(
             ast[4].body,
-            MarkdownNode::ListItem(list::ListItem {
-                order: Some(2),
-                checked: None,
-                quested: None
-            })
+            MarkdownNode::ListItem(list::OrderedItem { start: 2 }.into())
         );
         assert_eq!(ast[4].start, Location::new(2, 1));
         assert_eq!(ast[4].end, Location::new(2, 3));
         assert_eq!(
             ast[5].body,
-            MarkdownNode::ListItem(list::ListItem {
-                order: Some(3),
-                checked: None,
-                quested: None
-            })
+            MarkdownNode::ListItem(list::OrderedItem { start: 3 }.into())
         );
         assert_eq!(ast[5].start, Location::new(3, 1));
         assert_eq!(ast[5].end, Location::new(3, 7));
