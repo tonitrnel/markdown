@@ -5,6 +5,9 @@ build-release:
     
 build-wasm:
 	cd ./wasm-binding && wasm-pack build --target nodejs
+
+publish-wasm:
+	cd ./wasm-binding/pkg && npm publish
     
 test-blocks:
 	cargo test --lib blocks

@@ -14,7 +14,7 @@ Rust 语言。
 如果你在寻找一个高性能的 Markdown Rust 库，我推荐使用 [pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark)
 ，其性能是本库的 20 倍以上。
 
-注意：该库尚未通过所有测试。
+> 注意：该库尚未通过所有测试，使用 `\t` 制表符会导致某些例如列表出现解析错误，建议使用 4 个空格替代 `\t`。
 
 ## Installation
 

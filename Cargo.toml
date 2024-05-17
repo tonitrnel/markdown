@@ -28,3 +28,9 @@ frontmatter = ["serde_yaml"]
 
 [workspace]
 members = ["example/data", "wasm-binding"]
+
+[profile.release]
+strip = true
+opt-level = "z"
+lto = true
+panic = "abort"
