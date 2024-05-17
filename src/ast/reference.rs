@@ -1,4 +1,4 @@
-use serde::ser::SerializeMap;
+use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,19 +12,19 @@ impl Serialize for Reference {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(2))?;
+        let mut map = serializer.serialize_struct("Reference", 2)?;
         match self {
             Reference::Heading(str) => {
-                map.serialize_entry("variant", "heading")?;
-                map.serialize_entry("value", str)?;
+                map.serialize_field("variant", "heading")?;
+                map.serialize_field("value", str)?;
             }
             Reference::MultiHeading(str) => {
-                map.serialize_entry("variant", "multi-heading")?;
-                map.serialize_entry("value", str)?;
+                map.serialize_field("variant", "multi-heading")?;
+                map.serialize_field("value", str)?;
             }
             Reference::BlockId(str) => {
-                map.serialize_entry("variant", "block-id")?;
-                map.serialize_entry("value", str)?;
+                map.serialize_field("variant", "block-id")?;
+                map.serialize_field("value", str)?;
             }
         }
         map.end()
