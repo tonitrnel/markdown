@@ -24,7 +24,7 @@ fn kind(node: &MarkdownNode) -> &'static str {
         MarkdownNode::FrontMatter => "frontmatter",
         MarkdownNode::Paragraph => "paragraph",
         MarkdownNode::SoftBreak => "soft-break",
-        MarkdownNode::HardBreak => "hardbreak",
+        MarkdownNode::HardBreak => "hard-break",
         MarkdownNode::Text(..) => "text",
         MarkdownNode::Embed(..) => "embed",
         MarkdownNode::Heading(..) => "heading",
