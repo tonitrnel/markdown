@@ -18,30 +18,49 @@ Rust 语言。
 
 ## Installation
 
-待发布
+```shell
+npm i @painted/markdown-binding
+```
 
 ## Usage
 
 ```ts
-import {Markdown, type DocumentNode} from "@painted/markdown_binding";
+import { parse, type DocumentNode, type AstNode } from "@painted/markdown-binding";
 
-const parser = new Markdown("## hello world");
-const document = parser.parse();
-const tags = document.tags; // 该文档有额外使用（不在 frontmatter）的 tags
-const node = document.document; // Document Node，入口
+const markdown = parse("## hello world");
+const node = markdown.tree as DocumentNode; // Document Node，入口
 
-const render = (node: DocumentNode) => {
+export type DetermineElement =
+  | readonly []
+  | readonly [tag: string]
+  | readonly [tag: string, props: Record<string, unknown>];
+
+export const determineElement = (
+  node: AstNode | undefined,
+): DetermineElement => {
+    if (!node) return [];
     switch (node.kind) {
         case "document": {
-            const child = node.child;
-            // ...
+            return []
+        }
+        case 'paragraph': {
+          return ['p', {id: node.id ? `block-${node.id}` : undefined}];
         }
         case "text": {
             const text = node.content;
         }
+        // ...
     }
 }
-render(node)
+
+const render = (nodes: ReadonlyArray<AstNode>) => {
+  for (const node of nodes){
+    const [tag, props] = determineElement(node);
+    if (!tag) continue
+    // do something...
+  }
+}
+render(node.children) // render document children
 ```
 
 默认启用 `autocorrect` 用于优化排版
