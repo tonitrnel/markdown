@@ -1,7 +1,9 @@
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
-use markdown::{Location, MarkdownNode, Node, Parser, ParserOptions, Tree};
+use markdown::{
+    Document as MarkdownDocument, Location, MarkdownNode, Node, Parser, ParserOptions, Tree,
+};
 
 mod types;
 
@@ -94,6 +96,15 @@ fn transform_ast(ast: &Tree<Node>, index: usize, children: &mut Vec<AstNode>) {
     }
 }
 
+impl From<MarkdownDocument> for Document {
+    fn from(value: MarkdownDocument) -> Self {
+        Self {
+            ast: value.tree,
+            tags: value.tags.into_iter().collect(),
+        }
+    }
+}
+
 #[wasm_bindgen]
 impl Document {
     #[wasm_bindgen(getter)]
@@ -119,7 +130,7 @@ impl Document {
 
 #[wasm_bindgen]
 pub fn parse(text: String) -> Document {
-    // console_error_panic_hook::set_once();
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let parser = Parser::new_with_options(
         &text,
         ParserOptions::default()
@@ -127,9 +138,6 @@ pub fn parse(text: String) -> Document {
             .enabled_ofm()
             .enabled_cjk_autocorrect(),
     );
-    let (ast, tags) = parser.parse_with_tags();
-    Document {
-        ast,
-        tags: tags.into_iter().collect(),
-    }
+    let document = parser.parse();
+    Document::from(document)
 }

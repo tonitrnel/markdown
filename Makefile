@@ -4,7 +4,7 @@ build-release:
 	cargo build --release
     
 build-wasm:
-	cd ./wasm-binding && wasm-pack build --target nodejs
+	cd ./wasm-binding && wasm-pack build --target deno
 
 publish-wasm:
 	cd ./wasm-binding/pkg && npm publish

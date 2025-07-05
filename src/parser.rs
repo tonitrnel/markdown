@@ -1,7 +1,3 @@
-use serde::Serialize;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::fmt::{Debug, Formatter};
-
 use crate::ast::MarkdownNode;
 use crate::blocks::{BlockMatching, BlockProcessing};
 #[allow(unused)]
@@ -11,6 +7,10 @@ use crate::line::Line;
 use crate::tokenizer::{Location, Token, TokenIterator, Tokenizer};
 use crate::tree::Tree;
 use crate::{blocks, inlines};
+use serde::Serialize;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::fmt::{Debug, Formatter};
+use std::ops::Deref;
 
 #[derive(Serialize)]
 pub struct Node {
@@ -35,6 +35,22 @@ impl Node {
             processing: true,
             id: None,
         }
+    }
+}
+
+pub struct Document {
+    pub tree: Tree<Node>,
+    pub tags: HashSet<String>,
+}
+impl Deref for Document {
+    type Target = Tree<Node>;
+    fn deref(&self) -> &Self::Target {
+        &self.tree
+    }
+}
+impl Debug for Document {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.tree.fmt(f)
     }
 }
 
@@ -103,14 +119,8 @@ impl<'input> Parser<'input> {
     }
     pub fn new_with_options(text: &'input str, options: ParserOptions) -> Self {
         let mut tree = Tree::<Node>::new();
-        // println!("创建 Document 节点")
         let doc = tree.append(Node::new(MarkdownNode::Document, Location::default()));
-        // let start = std::time::Instant::now();
         let tokens = Tokenizer::new(text).tokenize();
-        // println!(
-        //     "tokenizer, elapsed: {}ms",
-        //     start.elapsed().as_micros() as f64 / 1000.0
-        // );
         Self {
             tokens,
             inlines: BTreeMap::new(),
@@ -129,34 +139,25 @@ impl<'input> Parser<'input> {
             html_stacks: VecDeque::new(),
         }
     }
-    pub fn parse(mut self) -> Tree<Node> {
-        self.tree.push();
-        // let start = std::time::Instant::now();
-        self.parse_blocks();
-        // println!(
-        //     "parse_blocks, elapsed: {}ms",
-        //     start.elapsed().as_micros() as f64 / 1000.0
-        // );
-        // let start = std::time::Instant::now();
-        self.parse_inlines();
-        // println!(
-        //     "parse_inlines, elapsed: {}ms",
-        //     start.elapsed().as_micros() as f64 / 1000.0
-        // );
-        self.tree.pop();
-        self.tree
-    }
-    pub fn parse_with_tags(mut self) -> (Tree<Node>, HashSet<String>) {
+    pub fn parse(mut self) -> Document {
         self.tree.push();
         self.parse_blocks();
         self.parse_inlines();
         self.tree.pop();
-        (self.tree, self.tags)
+        Document {
+            tree: self.tree,
+            tags: self.tags,
+        }
     }
     #[cfg(feature = "frontmatter")]
     pub fn parse_frontmatter(&mut self) -> Option<serde_yaml::Value> {
         exts::frontmatter::parse(self)
     }
+
+    // +9.1691ms
+    //     while            +4.6833ms
+    //     incorporate_line +4.4858ms
+    //     ...              +1ms
     fn parse_blocks(&mut self) {
         while let Some(line) = Line::extract(&mut self.tokens) {
             let last_location = if line.is_blank() {
@@ -175,6 +176,8 @@ impl<'input> Parser<'input> {
         // 重置树，后面的不在使用树的状态控制层级而是直接操作层级
         self.tree.reset();
     }
+    // +9.5869ms
+    //     inlines::process +8.729ms
     fn parse_inlines(&mut self) {
         self.parse_reference_link();
         let keys = self.inlines.keys().copied().collect::<Vec<_>>();
@@ -187,7 +190,6 @@ impl<'input> Parser<'input> {
             }
             let mut line = Line::extends(lines.unwrap());
             line.trim_end_matches(|it: &Token| matches!(it, Token::Whitespace(..)));
-            // println!("#{idx} {:?} {:?}", self.tree[idx].body, line);
             inlines::process(idx, self, line);
         }
         self.parse_footnote_list();

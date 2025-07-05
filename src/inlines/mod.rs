@@ -30,13 +30,6 @@ struct ProcessCtx<'a, 'input> {
 }
 
 pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, mut line: Line<'input>) {
-    // println!(
-    //     "    ({})↩({})@{:?}\"{:?}\"",
-    //     line.len(),
-    //     parser.tree.get_parent(id),
-    //     parser.tree[parser.tree.get_parent(id)].body,
-    //     line
-    // );
     let mut ctx = ProcessCtx {
         id,
         parser,

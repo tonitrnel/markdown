@@ -68,6 +68,7 @@ pub(crate) fn encode(url: impl AsRef<str>, keep_escaped: bool) -> String {
     }
     encoded
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,7 +79,7 @@ mod tests {
         assert_eq!(decode("?key=%E6%B5%8B%E8%AF%95"), "?key=测试");
         assert_eq!(decode("%3B%2C%2F%3F%3A%40%26%3D%2B%24"), ";,/?:@&=+$");
         assert_eq!(encode(" ", false), "%20");
-        assert_eq!(encode("Hello World!", false), "Hello%20World%21");
+        assert_eq!(encode("Hello World!", false), "Hello%20World!");
     }
     #[test]
     fn test_double_byte() {

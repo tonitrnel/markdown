@@ -9,32 +9,35 @@ fn merge_text_node(
     idx: usize,
     into_idx: Option<usize>,
 ) {
-    if matches!(parser.tree[idx].body, MarkdownNode::Text(..)) {
-        let next = parser.tree.get_next(idx);
-        let into_idx = if let Some(into_idx) = into_idx {
-            // println!("删除文本节点 #{idx}")
-            let node = parser.tree.remove(idx);
-            match (&mut parser.tree[into_idx].body, node.body) {
-                (MarkdownNode::Text(into_str), MarkdownNode::Text(mut str)) => {
-                    into_str.extend(str.drain(..));
+    let mut stack = vec![(idx, into_idx)];
+    while let Some((idx, into_idx)) = stack.pop() {
+        if matches!(parser.tree[idx].body, MarkdownNode::Text(..)) {
+            let next = parser.tree.get_next(idx);
+            let into_idx = if let Some(into_idx) = into_idx {
+                // println!("删除文本节点 #{idx}")
+                let node = parser.tree.remove(idx);
+                match (&mut parser.tree[into_idx].body, node.body) {
+                    (MarkdownNode::Text(into_str), MarkdownNode::Text(mut str)) => {
+                        into_str.extend(str.drain(..));
+                    }
+                    _ => panic!("unexpected error"),
                 }
-                _ => panic!("unexpected error"),
+                parser.tree[into_idx].end = node.end;
+                Some(into_idx)
+            } else {
+                text_ids.push(idx);
+                Some(idx)
+            };
+            if let Some(next_idx) = next {
+                stack.push((next_idx, into_idx))
             }
-            parser.tree[into_idx].end = node.end;
-            Some(into_idx)
         } else {
-            text_ids.push(idx);
-            Some(idx)
-        };
-        if let Some(next_idx) = next {
-            merge_text_node(parser, text_ids, next_idx, into_idx)
-        }
-    } else {
-        if let Some(child_idx) = parser.tree.get_first_child(idx) {
-            merge_text_node(parser, text_ids, child_idx, None)
-        }
-        if let Some(next_idx) = parser.tree.get_next(idx) {
-            merge_text_node(parser, text_ids, next_idx, None)
+            if let Some(child_idx) = parser.tree.get_first_child(idx) {
+                stack.push((child_idx, None))
+            }
+            if let Some(next_idx) = parser.tree.get_next(idx) {
+                stack.push((next_idx, None))
+            }
         }
     }
 }
@@ -47,6 +50,9 @@ pub(super) fn process(ProcessCtx { id, parser, .. }: &mut ProcessCtx) {
     // let start = std::time::Instant::now();
     // println!("合并文本節點開始 #{id}")
     merge_text_node(parser, &mut text_ids, next, None);
+    if !parser.options.cjk_autocorrect {
+        return;
+    }
     // println!("合并文本節點結束[{}µs]", start.elapsed().as_micros());
     let is_rich = matches!(
         &parser.tree[*id].body,
@@ -58,7 +64,7 @@ pub(super) fn process(ProcessCtx { id, parser, .. }: &mut ProcessCtx) {
         } else {
             continue;
         };
-        if parser.options.cjk_autocorrect && is_rich {
+        if is_rich {
             correct_cjk_text(text);
         }
     }

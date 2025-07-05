@@ -16,9 +16,10 @@ autocorrect = "2.9.0"
 [dev-dependencies]
 regex = "1.10.4"
 criterion = "0.5.1"
+colored = "2.1.0"
 
 [[bench]]
-name = "test"
+name = "benchmark"
 harness = false
 
 [features]
@@ -27,7 +28,7 @@ html = []
 frontmatter = ["serde_yaml"]
 
 [workspace]
-members = ["example/data", "wasm-binding"]
+members = ["examples/*", "wasm-binding"]
 
 [profile.release]
 strip = true

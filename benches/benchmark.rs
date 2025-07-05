@@ -6,6 +6,9 @@ use std::fs;
 fn parse(text: &str) {
     let parser = Parser::new_with_options(text, ParserOptions::default().enabled_ofm());
     let ast = parser.parse();
+    // without html: 18.947 ms
+    // without inline: 9ms
+    // without all: 285ns
     let _html = ast.to_html();
 }
 

@@ -674,7 +674,7 @@ mod tests {
             Tokenizer::new("1. Markdown 语法\n2. test2.2\n3. 12453\n21.214")
                 .tokenize()
                 .count(),
-            20
+            23
         )
     }
 

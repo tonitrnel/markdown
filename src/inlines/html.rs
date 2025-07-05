@@ -19,11 +19,15 @@ pub(super) fn process(
         return false;
     };
     // println!("inlines::html::process len = {len} html_type = {html_type:?}");
-    let end_location = line[len - 1].end_location();
+    let end_location = if len == 0 {
+        line.last_token_end_location()
+    } else {
+        line[len - 1].end_location()
+    };
     line.skip(len);
     let (start, end, html) = match &html_type {
-        html::HtmlType::Type2
-        | html::HtmlType::Type3
+        html::HtmlType::Type2 => (0, 0, html::Html::Inline(html_type)),
+        html::HtmlType::Type3
         | html::HtmlType::Type4
         | html::HtmlType::Type5
         | html::HtmlType::Type1(.., html::Flag::SelfClose | html::Flag::End)

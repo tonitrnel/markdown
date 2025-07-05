@@ -24,7 +24,9 @@ pub enum MarkdownNode {
     FrontMatter,
     // 段落
     Paragraph,
+    // 软换行，指单个 \n
     SoftBreak,
+    // 硬换行，末尾跟随空格、‘\’ 或多个 \n
     HardBreak,
     // 文本
     Text(String),

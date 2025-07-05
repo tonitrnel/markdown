@@ -1,10 +1,13 @@
+use colored::*;
 use markdown::parser::Parser;
 use regex::Regex;
 use std::fs;
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
-static RE: OnceLock<Regex> = OnceLock::new();
+static RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^`{32} example\n(?<markdown>[\s\S]*?)^\.\n(?<html>[\s\S]*?)^`{32}$|^#{1,6} *(?<section>.*)$").unwrap()
+});
 
 struct Example {
     markdown: String,
@@ -14,12 +17,9 @@ struct Example {
 }
 
 fn extract_space_tests(testfile: &Path) -> Vec<Example> {
-    let regex = RE.get_or_init(|| {
-        Regex::new(r"(?m)^`{32} example\n(?<markdown>[\s\S]*?)^\.\n(?<html>[\s\S]*?)^`{32}$|^#{1,6} *(?<section>.*)$").unwrap()
-    });
     let text = fs::read_to_string(testfile).unwrap().replace("\r\n", "\n");
     // 结果将是包含字符串中每个匹配项的开始和结束索引的元组的迭代器
-    let result = regex.captures_iter(&text);
+    let result = RE.captures_iter(&text);
     let mut current_section = String::new();
     let mut examples = Vec::new();
     for captures in result {
@@ -53,13 +53,22 @@ fn spec_test(testcase: &Example) -> bool {
     let ast = Parser::new(&testcase.markdown).parse();
     let html = ast.to_html();
     if html.replace('\n', "") != testcase.html.replace('\n', "") {
-        eprintln!("⌈------------------------DEBUG INFO--------------------------");
+        eprintln!(
+            "{}",
+            "⌈------------------------DEBUG INFO--------------------------".bright_black()
+        );
         eprintln!("[AST]:\n {:?}", ast);
         eprintln!("[RAW]:\n {:?}", testcase.markdown);
-        eprintln!("⁞------------------------ASSERT INFO-------------------------");
+        eprintln!(
+            "{}",
+            "⁞------------------------ASSERT INFO-------------------------".bright_black()
+        );
         eprintln!(" left: {:?}", html);
         eprintln!("right: {:?}", testcase.html);
-        eprintln!("⌊------------------------------------------------------------");
+        eprintln!(
+            "{}",
+            "⌊------------------------------------------------------------".bright_black()
+        );
         false
     } else {
         true
@@ -74,21 +83,35 @@ fn spec_tests(testfile: &str) {
     for testcase in testcases.iter() {
         let panics = std::panic::catch_unwind(|| spec_test(&testcase));
         if let Ok(true) = panics {
-            println!("test {}:{} ... ok", testcase.section, testcase.number);
+            println!(
+                "test {}:{} ... {}",
+                testcase.section,
+                testcase.number,
+                "ok".green()
+            );
             passed += 1;
         } else {
-            eprintln!("test {}:{} ... failed", testcase.section, testcase.number);
+            eprintln!(
+                "test {}:{} ... {}",
+                testcase.section,
+                testcase.number,
+                "FAILED".red()
+            );
             failed += 1;
         }
     }
     if failed > 0 {
         panic!(
-            "tests result: {passed:?} passed; {failed:?} failed; finished in {}ms",
+            "tests result: {passed:?} {}; {failed:?} {}; finished in {}ms",
+            "passed".green(),
+            "failed".red(),
             start.elapsed().as_millis()
         )
     } else {
         println!(
-            "tests result: {passed:?} passed; {failed:?} failed; finished in {}ms",
+            "tests result: {passed:?} {}; {failed:?} {}; finished in {}ms",
+            "passed".green(),
+            "failed".red(),
             start.elapsed().as_millis()
         )
     }
