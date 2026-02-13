@@ -71,11 +71,8 @@ pub(super) fn process(ProcessCtx { id, parser, .. }: &mut ProcessCtx) {
 }
 
 fn correct_cjk_text(text: &mut String) {
-    // println!("自動校正開始")
-    // let start = std::time::Instant::now();
-    let corrected = autocorrect::format(text.as_ref());
-    if &corrected != text {
-        *text = corrected
+    let corrected = crate::utils::cjk::correct_cjk_spacing(text.as_ref());
+    if let std::borrow::Cow::Owned(new_text) = corrected {
+        *text = new_text;
     }
-    // println!("自動校正結束[{}µs]", start.elapsed().as_micros());
 }
