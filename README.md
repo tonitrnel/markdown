@@ -4,12 +4,12 @@
 
 ## Motivation
 
-目标是解析 CommonMark、GFM（GitHub Flavored Markdown）和 OFM（Obsidian Flavored Markdown），输出 AST 供上层渲染系统使用。
-HTML 渲染仅用于测试与调试，不是核心目标。
+`Painted Markdown` 是一个 **AST-first** 的 Markdown 解析器：
+- 输入 Markdown，输出结构化 AST（包含节点类型、层级与位置信息）。
+- 目标兼容 CommonMark / GFM / OFM，供上层渲染系统（Web/Node）消费。
+- 内置 HTML 渲染主要用于测试与调试，不是主接口。
 
-需要注意的是，渲染 HTML 并不是该库的实现目标，这一功能主要用于测试目的。该库其核心需求是将库编译为 WebAssembly（WASM），然后在
-NodeJS 的 Astro 项目中使用，根据 AST（抽象语法树）渲染相应的组件。之所以使用 Rust 语言而不是 TypeScript 编写是为了方便学习和实践
-Rust 语言。
+项目重点是作为上层渲染管线的“语法前端”，尤其是通过 WebAssembly 在 JS 生态中复用 Rust 解析能力。
 
 如果你在寻找极致吞吐和低内存占用，优先考虑事件流解析器（如 `pulldown-cmark` / `cmark`）。
 
@@ -20,7 +20,7 @@ Rust 语言。
 markdown = { path = ".../markdown" }
 ```
 
-## Usage
+## API Usage
 
 ### Rust API
 
@@ -36,6 +36,7 @@ let parser = Parser::new_with_options(
 );
 let doc = parser.parse();
 let node_count = doc.tree.len();
+let html = doc.tree.to_html(); // for debug/testing
 ```
 
 ### 安全护栏（推荐给 WASM/NAPI）
@@ -55,6 +56,33 @@ match parser.parse_checked() {
     Err(ParseError::InputTooLarge { limit, actual }) => { /* handle */ }
     Err(ParseError::NodeLimitExceeded { limit, actual }) => { /* handle */ }
 }
+```
+
+### WASM API (Browser/Bundler)
+
+```ts
+import { parse_with_options } from "@ptdgrp/markdown-wasm";
+
+const doc = parse_with_options("# Hello", {
+  github_flavored: true,
+  obsidian_flavored: true,
+  cjk_autocorrect: true
+});
+
+const tree = doc.tree;
+const tags = doc.tags;
+const frontmatter = doc.frontmatter;
+const html = doc.to_html(); // debug/testing
+```
+
+### WASM API (Node.js)
+
+```ts
+import { parse } from "@ptdgrp/markdown-wasm-node";
+
+const doc = parse("This is $e^{i\\pi}+1=0$");
+console.log(doc.total_nodes);
+console.log(doc.to_html()); // debug/testing
 ```
 
 ### Frontmatter
