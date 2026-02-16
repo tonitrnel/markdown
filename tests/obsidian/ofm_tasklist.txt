@@ -1,0 +1,79 @@
+// Obsidian Flavored Markdown - Task Lists
+// Reference: https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax
+
+## Task Lists (extension)
+
+OFM supports task lists with checkboxes. A list item starting with `[ ]` is
+unchecked, and `[x]` is checked. Unlike GFM, Obsidian treats any character
+other than space as checked.
+
+Basic task list:
+
+```````````````````````````````` example
+- [ ] unchecked task
+- [x] checked task
+.
+<ul class="contains-task-list">
+<li class="task-list-item"><input type="checkbox" disabled /> unchecked task</li>
+<li class="task-list-item is-checked"><input type="checkbox" disabled checked /> checked task</li>
+</ul>
+````````````````````````````````
+
+Task list with formatting:
+
+```````````````````````````````` example
+- [x] **bold task**
+- [ ] *italic task*
+.
+<ul class="contains-task-list">
+<li class="task-list-item is-checked"><input type="checkbox" disabled checked /> <strong>bold task</strong></li>
+<li class="task-list-item"><input type="checkbox" disabled /> <em>italic task</em></li>
+</ul>
+````````````````````````````````
+
+Nested task list:
+
+```````````````````````````````` example
+- [x] parent task
+  - [ ] child task
+  - [x] another child
+- [ ] second parent
+.
+<ul class="contains-task-list">
+<li class="task-list-item is-checked"><input type="checkbox" disabled checked /> parent task
+<ul class="contains-task-list">
+<li class="task-list-item"><input type="checkbox" disabled /> child task</li>
+<li class="task-list-item is-checked"><input type="checkbox" disabled checked /> another child</li>
+</ul>
+</li>
+<li class="task-list-item"><input type="checkbox" disabled /> second parent</li>
+</ul>
+````````````````````````````````
+
+Obsidian supports any character as checked state:
+
+```````````````````````````````` example
+- [?] question mark task
+- [!] important task
+- [-] cancelled task
+.
+<ul class="contains-task-list">
+<li class="task-list-item is-checked"><input type="checkbox" disabled checked /> question mark task</li>
+<li class="task-list-item is-checked"><input type="checkbox" disabled checked /> important task</li>
+<li class="task-list-item is-checked"><input type="checkbox" disabled checked /> cancelled task</li>
+</ul>
+````````````````````````````````
+
+Mixed regular list and task list:
+
+```````````````````````````````` example
+- regular item
+- [ ] task item
+- another regular
+.
+<ul class="contains-task-list">
+<li>regular item</li>
+<li class="task-list-item"><input type="checkbox" disabled /> task item</li>
+<li>another regular</li>
+</ul>
+````````````````````````````````

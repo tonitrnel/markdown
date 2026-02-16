@@ -1,0 +1,36 @@
+// Obsidian Flavored Markdown - Block Identifiers
+// Reference: https://help.obsidian.md/Linking+notes+and+files/Internal+links#Link+to+a+block+in+a+note
+
+## Block Identifiers (extension)
+
+OFM enables the `block identifier` extension. A caret followed by an identifier
+(`^block-id`) at the end of a block defines a referenceable block.
+
+Block id at the end of a paragraph:
+
+```````````````````````````````` example
+This is a paragraph.
+^my-block-id
+.
+<p id="my-block-id">This is a paragraph.</p>
+````````````````````````````````
+
+Block id with alphanumeric characters:
+
+```````````````````````````````` example
+Some content here.
+^abc123
+.
+<p id="abc123">Some content here.</p>
+````````````````````````````````
+
+Standalone block id on its own line:
+
+```````````````````````````````` example
+A paragraph above.
+
+^standalone-id
+.
+<p>A paragraph above.</p>
+<p id="standalone-id"></p>
+````````````````````````````````

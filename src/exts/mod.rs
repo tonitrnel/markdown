@@ -1,2 +1,2 @@
-#[cfg(feature = "frontmatter")]
+pub mod yaml;
 pub mod frontmatter;

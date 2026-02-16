@@ -1,7 +1,6 @@
 #![allow(unused)]
-use crate::ast::{math, MarkdownNode};
+use crate::ast::{MarkdownNode, math};
 use crate::inlines::ProcessCtx;
-use crate::tokenizer::{Token, Whitespace};
 
 pub(super) fn process(
     ProcessCtx {
@@ -10,78 +9,77 @@ pub(super) fn process(
     is_block: bool,
 ) -> bool {
     let start_location = line.start_location();
-    line.skip(if is_block { 2 } else { 1 });
+    let delimiter_len = if is_block { 2 } else { 1 };
+    line.skip(delimiter_len);
+    // 检查开头是否允许（非 block 时不能以空白开头）
     let allow_open = if is_block {
         true
     } else {
-        line.validate(0, |it: &Token| !matches!(it, Token::Whitespace(..)))
+        line.peek()
+            .map(|b| !b.is_ascii_whitespace())
+            .unwrap_or(false)
     };
     if !allow_open {
         return false;
-    };
-    let mut iter = line.iter().enumerate();
-    let (end, expression) = loop {
-        if let Some((end, item)) = iter.next() {
-            if Token::Dollar == item.token {
-                if is_block && line.validate(end + 1, Token::Dollar) {
-                    let mut _line = line.slice(0, end);
-                    break (end + 2, _line);
-                } else if !is_block {
-                    let _line = line.slice(0, end);
-                    break (end + 1, _line);
-                }
+    }
+    let expr_start_loc = line.start_location();
+    let mut expression_bytes: Vec<u8> = Vec::new();
+    let expr_end_loc = loop {
+        let Some(current) = line.peek() else {
+            return false;
+        };
+        if current == b'$' && (!is_block || line.validate(1, b'$')) {
+            if !is_block
+                && (expression_bytes.is_empty()
+                    || expression_bytes
+                        .last()
+                        .is_some_and(|b| b.is_ascii_whitespace()))
+            {
+                return false;
             }
-            continue;
+            break line.start_location();
         }
-        return false;
+        if let Some(next) = line.next_byte() {
+            expression_bytes.push(next);
+        } else {
+            return false;
+        }
     };
-    let allow_close = if is_block {
-        true
-    } else {
-        line.validate(end - 2, |it: &Token| !matches!(it, Token::Whitespace(..)))
-    };
-    if !allow_close {
-        return false;
-    };
-    let text = line.slice(0, end);
-    let end_location = line[end - 1].end_location();
+    line.skip(delimiter_len);
+    let end_location = line.start_location();
     let node = if is_block {
         parser.append_to(
             *id,
-            MarkdownNode::Math(math::Math::Block(math::BlockMath {})),
+            MarkdownNode::Math(Box::new(math::Math::Block(math::BlockMath {}))),
             (start_location, end_location),
         )
     } else {
         parser.append_to(
             *id,
-            MarkdownNode::Math(math::Math::Inline(math::InlineMath {})),
+            MarkdownNode::Math(Box::new(math::Math::Inline(math::InlineMath {}))),
             (start_location, end_location),
         )
     };
-    line.skip(end);
-    parser.append_text_to(
-        node,
-        expression.to_unescape_string(),
-        (
-            expression.start_location(),
-            expression.last_token_end_location(),
-        ),
-    );
+    let expression_str = match std::str::from_utf8(&expression_bytes) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    parser.append_text_to(node, expression_str, (expr_start_loc, expr_end_loc));
     true
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::Parser;
     use crate::ParserOptions;
+    use crate::parser::Parser;
 
     #[test]
     fn ext_case_1() {
-        let text = r#"$$
+        let text = r#"$
 \begin{vmatrix}a & b\\
 c & d
 \end{vmatrix}=ad-bc
-$$"#;
+$"#;
         let ast = Parser::new(text).parse();
         println!("{ast:?}")
     }

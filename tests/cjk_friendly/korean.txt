@@ -1,0 +1,41 @@
+// CJK-friendly emphasis with Korean (Hangul) characters
+// Hangul script is classified as CJK character per the specification
+
+## CJK Korean: Strong emphasis with Hangul
+
+```````````````````````````````` example
+**이 [링크](https://example.kr/)**만을 강조하고 싶다.
+.
+<p><strong>이 <a href="https://example.kr/">링크</a></strong>만을 강조하고 싶다.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+**스크립트(script)**라고
+.
+<p><strong>스크립트(script)</strong>라고</p>
+````````````````````````````````
+
+```````````````````````````````` example
+패키지를 발행하려면 **`npm publish`**를 실행하십시오.
+.
+<p>패키지를 발행하려면 <strong><code>npm publish</code></strong>를 실행하십시오.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+**안녕(hello)**하세요.
+.
+<p><strong>안녕(hello)</strong>하세요.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+ᅡ**(a)**
+.
+<p>ᅡ<strong>(a)</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example
+**(k)**ᄏ
+.
+<p><strong>(k)</strong>ᄏ</p>
+````````````````````````````````
+

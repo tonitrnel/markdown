@@ -1,0 +1,63 @@
+// Obsidian Flavored Markdown - Strikethrough
+// Reference: https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax
+
+## Strikethrough (extension)
+
+Text wrapped in two tildes (`~~`) is rendered as strikethrough.
+
+```````````````````````````````` example
+~~strikethrough~~
+.
+<p><del>strikethrough</del></p>
+````````````````````````````````
+
+Inline strikethrough:
+
+```````````````````````````````` example
+Any word wrapped with two tildes (like ~~this~~) will appear crossed out.
+.
+<p>Any word wrapped with two tildes (like <del>this</del>) will appear crossed out.</p>
+````````````````````````````````
+
+Single tilde also works in OFM:
+
+```````````````````````````````` example
+~single tilde~ strikethrough.
+.
+<p><del>single tilde</del> strikethrough.</p>
+````````````````````````````````
+
+Strikethrough with inline formatting:
+
+```````````````````````````````` example
+~~**bold and deleted**~~
+.
+<p><del><strong>bold and deleted</strong></del></p>
+````````````````````````````````
+
+Strikethrough cannot span multiple paragraphs:
+
+```````````````````````````````` example
+~~not
+
+crossed~~
+.
+<p>~~not</p>
+<p>crossed~~</p>
+````````````````````````````````
+
+Three or more tildes do not create a strikethrough:
+
+```````````````````````````````` example
+~~~not strikethrough~~~
+.
+<p>~~~not strikethrough~~~</p>
+````````````````````````````````
+
+Multiple strikethroughs in one line:
+
+```````````````````````````````` example
+~~first~~ and ~~second~~ deleted.
+.
+<p><del>first</del> and <del>second</del> deleted.</p>
+````````````````````````````````

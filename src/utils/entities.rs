@@ -2236,18 +2236,49 @@ pub(crate) fn unescape_string(str: impl AsRef<str>) -> String {
         str.to_owned()
     }
 }
-pub(crate) fn escape_xml(str: impl AsRef<str>) -> String {
-    let mut new = String::new();
-    for char in str.as_ref().chars() {
-        match char {
-            '&' => new.push_str("&amp;"),
-            '<' => new.push_str("&lt;"),
-            '>' => new.push_str("&gt;"),
-            '"' => new.push_str("&quot;"),
-            _ => new.push(char),
+pub(crate) fn escape_xml(input: &str) -> std::borrow::Cow<'_, str> {
+    let bytes = input.as_bytes();
+    let first_escape = bytes
+        .iter()
+        .position(|b| matches!(*b, b'&' | b'<' | b'>' | b'"'));
+    let Some(mut i) = first_escape else {
+        return std::borrow::Cow::Borrowed(input);
+    };
+
+    let mut out = String::with_capacity(input.len() + 16);
+    out.push_str(&input[..i]);
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'&' => {
+                out.push_str("&amp;");
+                i += 1;
+            }
+            b'<' => {
+                out.push_str("&lt;");
+                i += 1;
+            }
+            b'>' => {
+                out.push_str("&gt;");
+                i += 1;
+            }
+            b'"' => {
+                out.push_str("&quot;");
+                i += 1;
+            }
+            _ => {
+                let start = i;
+                while i < bytes.len() && !matches!(bytes[i], b'&' | b'<' | b'>' | b'"') {
+                    i += 1;
+                }
+                // SAFETY: input is valid UTF-8 and split points are always on ASCII bytes,
+                // which are UTF-8 code-point boundaries.
+                out.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[start..i]) });
+            }
         }
     }
-    new
+
+    std::borrow::Cow::Owned(out)
 }
 #[cfg(test)]
 mod tests {

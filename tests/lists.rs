@@ -665,19 +665,13 @@ fn case_294() {
     - baz
       - boo"#;
     let output = r#"<ul>
-<li>foo
-<ul>
-<li>bar
-<ul>
-<li>baz
-<ul>
+<li>foo<ul>
+<li>bar<ul>
+<li>baz<ul>
 <li>boo</li>
-</ul>
-</li>
-</ul>
-</li>
-</ul>
-</li>
+</ul></li>
+</ul></li>
+</ul></li>
 </ul>"#;
     let ast = Parser::new(input).parse();
     println!("AST:\n{ast:?}");
@@ -704,11 +698,9 @@ fn case_296() {
     let input = r#"10) foo
     - bar"#;
     let output = r#"<ol start="10">
-<li>foo
-<ul>
+<li>foo<ul>
 <li>bar</li>
-</ul>
-</li>
+</ul></li>
 </ol>"#;
     let ast = Parser::new(input).parse();
     println!("AST:\n{ast:?}");
@@ -772,7 +764,8 @@ fn case_300() {
 </li>
 <li>
 <h2>Bar</h2>
-baz</li>
+baz
+</li>
 </ul>"#;
     let ast = Parser::new(input).parse();
     println!("AST:\n{ast:?}");
@@ -878,18 +871,14 @@ fn case_307() {
 
       bim"#;
     let output = r#"<ul>
-<li>foo
-<ul>
-<li>bar
-<ul>
+<li>foo<ul>
+<li>bar<ul>
 <li>
 <p>baz</p>
 <p>bim</p>
 </li>
-</ul>
-</li>
-</ul>
-</li>
+</ul></li>
+</ul></li>
 </ul>"#;
     let ast = Parser::new(input).parse();
     println!("AST:\n{ast:?}");
@@ -1058,7 +1047,9 @@ fn case_315() {
 <li>
 <p>a</p>
 </li>
-<li></li>
+<li>
+
+</li>
 <li>
 <p>c</p>
 </li>
@@ -1143,14 +1134,12 @@ fn case_319() {
     c
 - d"#;
     let output = r#"<ul>
-<li>a
-<ul>
+<li>a<ul>
 <li>
 <p>b</p>
 <p>c</p>
 </li>
-</ul>
-</li>
+</ul></li>
 <li>d</li>
 </ul>"#;
     let ast = Parser::new(input).parse();
@@ -1164,11 +1153,9 @@ fn case_320() {
   >
 * c"#;
     let output = r#"<ul>
-<li>a
-<blockquote>
+<li>a<blockquote>
 <p>b</p>
-</blockquote>
-</li>
+</blockquote></li>
 <li>c</li>
 </ul>"#;
     let ast = Parser::new(input).parse();
@@ -1184,13 +1171,11 @@ fn case_321() {
   ```
 - d"#;
     let output = r#"<ul>
-<li>a
-<blockquote>
+<li>a<blockquote>
 <p>b</p>
 </blockquote>
 <pre><code>c
-</code></pre>
-</li>
+</code></pre></li>
 <li>d</li>
 </ul>"#;
     let ast = Parser::new(input).parse();
@@ -1212,11 +1197,9 @@ fn case_323() {
     let input = r#"- a
   - b"#;
     let output = r#"<ul>
-<li>a
-<ul>
+<li>a<ul>
 <li>b</li>
-</ul>
-</li>
+</ul></li>
 </ul>"#;
     let ast = Parser::new(input).parse();
     println!("AST:\n{ast:?}");

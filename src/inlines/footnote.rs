@@ -39,10 +39,12 @@ pub(crate) fn process_footnote_list(parser: &mut Parser, node_refcounts: Vec<(us
         for i in 0..ref_count {
             parser.append_to(
                 last_child,
-                MarkdownNode::Link(link::Link::FootnoteBackref(link::FootnoteBackref {
-                    footnote_label: ref_label.clone(),
-                    index: i + 1,
-                })),
+                MarkdownNode::Link(Box::new(link::Link::FootnoteBackref(
+                    link::FootnoteBackref {
+                        footnote_label: ref_label.clone(),
+                        index: i + 1,
+                    },
+                ))),
                 (location, location),
             );
         }

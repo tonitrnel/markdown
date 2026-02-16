@@ -15,23 +15,23 @@ pub mod reference;
 pub mod table;
 pub mod thematic_break;
 
-#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum MarkdownNode {
     // 根节点
     Document,
     // 前言，记录 Yaml 内容，仅出现在内容顶部
-    FrontMatter,
+    FrontMatter(Box<crate::exts::yaml::YamlMap>),
     // 段落
     Paragraph,
     // 软换行，指单个 \n
     SoftBreak,
-    // 硬换行，末尾跟随空格、‘\’ 或多个 \n
+    // 硬换行，末尾跟随空格、'\' 或多个 \n
     HardBreak,
     // 文本
     Text(String),
     // 内部嵌入
-    Embed(embed::Embed),
+    Embed(Box<embed::Embed>),
     // 标题
     Heading(heading::Heading),
     // 重要
@@ -39,13 +39,13 @@ pub enum MarkdownNode {
     // 强调
     Emphasis,
     // 列表
-    List(list::List),
+    List(Box<list::List>),
     // 列表项
-    ListItem(list::ListItem),
+    ListItem(Box<list::ListItem>),
     // 图像
-    Image(image::Image),
+    Image(Box<image::Image>),
     // 链接
-    Link(link::Link),
+    Link(Box<link::Link>),
     // 标签
     Tag(String),
     // 表情
@@ -53,9 +53,9 @@ pub enum MarkdownNode {
     // 块引用
     BlockQuote,
     // 代码
-    Code(code::Code),
+    Code(Box<code::Code>),
     // 表格
-    Table(table::Table),
+    Table(Box<table::Table>),
     TableHead,
     TableHeadCol,
     TableBody,
@@ -68,15 +68,15 @@ pub enum MarkdownNode {
     // 水平线
     ThematicBreak,
     // 脚注
-    Footnote(footnote::Footnote),
+    Footnote(Box<footnote::Footnote>),
     // 脚注列表（仅在使用某个脚注创建，不由正文生成）
     FootnoteList,
     // 数学/公式
-    Math(math::Math),
+    Math(Box<math::Math>),
     // 标注
-    Callout(callout::Callout),
+    Callout(Box<callout::Callout>),
     // HTML
-    Html(html::Html),
+    Html(Box<html::Html>),
 }
 impl MarkdownNode {
     /// 是否接受目标节点
@@ -120,28 +120,31 @@ impl MarkdownNode {
         !self.is_block_level()
     }
     pub fn is_block_level(&self) -> bool {
-        matches!(
-            self,
+        match self {
             MarkdownNode::Document
-                | MarkdownNode::FrontMatter
-                | MarkdownNode::Paragraph
-                | MarkdownNode::Heading(..)
-                | MarkdownNode::List(..)
-                | MarkdownNode::ListItem(..)
-                | MarkdownNode::BlockQuote
-                | MarkdownNode::Code(code::Code::Fenced(..) | code::Code::Indented(..))
-                | MarkdownNode::Table(..)
-                | MarkdownNode::TableHead
-                | MarkdownNode::TableHeadCol
-                | MarkdownNode::TableBody
-                | MarkdownNode::TableRow
-                | MarkdownNode::TableDataCol
-                | MarkdownNode::ThematicBreak
-                | MarkdownNode::Footnote(..)
-                | MarkdownNode::FootnoteList
-                | MarkdownNode::Callout(..)
-                | MarkdownNode::Html(html::Html::Block(..))
-        )
+            | MarkdownNode::FrontMatter(..)
+            | MarkdownNode::Paragraph
+            | MarkdownNode::Heading(..)
+            | MarkdownNode::List(..)
+            | MarkdownNode::ListItem(..)
+            | MarkdownNode::BlockQuote
+            | MarkdownNode::Table(..)
+            | MarkdownNode::TableHead
+            | MarkdownNode::TableHeadCol
+            | MarkdownNode::TableBody
+            | MarkdownNode::TableRow
+            | MarkdownNode::TableDataCol
+            | MarkdownNode::ThematicBreak
+            | MarkdownNode::Footnote(..)
+            | MarkdownNode::FootnoteList
+            | MarkdownNode::Callout(..) => true,
+            MarkdownNode::Code(c) => matches!(
+                c.as_ref(),
+                code::Code::Fenced(..) | code::Code::Indented(..)
+            ),
+            MarkdownNode::Html(h) => matches!(h.as_ref(), html::Html::Block(..)),
+            _ => false,
+        }
     }
     pub fn xml_escape(&self) -> bool {
         match self {
@@ -163,27 +166,27 @@ impl From<heading::HeadingLevel> for MarkdownNode {
 }
 impl From<math::Math> for MarkdownNode {
     fn from(value: math::Math) -> Self {
-        MarkdownNode::Math(value)
+        MarkdownNode::Math(Box::new(value))
     }
 }
 impl From<code::Code> for MarkdownNode {
     fn from(value: code::Code) -> Self {
-        MarkdownNode::Code(value)
+        MarkdownNode::Code(Box::new(value))
     }
 }
 impl From<embed::Embed> for MarkdownNode {
     fn from(value: embed::Embed) -> Self {
-        MarkdownNode::Embed(value)
+        MarkdownNode::Embed(Box::new(value))
     }
 }
 impl From<link::Link> for MarkdownNode {
     fn from(value: link::Link) -> Self {
-        MarkdownNode::Link(value)
+        MarkdownNode::Link(Box::new(value))
     }
 }
 impl From<image::Image> for MarkdownNode {
     fn from(value: image::Image) -> Self {
-        MarkdownNode::Image(value)
+        MarkdownNode::Image(Box::new(value))
     }
 }
 impl From<&str> for MarkdownNode {

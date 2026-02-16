@@ -1,95 +1,94 @@
 use std::fmt::Write;
 
-use crate::ast::{code, MarkdownNode};
-use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, Line, ProcessCtx};
+use crate::ast::{MarkdownNode, code};
+use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
 use crate::parser::Parser;
-use crate::tokenizer::Token;
+use crate::span::Span;
 use crate::utils;
 
-#[derive(Debug)]
-enum State {
-    // ``` regexp: ^`{3,}(?!.*`)
-    MarkerBackticks,
-    // ~~~ regexp: ^~{3,}
-    MarkerTilde,
-    InLanguage(bool), // Loose = false, Strict = true
-}
-
 impl code::FencedCode {
-    fn try_match(line: &Line) -> Option<(Token<'static>, usize, String)> {
-        let (marker, mut state) = match line.peek() {
-            Some(Token::Backtick) => (Token::Backtick, State::MarkerBackticks),
-            Some(Token::Tilde) => (Token::Tilde, State::MarkerTilde),
+    fn try_match(line: &Span) -> Option<(u8, usize, String)> {
+        let marker = match line.peek() {
+            Some(b'`') => b'`',
+            Some(b'~') => b'~',
             _ => return None,
         };
-        let mut marker_length = 0;
-        let mut language_range = (0, line.len());
-        for (i, item) in line.iter().enumerate() {
-            match (&state, &item.token) {
-                (State::MarkerBackticks, Token::Backtick) => {}
-                (State::MarkerBackticks, _) if i >= 3 => {
-                    marker_length = i;
-                    language_range.0 = i;
-                    state = State::InLanguage(true);
-                }
-                (State::MarkerTilde, Token::Tilde) => {}
-                (State::MarkerTilde, _) if i >= 3 => {
-                    marker_length = i;
-                    language_range.0 = i;
-                    state = State::InLanguage(false);
-                }
-                (State::InLanguage(true), Token::Backtick) => return None,
-                (State::InLanguage(_), _) => {}
-                _ => return None,
-            }
-        }
-        match state {
-            State::MarkerBackticks | State::MarkerTilde => {
-                marker_length = line.len();
-                language_range.0 = line.len();
-            }
-            _ => (),
-        }
+        let marker_length = line.starts_count(marker);
         if marker_length < 3 {
             return None;
         }
-        // println!(
-        //     "marker = {marker:?} count={count} {:?} state={state:?}",
-        //     language_range
-        // );
-        Some((
-            marker,
-            marker_length,
-            if language_range.0 == language_range.1 {
-                String::new()
-            } else {
-                line.slice(language_range.0, language_range.1)
-                    .trim()
-                    .to_string()
-            },
-        ))
+        // For backtick fences, no backtick allowed in info string
+        if marker == b'`' {
+            // Check remaining content for backticks
+            for i in marker_length..line.len() {
+                if line.get(i) == Some(b'`') {
+                    return None;
+                }
+            }
+        }
+        // Extract language (info string after marker)
+        let language = if marker_length < line.len() {
+            let lang_span = line.slice(marker_length, line.len());
+            let trimmed = lang_span.trim();
+            trimmed.as_str().to_string()
+        } else {
+            String::new()
+        };
+        Some((marker, marker_length, language))
     }
 }
+
+fn backslash_unescape(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut result = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_punctuation() {
+            result.push(bytes[i + 1] as char);
+            i += 2;
+        } else {
+            let Some(ch) = s[i..].chars().next() else {
+                break;
+            };
+            result.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    result
+}
+
 impl BlockStrategy for code::FencedCode {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
-        let location = line[0].location;
+        let location = line.start_location();
         if line.is_indented() {
             return BlockMatching::Unmatched;
         }
-        line.skip_indent();
+        line.skip_spaces(4);
         if let Some((marker, marker_length, language)) = Self::try_match(line) {
+            // OFM: keep `~~~text~~~` as plain text (strikethrough-related syntax), not fenced code.
+            if parser.options.obsidian_flavored && marker == b'~' && language.ends_with("~~~") {
+                return BlockMatching::Unmatched;
+            }
             parser.close_unmatched_blocks();
+            // Convert marker byte to FenceMarker enum
+            let marker_token = if marker == b'`' {
+                code::FenceMarker::Backtick
+            } else {
+                code::FenceMarker::Tilde
+            };
             parser.append_block(
-                MarkdownNode::Code(code::Code::Fenced(code::FencedCode {
+                MarkdownNode::Code(Box::new(code::Code::Fenced(code::FencedCode {
                     language: if !language.is_empty() {
-                        Some(utils::entities::unescape_string(language))
+                        Some(backslash_unescape(&utils::entities::unescape_string(
+                            language,
+                        )))
                     } else {
                         None
                     },
                     length: marker_length,
                     indent: line.indent_spaces(),
-                    marker,
-                })),
+                    marker: marker_token,
+                }))),
                 location,
             );
             line.skip_to_end();
@@ -100,41 +99,52 @@ impl BlockStrategy for code::FencedCode {
     }
     fn process(ProcessCtx { line, parser, .. }: ProcessCtx) -> BlockProcessing {
         let snapshot = line.snapshot();
-        // 尝试提取当前处理节点的代码块，如果不是代码块直接返回 Unprocessed
-        let container = if let MarkdownNode::Code(code::Code::Fenced(code)) =
-            &parser.tree[parser.curr_proc_node].body
-        {
-            code
+        let container = if let MarkdownNode::Code(c) = &parser.tree[parser.curr_proc_node].body {
+            if let code::Code::Fenced(code) = c.as_ref() {
+                code
+            } else {
+                return BlockProcessing::Unprocessed;
+            }
         } else {
             return BlockProcessing::Unprocessed;
         };
-        // println!("{line:?}");
         if line.is_indented() || line.is_blank() {
             line.skip_spaces(container.indent);
             return BlockProcessing::Further;
         }
-        // 检查当前行是否满足结束代码块的条件
-        let location = line.start_location();
-        let length = line.skip_indent().starts_count(&container.marker);
+        let marker_byte = if container.marker == code::FenceMarker::Backtick {
+            b'`'
+        } else {
+            b'~'
+        };
+        let length = line.skip_indent().starts_count(marker_byte);
         if length >= container.length && line.skip(length).only_space_to_end() {
-            parser.finalize(parser.curr_proc_node, location);
+            // Use end location of the closing fence line
+            let end_location = line.end_location();
+            parser.finalize(parser.curr_proc_node, end_location);
             return BlockProcessing::Processed;
         }
-        // 回滚到初始状态并删除等效的缩进
-        line.resume(snapshot).skip_spaces(container.indent);
+        line.resume(&snapshot).skip_spaces(container.indent);
         BlockProcessing::Further
     }
     fn after(id: usize, parser: &mut Parser) {
-        if let Some(lines) = parser.inlines.remove(&id) {
-            let start = lines[0].start_location();
-            let end = lines.last().map(|it| it.last_token_end_location()).unwrap();
-            let mut literal = lines.into_iter().fold(String::new(), |mut str, it| {
-                let _ = it.write_string(&mut str, false);
-                let _ = str.write_char('\n');
-                str
-            });
+        if let Some(spans) = parser.inlines.remove(&id) {
+            if spans.is_empty() {
+                return;
+            }
+            let start = spans[0].start_location();
+            let end = spans
+                .last()
+                .map(|it| it.last_token_end_location())
+                .unwrap_or(start);
+            let estimated = spans.iter().map(|it| it.len() + 1).sum();
+            let mut literal = String::with_capacity(estimated);
+            for span in spans {
+                literal.push_str(span.as_str());
+                literal.push('\n');
+            }
             if !literal.ends_with('\n') {
-                literal.write_char('\n').unwrap();
+                let _ = literal.write_char('\n');
             }
             parser.append_text(literal, (start, end));
         }
@@ -143,7 +153,6 @@ impl BlockStrategy for code::FencedCode {
 
 impl BlockStrategy for code::IndentedCode {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
-        // 没有缩进 或者 是段落（ 缩进代码块不能中止段落 ）或者该行是空的
         if !line.is_indented()
             || parser.tree[parser.curr_proc_node].body == MarkdownNode::Paragraph
             || line.is_blank()
@@ -154,7 +163,7 @@ impl BlockStrategy for code::IndentedCode {
         line.skip_spaces(4);
         parser.close_unmatched_blocks();
         parser.append_block(
-            MarkdownNode::Code(code::Code::Indented(code::IndentedCode {})),
+            MarkdownNode::Code(Box::new(code::Code::Indented(code::IndentedCode {}))),
             location,
         );
         BlockMatching::MatchedLeaf
@@ -169,30 +178,87 @@ impl BlockStrategy for code::IndentedCode {
         }
     }
     fn after(id: usize, parser: &mut Parser) {
-        if let Some(mut lines) = parser.inlines.remove(&id) {
-            while let Some(true) = lines.last().map(|it| it.is_blank()) {
-                lines.pop();
+        if let Some(mut spans) = parser.inlines.remove(&id) {
+            while let Some(true) = spans.last().map(|it| it.is_blank()) {
+                spans.pop();
             }
-            let start = lines[0].start_location();
-            let end = lines.last().map(|it| it.last_token_end_location()).unwrap();
-            let mut literal = lines.into_iter().fold(String::new(), |mut str, it| {
-                let _ = it.write_string(&mut str, false);
+            if spans.is_empty() {
+                return;
+            }
+            let start = spans[0].start_location();
+            let end = spans
+                .last()
+                .map(|it| it.last_token_end_location())
+                .unwrap_or(start);
+            let container_prefix_cols = container_prefix_cols(id, parser);
+            let mut literal = spans.into_iter().fold(String::new(), |mut str, it| {
+                let _ = write_recovered_indented_line(&mut str, &it, container_prefix_cols);
                 let _ = str.write_char('\n');
                 str
             });
             if !literal.ends_with('\n') {
-                literal.write_char('\n').unwrap();
+                let _ = literal.write_char('\n');
             }
             parser.append_text(literal, (start, end));
         }
     }
 }
 
+fn write_recovered_indented_line(
+    out: &mut String,
+    span: &crate::span::Span<'_>,
+    container_prefix: usize,
+) -> std::fmt::Result {
+    let full = span.full_str();
+    let tail = span.as_str();
+    let consumed_bytes = full.len().saturating_sub(tail.len());
+    let consumed = &full.as_bytes()[..consumed_bytes];
+    let actual_consumed_cols = visual_cols(consumed);
+    let expected_consumed_cols = container_prefix + 4;
+    if actual_consumed_cols > expected_consumed_cols {
+        for _ in 0..(actual_consumed_cols - expected_consumed_cols) {
+            out.write_char(' ')?;
+        }
+    }
+    out.write_str(tail)?;
+    Ok(())
+}
+
+fn visual_cols(bytes: &[u8]) -> usize {
+    let mut col = 0usize;
+    for &b in bytes {
+        if b == b'\t' {
+            col += 4 - (col % 4);
+        } else {
+            col += 1;
+        }
+    }
+    col
+}
+
+fn container_prefix_cols(id: usize, parser: &Parser<'_>) -> usize {
+    let mut sum = 0usize;
+    let mut cur = parser.tree.get_parent(id);
+    while cur != 0 {
+        match &parser.tree[cur].body {
+            MarkdownNode::List(list) => {
+                sum += list.padding() + list.marker_offset();
+            }
+            MarkdownNode::BlockQuote => {
+                // `>` marker plus its optional following space/tab.
+                sum += 2;
+            }
+            _ => {}
+        }
+        cur = parser.tree.get_parent(cur);
+    }
+    sum
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::ast::{code, MarkdownNode};
+    use crate::ast::{MarkdownNode, code};
     use crate::parser::Parser;
-    use crate::tokenizer::Token;
 
     #[test]
     fn test_fenced_code() {
@@ -206,12 +272,12 @@ mod tests {
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,
-            MarkdownNode::Code(code::Code::Fenced(code::FencedCode {
+            MarkdownNode::Code(Box::new(code::Code::Fenced(code::FencedCode {
                 language: Some("text".to_string()),
                 length: 3,
                 indent: 3,
-                marker: Token::Backtick
-            }))
+                marker: code::FenceMarker::Backtick
+            })))
         );
         assert_eq!(
             ast.to_html(),
@@ -238,7 +304,7 @@ aaa
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,
-            MarkdownNode::Code(code::Code::Indented(code::IndentedCode {}))
+            MarkdownNode::Code(Box::new(code::Code::Indented(code::IndentedCode {})))
         );
         if let MarkdownNode::Text(text) = &ast[2].body {
             assert!(text.starts_with("a simple"));

@@ -61,7 +61,7 @@ pub(crate) fn encode(url: impl AsRef<str>, keep_escaped: bool) -> String {
             '%' if keep_escaped => encoded.push(char),
             _ => {
                 for byte in encode_char(char, &mut [0; 4]) {
-                    write!(encoded, "%{:02X}", byte).unwrap()
+                    let _ = write!(encoded, "%{:02X}", byte);
                 }
             }
         }

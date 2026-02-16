@@ -1,5 +1,12 @@
-use crate::tokenizer::Token;
 use serde::Serialize;
+
+/// Marker type for bullet lists
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BulletMarker {
+    Hyphen,
+    Plus,
+    Asterisk,
+}
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "variant", rename_all = "kebab-case")]
@@ -69,7 +76,7 @@ impl List {
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct BulletList {
-    pub(crate) marker: Token<'static>,
+    pub(crate) marker: BulletMarker,
     pub(crate) padding: usize,
     pub(crate) marker_offset: usize,
     pub tight: bool,
@@ -89,6 +96,7 @@ pub struct TaskList {
     pub(crate) task: Option<char>, // - [ ] task char
     pub(crate) padding: usize,
     pub(crate) marker_offset: usize,
+    pub(crate) obsidian: bool,
     pub tight: bool,
 }
 
@@ -100,8 +108,30 @@ pub enum ListItem {
     Task(TaskItem),
 }
 
+impl ListItem {
+    pub fn padding(&self) -> usize {
+        match self {
+            ListItem::Bullet(it) => it.padding,
+            ListItem::Ordered(it) => it.padding,
+            ListItem::Task(it) => it.padding,
+        }
+    }
+    pub fn marker_offset(&self) -> usize {
+        match self {
+            ListItem::Bullet(it) => it.marker_offset,
+            ListItem::Ordered(it) => it.marker_offset,
+            ListItem::Task(it) => it.marker_offset,
+        }
+    }
+}
+
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
-pub struct BulletItem {}
+pub struct BulletItem {
+    #[serde(skip)]
+    pub(crate) padding: usize,
+    #[serde(skip)]
+    pub(crate) marker_offset: usize,
+}
 impl From<BulletItem> for ListItem {
     fn from(value: BulletItem) -> Self {
         ListItem::Bullet(value)
@@ -111,6 +141,10 @@ impl From<BulletItem> for ListItem {
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct OrderedItem {
     pub start: u64,
+    #[serde(skip)]
+    pub(crate) padding: usize,
+    #[serde(skip)]
+    pub(crate) marker_offset: usize,
 }
 impl From<OrderedItem> for ListItem {
     fn from(value: OrderedItem) -> Self {
@@ -121,6 +155,10 @@ impl From<OrderedItem> for ListItem {
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct TaskItem {
     pub task: Option<char>,
+    #[serde(skip)]
+    pub(crate) padding: usize,
+    #[serde(skip)]
+    pub(crate) marker_offset: usize,
 }
 impl From<TaskItem> for ListItem {
     fn from(value: TaskItem) -> Self {

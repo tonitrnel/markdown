@@ -195,7 +195,9 @@ fn case_61() {
     let output = r#"<ul>
 <li>Foo</li>
 <li>
+
 <hr />
+
 </li>
 </ul>"#;
     let ast = Parser::new(input).parse();

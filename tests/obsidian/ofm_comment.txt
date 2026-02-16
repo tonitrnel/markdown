@@ -1,0 +1,47 @@
+// Obsidian Flavored Markdown - Comments
+// Reference: https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax
+
+## Comments (extension)
+
+OFM enables the `comment` extension. Text wrapped in double percent signs (`%%`)
+is hidden from the rendered output.
+
+Inline comments are stripped:
+
+```````````````````````````````` example
+This is an %%inline%% comment.
+.
+<p>This is an  comment.</p>
+````````````````````````````````
+
+Multiple inline comments in one line:
+
+```````````````````````````````` example
+Hello %%hidden1%% world %%hidden2%% end.
+.
+<p>Hello  world  end.</p>
+````````````````````````````````
+
+Comment at the beginning of a line:
+
+```````````````````````````````` example
+%%hidden%%visible text
+.
+<p>visible text</p>
+````````````````````````````````
+
+Comment at the end of a line:
+
+```````````````````````````````` example
+visible text%%hidden%%
+.
+<p>visible text</p>
+````````````````````````````````
+
+Unclosed double percent is not treated as a comment:
+
+```````````````````````````````` example
+This is %%not a comment
+.
+<p>This is %%not a comment</p>
+````````````````````````````````

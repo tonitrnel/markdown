@@ -1,6 +1,5 @@
 use crate::ast::MarkdownNode;
 use crate::inlines::ProcessCtx;
-use crate::tokenizer::Token;
 
 pub(super) fn process(
     ProcessCtx {
@@ -8,41 +7,64 @@ pub(super) fn process(
     }: &mut ProcessCtx,
 ) -> bool {
     let start_location = line.start_location();
-    if line.start_offset > 0
-        && line
-            .get_raw(line.start_offset - 1)
-            .map(|it| !it.is_newline() && !it.is_space_or_tab())
-            .unwrap_or(true)
-    {
-        return false;
-    }
-    line.next();
-    let mut end = 0;
-    let mut non_text = true;
-    for (i, item) in line.iter().enumerate() {
-        match &item.token {
-            Token::Text(..) => {
-                non_text = false;
-                continue;
-            }
-            Token::Digit(..) | Token::Underscore | Token::Hyphen | Token::Slash => continue,
-            _ => {
-                end = i;
-                break;
-            }
+    // 检查 '#' 前面的字符：必须是行首、换行或空白
+    let cur = line.cursor();
+    if cur > line.start() {
+        let prev_byte = line.source_slice()[cur - 1];
+        if prev_byte != b'\n' && prev_byte != b'\r' && prev_byte != b' ' && prev_byte != b'\t' {
+            return false;
         }
     }
-    if end == 0 {
-        end = line.len()
+    // 跳过 '#'
+    line.next_byte();
+    let tag_start = line.cursor();
+    let mut has_text = false;
+    let mut i = line.cursor();
+    while i < line.end() {
+        let b = line.source_slice()[i];
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' => {
+                has_text = true;
+                i += 1;
+            }
+            b'0'..=b'9' | b'_' | b'-' | b'/' => {
+                i += 1;
+            }
+            // 多字节 UTF-8 字符（非 ASCII 文本，如中文）
+            0xC0..=0xFF => {
+                has_text = true;
+                // 确定 UTF-8 字符长度
+                let char_len = if b < 0xE0 {
+                    2
+                } else if b < 0xF0 {
+                    3
+                } else {
+                    4
+                };
+                i += char_len;
+            }
+            // continuation byte（不应该在这里出现，但安全处理）
+            0x80..=0xBF => {
+                i += 1;
+            }
+            _ => break,
+        }
     }
-    if end == 0 || non_text {
+    let tag_end = i.min(line.end());
+    if tag_end == tag_start || !has_text {
         return false;
     }
-    let end_location = line[end - 1].end_location();
-    let tag = line.slice(0, end).to_string();
+    let tag = unsafe { std::str::from_utf8_unchecked(&line.source_slice()[tag_start..tag_end]) };
+    let end_location = line.location_at_byte(tag_end);
     parser.tags.insert(tag.to_lowercase());
-    parser.append_to(*id, MarkdownNode::Tag(tag), (start_location, end_location));
-    line.skip(end);
+    parser.append_to(
+        *id,
+        MarkdownNode::Tag(tag.to_string()),
+        (start_location, end_location),
+    );
+    // 移动 cursor 到 tag_end
+    let skip_count = tag_end - line.cursor();
+    line.skip(skip_count);
     true
 }
 

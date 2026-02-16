@@ -1,7 +1,7 @@
 use crate::ast::{self, MarkdownNode};
-use crate::line::Line;
+use crate::parser::Location;
 use crate::parser::Parser;
-use crate::tokenizer::Location;
+use crate::span::Span;
 
 mod block_quote;
 mod callout;
@@ -27,12 +27,12 @@ pub enum BlockProcessing {
 pub struct BeforeCtx<'a, 'input> {
     pub container: usize,
     pub parser: &'a mut Parser<'input>,
-    pub line: &'a mut Line<'input>,
+    pub line: &'a mut Span<'input>,
 }
 pub struct ProcessCtx<'a, 'input> {
     pub id: usize,
     pub parser: &'a mut Parser<'input>,
-    pub line: &'a mut Line<'input>,
+    pub line: &'a mut Span<'input>,
 }
 
 pub trait BlockStrategy {
@@ -62,7 +62,7 @@ pub trait BlockStrategy {
 pub fn process<'input>(
     id: usize,
     parser: &mut Parser<'input>,
-    line: &mut Line<'input>,
+    line: &mut Span<'input>,
 ) -> BlockProcessing {
     let ctx = ProcessCtx { id, parser, line };
     match ctx.parser.tree[id].body {
@@ -74,8 +74,12 @@ pub fn process<'input>(
             ast::heading::SetextHeading::process(ctx)
         }
         MarkdownNode::BlockQuote => ast::block_quote::BlockQuote::process(ctx),
-        MarkdownNode::Code(ast::code::Code::Fenced(..)) => ast::code::FencedCode::process(ctx),
-        MarkdownNode::Code(ast::code::Code::Indented(..)) => ast::code::IndentedCode::process(ctx),
+        MarkdownNode::Code(ref c) if matches!(c.as_ref(), ast::code::Code::Fenced(..)) => {
+            ast::code::FencedCode::process(ctx)
+        }
+        MarkdownNode::Code(ref c) if matches!(c.as_ref(), ast::code::Code::Indented(..)) => {
+            ast::code::IndentedCode::process(ctx)
+        }
         MarkdownNode::Html(..) => ast::html::Html::process(ctx),
         MarkdownNode::List(..) => ast::list::List::process(ctx),
         MarkdownNode::ListItem(..) => ast::list::ListItem::process(ctx),
@@ -83,7 +87,7 @@ pub fn process<'input>(
         MarkdownNode::Callout(..) => ast::callout::Callout::process(ctx),
         MarkdownNode::Footnote(..) => ast::footnote::Footnote::process(ctx),
         MarkdownNode::Paragraph => {
-            if ctx.line.is_blank() {
+            if ctx.line.is_blank_to_end() {
                 BlockProcessing::Unprocessed
             } else {
                 BlockProcessing::Further
@@ -94,8 +98,23 @@ pub fn process<'input>(
 }
 
 pub fn after(id: usize, parser: &mut Parser, location: Location) {
+    // For container blocks like List and ListItem, adjust end location
+    // to not include the trailing newline of the last line
+    let adjusted_location = match &parser.tree[id].body {
+        MarkdownNode::List(..) | MarkdownNode::ListItem(..) => {
+            // Use the end of the last child if available
+            if let Some(last_child) = parser.tree.get_last_child(id) {
+                parser.tree[last_child].end
+            } else {
+                location
+            }
+        }
+        _ => location,
+    };
+
     let node = &mut parser.tree[id];
-    node.end = location;
+    node.end = adjusted_location;
+
     match node.body {
         MarkdownNode::Heading(ast::heading::Heading::ATX(..)) => {
             ast::heading::ATXHeading::after(id, parser)
@@ -104,8 +123,10 @@ pub fn after(id: usize, parser: &mut Parser, location: Location) {
             ast::heading::SetextHeading::after(id, parser)
         }
         MarkdownNode::BlockQuote => ast::block_quote::BlockQuote::after(id, parser),
-        MarkdownNode::Code(ast::code::Code::Fenced(..)) => ast::code::FencedCode::after(id, parser),
-        MarkdownNode::Code(ast::code::Code::Indented(..)) => {
+        MarkdownNode::Code(ref c) if matches!(c.as_ref(), ast::code::Code::Fenced(..)) => {
+            ast::code::FencedCode::after(id, parser)
+        }
+        MarkdownNode::Code(ref c) if matches!(c.as_ref(), ast::code::Code::Indented(..)) => {
             ast::code::IndentedCode::after(id, parser)
         }
         MarkdownNode::List(..) => ast::list::List::after(id, parser),
@@ -119,7 +140,7 @@ pub fn after(id: usize, parser: &mut Parser, location: Location) {
 pub fn matcher<'input>(
     container: usize,
     parser: &mut Parser<'input>,
-    line: &mut Line<'input>,
+    line: &mut Span<'input>,
 ) -> BlockMatching {
     let matchers = [
         ast::callout::Callout::before,
@@ -147,13 +168,14 @@ pub fn matcher<'input>(
             r => return r,
         }
     }
+    line.resume(&snapshot);
     BlockMatching::Unmatched
 }
 
 pub(crate) fn reprocess<'input>(
     id: usize,
     parser: &mut Parser<'input>,
-    line: &mut Line<'input>,
+    line: &mut Span<'input>,
 ) -> bool {
     let snapshot = line.snapshot();
     let ctx = ProcessCtx { id, parser, line };
@@ -162,7 +184,7 @@ pub(crate) fn reprocess<'input>(
         _ => false,
     };
     if !processed {
-        line.resume(snapshot);
+        line.resume(&snapshot);
     }
     processed
 }

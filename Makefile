@@ -4,7 +4,7 @@ build-release:
 	cargo build --release
     
 build-wasm:
-	cd ./wasm-binding && wasm-pack build --target deno
+	cd ./wasm-binding && wasm-pack build --target bundler
 
 publish-wasm:
 	cd ./wasm-binding/pkg && npm publish
@@ -40,3 +40,8 @@ test-passed: test-basics
 	cargo test --test paragraphs
 	cargo test --test blank_lines
 	cargo test --test block_quotes
+
+samply:
+	rm target/release/deps/timing_test-*
+	cargo build --release --bench timing_test
+	

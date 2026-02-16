@@ -1,0 +1,251 @@
+// Obsidian Flavored Markdown - Callouts
+// Reference: https://help.obsidian.md/Editing+and+formatting/Callouts
+
+## Callouts (extension)
+
+OFM enables the `callout` extension. A blockquote whose first line matches
+`> [!type]` is rendered as a callout.
+
+Basic note callout:
+
+```````````````````````````````` example
+> [!note]
+> This is a note callout.
+.
+<div class="callout" data-callout="note">
+<div class="callout-title">Note</div>
+<div class="callout-content">
+<p>This is a note callout.</p>
+</div>
+</div>
+````````````````````````````````
+
+Callout with custom title:
+
+```````````````````````````````` example
+> [!tip] Hot tip
+> This is a tip with a custom title.
+.
+<div class="callout" data-callout="tip">
+<div class="callout-title">Hot tip</div>
+<div class="callout-content">
+<p>This is a tip with a custom title.</p>
+</div>
+</div>
+````````````````````````````````
+
+Callout with markdown content:
+
+```````````````````````````````` example
+> [!info]
+> Supports **bold** and *italic*.
+.
+<div class="callout" data-callout="info">
+<div class="callout-title">Info</div>
+<div class="callout-content">
+<p>Supports <strong>bold</strong> and <em>italic</em>.</p>
+</div>
+</div>
+````````````````````````````````
+
+Foldable callout (collapsed by default):
+
+```````````````````````````````` example
+> [!warning]-
+> This is collapsed by default.
+.
+<div class="callout is-collapsible is-collapsed" data-callout="warning">
+<div class="callout-title">Warning</div>
+<div class="callout-content">
+<p>This is collapsed by default.</p>
+</div>
+</div>
+````````````````````````````````
+
+Foldable callout (expanded by default):
+
+```````````````````````````````` example
+> [!warning]+
+> This is expanded by default.
+.
+<div class="callout is-collapsible" data-callout="warning">
+<div class="callout-title">Warning</div>
+<div class="callout-content">
+<p>This is expanded by default.</p>
+</div>
+</div>
+````````````````````````````````
+
+Different callout types:
+
+```````````````````````````````` example
+> [!abstract]
+> Abstract content.
+.
+<div class="callout" data-callout="abstract">
+<div class="callout-title">Abstract</div>
+<div class="callout-content">
+<p>Abstract content.</p>
+</div>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+> [!todo]
+> Todo content.
+.
+<div class="callout" data-callout="todo">
+<div class="callout-title">Todo</div>
+<div class="callout-content">
+<p>Todo content.</p>
+</div>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+> [!success]
+> Success content.
+.
+<div class="callout" data-callout="success">
+<div class="callout-title">Success</div>
+<div class="callout-content">
+<p>Success content.</p>
+</div>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+> [!question]
+> Question content.
+.
+<div class="callout" data-callout="question">
+<div class="callout-title">Question</div>
+<div class="callout-content">
+<p>Question content.</p>
+</div>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+> [!failure]
+> Failure content.
+.
+<div class="callout" data-callout="failure">
+<div class="callout-title">Failure</div>
+<div class="callout-content">
+<p>Failure content.</p>
+</div>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+> [!danger]
+> Danger content.
+.
+<div class="callout" data-callout="danger">
+<div class="callout-title">Danger</div>
+<div class="callout-content">
+<p>Danger content.</p>
+</div>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+> [!bug]
+> Bug content.
+.
+<div class="callout" data-callout="bug">
+<div class="callout-title">Bug</div>
+<div class="callout-content">
+<p>Bug content.</p>
+</div>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+> [!example]
+> Example content.
+.
+<div class="callout" data-callout="example">
+<div class="callout-title">Example</div>
+<div class="callout-content">
+<p>Example content.</p>
+</div>
+</div>
+````````````````````````````````
+
+```````````````````````````````` example
+> [!quote]
+> Quote content.
+.
+<div class="callout" data-callout="quote">
+<div class="callout-title">Quote</div>
+<div class="callout-content">
+<p>Quote content.</p>
+</div>
+</div>
+````````````````````````````````
+
+Callout type aliases work (hint = tip):
+
+```````````````````````````````` example
+> [!hint]
+> Same as tip.
+.
+<div class="callout" data-callout="tip">
+<div class="callout-title">Tip</div>
+<div class="callout-content">
+<p>Same as tip.</p>
+</div>
+</div>
+````````````````````````````````
+
+Callout type aliases work (caution = warning):
+
+```````````````````````````````` example
+> [!caution]
+> Same as warning.
+.
+<div class="callout" data-callout="warning">
+<div class="callout-title">Warning</div>
+<div class="callout-content">
+<p>Same as warning.</p>
+</div>
+</div>
+````````````````````````````````
+
+Callout type is case-insensitive:
+
+```````````````````````````````` example
+> [!NOTE]
+> Uppercase type.
+.
+<div class="callout" data-callout="note">
+<div class="callout-title">Note</div>
+<div class="callout-content">
+<p>Uppercase type.</p>
+</div>
+</div>
+````````````````````````````````
+
+Nested callout:
+
+```````````````````````````````` example
+> [!note]
+> Outer callout.
+> > [!tip]
+> > Inner callout.
+.
+<div class="callout" data-callout="note">
+<div class="callout-title">Note</div>
+<div class="callout-content">
+<p>Outer callout.</p>
+<div class="callout" data-callout="tip">
+<div class="callout-title">Tip</div>
+<div class="callout-content">
+<p>Inner callout.</p>
+</div>
+</div>
+</div>
+</div>
+````````````````````````````````

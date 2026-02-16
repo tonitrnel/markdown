@@ -44,19 +44,23 @@ fn is_cjk_punct_or_symbol(ch: char) -> bool {
 fn is_ascii_alnum(ch: char) -> bool {
     ch.is_ascii_alphanumeric()
 }
-
 /// 在 CJK 字符与 ASCII 字母数字之间插入空格。
 /// 单次 O(n) 扫描，无需修改时返回 `Cow::Borrowed` 避免分配。
+#[allow(dead_code)]
 pub fn correct_cjk_spacing(text: &str) -> Cow<'_, str> {
-    correct_cjk_spacing_with_nouns(text, &[])
+    correct_cjk_spacing_with_nouns(text, (&[] as &[&str]).iter())
 }
-
 /// 在 CJK 字符与 ASCII 字母数字之间插入空格，跳过名词表中的专有名词。
 /// `nouns` 中的词会被原样保留，不在其内部插入空格（如 "豆瓣FM"）。
-pub fn correct_cjk_spacing_with_nouns<'a>(text: &'a str, nouns: &[&str]) -> Cow<'a, str> {
+pub fn correct_cjk_spacing_with_nouns<'a, I, S>(text: &'a str, nouns: I) -> Cow<'a, str>
+where
+    I: Iterator<Item = S>,
+    S: AsRef<str>,
+{
     // 快速路径：收集名词在 text 中的所有出现区间 [start, end)
     let mut skip_ranges: Vec<(usize, usize)> = Vec::new();
     for noun in nouns {
+        let noun = noun.as_ref();
         let mut search_from = 0;
         while let Some(pos) = text[search_from..].find(noun) {
             let abs_start = search_from + pos;
@@ -213,7 +217,8 @@ mod tests {
         // 专有名词跳过：「豆瓣FM」按官方格式保留
         let nouns = &["豆瓣FM"];
         assert_eq!(
-            correct_cjk_spacing_with_nouns("我最愛的產品是簡書和豆瓣FM，你呢？", nouns).as_ref(),
+            correct_cjk_spacing_with_nouns("我最愛的產品是簡書和豆瓣FM，你呢？", nouns.iter())
+                .as_ref(),
             "我最愛的產品是簡書和豆瓣FM，你呢？"
         );
     }
@@ -223,7 +228,7 @@ mod tests {
         // 多个专有名词，名词边界处也不插入空格
         let nouns = &["豆瓣FM", "QQ音乐"];
         assert_eq!(
-            correct_cjk_spacing_with_nouns("我用豆瓣FM和QQ音乐聽歌", nouns).as_ref(),
+            correct_cjk_spacing_with_nouns("我用豆瓣FM和QQ音乐聽歌", nouns.iter()).as_ref(),
             "我用豆瓣FM和QQ音乐聽歌"
         );
     }
@@ -232,7 +237,7 @@ mod tests {
     fn noun_list_empty_still_corrects() {
         // 空名词表 = 正常校正
         assert_eq!(
-            correct_cjk_spacing_with_nouns("使用GitHub登錄", &[]).as_ref(),
+            correct_cjk_spacing_with_nouns("使用GitHub登錄", (&[] as &[&str]).iter()).as_ref(),
             "使用 GitHub 登錄"
         );
     }
@@ -242,7 +247,7 @@ mod tests {
         // 名词表中的词不在文本中，正常校正
         let nouns = &["豆瓣FM"];
         assert_eq!(
-            correct_cjk_spacing_with_nouns("使用GitHub登錄", nouns).as_ref(),
+            correct_cjk_spacing_with_nouns("使用GitHub登錄", nouns.iter()).as_ref(),
             "使用 GitHub 登錄"
         );
     }

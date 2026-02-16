@@ -1,104 +1,121 @@
 use crate::ast::{heading, MarkdownNode};
-use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, Line, ProcessCtx};
-use crate::tokenizer::Token;
-use std::ops::Range;
+use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
+use crate::span::Span;
 
-#[derive(Debug)]
-enum State {
-    Initial,
-    StartHashes(usize),
-    Content,
-    EndHashes(usize),
-    End(usize),
-}
 impl heading::ATXHeading {
-    fn try_match(line: &Line) -> Option<(usize, Range<usize>)> {
+    fn try_match(line: &Span) -> Option<(usize, usize, usize)> {
         if line.is_indented() {
             return None;
         }
-        let mut state = State::Initial;
-        let mut hash_count = 1;
-        let mut start = 1;
-        for (i, item) in line.iter().enumerate() {
-            // println!("heading: {state:?} {:?}", item.token);
-            match (&state, &item.token) {
-                (State::Initial, Token::Crosshatch) => state = State::StartHashes(i),
-                (State::StartHashes(_), Token::Crosshatch) => (),
-                (State::StartHashes(s), t) if t.is_space_or_tab() => {
-                    let count = i - *s;
-                    if count > 6 {
-                        return None;
-                    };
-                    hash_count = count;
-                    start = i + 1;
-                    state = State::End(i + 1);
+        let len = line.len();
+        if len == 0 {
+            return None;
+        }
+        // Count leading '#'
+        let hash_count = line.starts_count(b'#');
+        if hash_count == 0 || hash_count > 6 {
+            return None;
+        }
+        // After hashes: must be space/tab or end of line
+        if hash_count < len {
+            let next = line.get(hash_count);
+            if let Some(b) = next {
+                if b != b' ' && b != b'\t' {
+                    return None;
                 }
-                (State::Content, t) if t.is_space_or_tab() => state = State::End(i),
-                (State::Content, _) => {}
-                (State::End(_), Token::Crosshatch) => {
-                    state = State::EndHashes(i);
+            }
+        }
+        // Find content range (skip leading space after hashes)
+        let mut start = hash_count;
+        if start < len {
+            if let Some(b) = line.get(start) {
+                if b == b' ' || b == b'\t' {
+                    start += 1;
                 }
-                (State::End(_), t) if t.is_space_or_tab() => {}
-                (State::End(_), _) => state = State::Content,
-                (State::EndHashes(_), Token::Crosshatch) => {}
-                (State::EndHashes(s), t) if t.is_space_or_tab() => state = State::End(*s),
-                (State::EndHashes(_), _) => state = State::Content,
-                _ => return None,
             }
         }
-        let mut end = match state {
-            State::EndHashes(s) | State::End(s) => s,
-            _ => line.len(),
-        };
-        // trim start
-        for i in start..end {
-            if line[i].is_space_or_tab() {
-                continue;
+        // Find end: trim trailing '#' and spaces
+        let mut end = len;
+        // Trim trailing spaces
+        while end > start {
+            if let Some(b) = line.get(end - 1) {
+                if b == b' ' || b == b'\t' {
+                    end -= 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
             }
-            start = i;
-            break;
         }
-        // trim end
-        for i in (start..end).rev() {
-            if line[i].is_space_or_tab() {
-                continue;
+        // Trim trailing '#'
+        let mut hash_end = end;
+        while hash_end > start {
+            if let Some(b) = line.get(hash_end - 1) {
+                if b == b'#' {
+                    hash_end -= 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
             }
-            end = i + 1;
-            break;
         }
-        let range = Range { start, end };
-        // println!(
-        //     "hash_count = {hash_count} {:?}  => {:?}",
-        //     line,
-        //     line.slice(start, end)
-        // );
-        Some((hash_count, range))
+        // Trailing '#' must be preceded by space or be at start
+        if hash_end < end && hash_end > start {
+            if let Some(b) = line.get(hash_end - 1) {
+                if b == b' ' || b == b'\t' {
+                    end = hash_end;
+                    // Trim trailing spaces again
+                    while end > start {
+                        if let Some(b) = line.get(end - 1) {
+                            if b == b' ' || b == b'\t' {
+                                end -= 1;
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        } else if hash_end == start {
+            // All trailing content is '#', remove it
+            end = hash_end;
+        }
+        // Trim leading spaces from content
+        while start < end {
+            if let Some(b) = line.get(start) {
+                if b == b' ' || b == b'\t' {
+                    start += 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        Some((hash_count, start, end))
     }
 }
+
 impl BlockStrategy for heading::ATXHeading {
-    /// AXT headings
-    ///
-    /// ```text
-    ///  # foo
-    ///  ## foo
-    ///  ### foo
-    ///  #### foo
-    ///  ##### foo
-    ///  ###### foo
-    ///  ## foo ## ## #
-    /// ```
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
-        let location = line[0].location;
+        let location = line.start_location();
         line.skip_indent();
-        if let Some((hash_count, range)) = Self::try_match(line) {
+        if let Some((hash_count, start, end)) = Self::try_match(line) {
             parser.close_unmatched_blocks();
+            let Ok(level) = heading::HeadingLevel::try_from(hash_count) else {
+                return BlockMatching::Unmatched;
+            };
             let idx = parser.append_block(
                 MarkdownNode::Heading(heading::Heading::ATX(heading::ATXHeading {
-                    level: heading::HeadingLevel::try_from(hash_count).unwrap(),
+                    level,
                 })),
                 location,
             );
-            parser.append_inline(idx, line.slice(range.start, range.end));
+            parser.append_inline(idx, line.slice(start, end));
             line.skip_to_end();
             BlockMatching::MatchedLeaf
         } else {
@@ -119,27 +136,38 @@ impl BlockStrategy for heading::SetextHeading {
             ..
         }: BeforeCtx,
     ) -> BlockMatching {
-        if !line.is_indented()
-            && parser.tree[container].body == MarkdownNode::Paragraph
-            && line
-                .skip_indent()
-                .starts_with_matches(|it| matches!(it, Token::Eq | Token::Hyphen), 1)
-        {
-            let level = if line[0].token == Token::Eq {
-                line.skip_consecutive_tokens(&Token::Eq);
-                heading::HeadingLevel::H1
-            } else {
-                line.skip_consecutive_tokens(&Token::Hyphen);
-                heading::HeadingLevel::H2
-            };
-            if !line.only_space_to_end() {
-                return BlockMatching::Unmatched;
+        if !line.is_indented() && parser.tree[container].body == MarkdownNode::Paragraph {
+            line.skip_indent();
+            let first = line.peek();
+            if first == Some(b'=') || first == Some(b'-') {
+                if let Some(spans) = parser.inlines.get(&container) {
+                    let all_ref_def = !spans.is_empty()
+                        && spans.iter().all(crate::inlines::is_link_reference_line);
+                    if all_ref_def {
+                        return BlockMatching::Unmatched;
+                    }
+                }
+                let Some(marker) = first else {
+                    return BlockMatching::Unmatched;
+                };
+                let level = if marker == b'=' {
+                    line.skip_consecutive(b'=');
+                    heading::HeadingLevel::H1
+                } else {
+                    line.skip_consecutive(b'-');
+                    heading::HeadingLevel::H2
+                };
+                if !line.only_space_to_end() {
+                    return BlockMatching::Unmatched;
+                }
+                parser.replace_block(
+                    MarkdownNode::Heading(heading::Heading::SETEXT(heading::SetextHeading {
+                        level,
+                    })),
+                    line.end_location(),
+                );
+                return BlockMatching::MatchedLeaf;
             }
-            parser.replace_block(
-                MarkdownNode::Heading(heading::Heading::SETEXT(heading::SetextHeading { level })),
-                line.end_location(),
-            );
-            return BlockMatching::MatchedLeaf;
         }
         BlockMatching::Unmatched
     }
@@ -151,8 +179,8 @@ impl BlockStrategy for heading::SetextHeading {
 #[cfg(test)]
 mod tests {
     use crate::ast::{heading, MarkdownNode};
+    use crate::parser::Location;
     use crate::parser::Parser;
-    use crate::tokenizer::Location;
 
     #[test]
     fn test_atx_heading() {
@@ -169,7 +197,6 @@ mod tests {
         .trim();
         let ast = Parser::new(text).parse();
         assert_eq!(ast[0].body, MarkdownNode::Document);
-        // 为每个标题定义预期的开始和结束位置
         let expected_locations = [
             (Location::new(1, 1), Location::new(1, 6)),
             (Location::new(2, 1), Location::new(2, 7)),
@@ -177,10 +204,8 @@ mod tests {
             (Location::new(4, 1), Location::new(4, 9)),
             (Location::new(5, 1), Location::new(5, 10)),
             (Location::new(6, 1), Location::new(6, 13)),
-            // 注意：最后一行是段落，不是标题
             (Location::new(7, 1), Location::new(8, 9)),
         ];
-        // 检查标题节点
         for (i, &(start, end)) in expected_locations.iter().enumerate().take(6) {
             match &ast[i + 1].body {
                 MarkdownNode::Heading(heading::Heading::ATX(atx)) => {
@@ -192,7 +217,6 @@ mod tests {
             assert_eq!(ast[i + 1].end, end);
             assert_eq!(ast.get_next(i + 1), Some(i + 2));
         }
-        // 检查最后一个段落节点
         assert_eq!(ast[7].body, MarkdownNode::Paragraph);
         let last = expected_locations.last().unwrap();
         assert_eq!(ast[7].start, last.0);
@@ -212,11 +236,9 @@ baz*
         .trim();
         let ast = Parser::new(text).parse();
         assert_eq!(ast[0].body, MarkdownNode::Document);
-        // println!("{ast:?}")
         let expected_locations = [
             (Location::new(1, 1), Location::new(2, 10)),
             (Location::new(3, 1), Location::new(4, 10)),
-            // 注意：最后一行是段落，不是标题
             (Location::new(5, 1), Location::new(7, 5)),
         ];
         for i in 1..3 {
@@ -237,18 +259,8 @@ baz*
                 level: heading::HeadingLevel::H1,
             }))
         );
-
         let last = expected_locations.last().unwrap();
         assert_eq!(ast[3].start, last.0);
         assert_eq!(ast[3].end, last.1);
     }
-
-    // #[test]
-    // fn test_running() {
-    //     let input = "# foo\t#\t";
-    //     let output = r#"g"#;
-    //     let ast = Parser::new(input).parse();
-    //     println!("AST:\n{ast:?}");
-    //     assert_eq!(ast.to_html(), output);
-    // }
 }

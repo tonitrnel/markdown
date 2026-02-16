@@ -1,0 +1,87 @@
+// Obsidian Flavored Markdown - Embeds
+// Reference: https://help.obsidian.md/Linking+notes+and+files/Embedding+files
+
+## Embeds (extension)
+
+OFM enables the `embed` extension. An exclamation mark before double brackets
+(`![[]]`) embeds the content of another file.
+
+Embed a note:
+
+```````````````````````````````` example
+![[My Note]]
+.
+<p><span class="internal-embed" src="My Note"></span></p>
+````````````````````````````````
+
+Embed a heading section:
+
+```````````````````````````````` example
+![[My Note#Heading 2]]
+.
+<p><span class="internal-embed" src="My Note#Heading 2"></span></p>
+````````````````````````````````
+
+Embed a block:
+
+```````````````````````````````` example
+![[My Note#^block-id]]
+.
+<p><span class="internal-embed" src="My Note#^block-id"></span></p>
+````````````````````````````````
+
+Embed an image:
+
+```````````````````````````````` example
+![[photo.jpg]]
+.
+<p><img src="photo.jpg" alt="photo.jpg" /></p>
+````````````````````````````````
+
+Embed an image with width:
+
+```````````````````````````````` example
+![[photo.jpg|200]]
+.
+<p><img src="photo.jpg" alt="photo.jpg" width="200" /></p>
+````````````````````````````````
+
+Embed an image with width and height:
+
+```````````````````````````````` example
+![[photo.jpg|200x300]]
+.
+<p><img src="photo.jpg" alt="photo.jpg" width="200" height="300" /></p>
+````````````````````````````````
+
+Embed inline with text:
+
+```````````````````````````````` example
+Here is ![[photo.jpg]] an image.
+.
+<p>Here is <img src="photo.jpg" alt="photo.jpg" /> an image.</p>
+````````````````````````````````
+
+Empty embed is not valid:
+
+```````````````````````````````` example
+![[]]
+.
+<p>![[]]</p>
+````````````````````````````````
+
+Embed audio file:
+
+```````````````````````````````` example
+![[recording.mp3]]
+.
+<p><audio controls src="recording.mp3"></audio></p>
+````````````````````````````````
+
+Embed PDF with page number:
+
+```````````````````````````````` example
+![[document.pdf#page=3]]
+.
+<p><iframe src="document.pdf#page=3"></iframe></p>
+````````````````````````````````

@@ -101,15 +101,11 @@ fn case_9() {
    - bar
 	 - baz"#;
     let output = r#"<ul>
-<li>foo
-<ul>
-<li>bar
-<ul>
+<li>foo<ul>
+<li>bar<ul>
 <li>baz</li>
-</ul>
-</li>
-</ul>
-</li>
+</ul></li>
+</ul></li>
 </ul>"#;
     let ast = Parser::new(input).parse();
     println!("AST:\n{ast:?}");

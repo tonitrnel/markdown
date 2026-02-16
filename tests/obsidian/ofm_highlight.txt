@@ -1,0 +1,80 @@
+// Obsidian Flavored Markdown - Highlighting
+// Reference: https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax
+
+## Highlighting (extension)
+
+OFM enables the `highlighting` extension. Text wrapped in two equal signs (`==`)
+is rendered as highlighted text.
+
+```````````````````````````````` example
+==highlight==
+.
+<p><mark>highlight</mark></p>
+````````````````````````````````
+
+Highlighting can be used inline:
+
+```````````````````````````````` example
+Use two equal signs to ==highlight text==.
+.
+<p>Use two equal signs to <mark>highlight text</mark>.</p>
+````````````````````````````````
+
+Multiple highlights in one line:
+
+```````````````````````````````` example
+==first== and ==second== highlights.
+.
+<p><mark>first</mark> and <mark>second</mark> highlights.</p>
+````````````````````````````````
+
+Highlighting can contain bold:
+
+```````````````````````````````` example
+==**bold highlight**==
+.
+<p><mark><strong>bold highlight</strong></mark></p>
+````````````````````````````````
+
+Highlighting can contain italic:
+
+```````````````````````````````` example
+==*italic highlight*==
+.
+<p><mark><em>italic highlight</em></mark></p>
+````````````````````````````````
+
+A single equal sign does not create a highlight:
+
+```````````````````````````````` example
+=not highlighted=
+.
+<p>=not highlighted=</p>
+````````````````````````````````
+
+Three or more equal signs do not create a highlight:
+
+```````````````````````````````` example
+===not highlighted===
+.
+<p>===not highlighted===</p>
+````````````````````````````````
+
+Unclosed highlight markers are treated as plain text:
+
+```````````````````````````````` example
+==not closed
+.
+<p>==not closed</p>
+````````````````````````````````
+
+Highlight cannot span multiple paragraphs:
+
+```````````````````````````````` example
+==not
+
+highlighted==
+.
+<p>==not</p>
+<p>highlighted==</p>
+````````````````````````````````

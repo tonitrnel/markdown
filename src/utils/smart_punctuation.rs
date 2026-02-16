@@ -11,7 +11,7 @@ use std::borrow::Cow;
 /// 此函数仅处理 dash 和 ellipsis。
 pub fn smart_punctuation(text: &str) -> Cow<'_, str> {
     // 快速检查：无需处理则直接返回
-    if !text.contains("--") && !text.contains("...") {
+    if !needs_smart_punctuation(text) {
         return Cow::Borrowed(text);
     }
 
@@ -50,6 +50,33 @@ pub fn smart_punctuation(text: &str) -> Cow<'_, str> {
     Cow::Owned(result)
 }
 
+#[inline]
+pub fn needs_smart_punctuation(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    if len < 2 {
+        return false;
+    }
+    let mut i = 0;
+    while i < len {
+        match bytes[i] {
+            b'-' => {
+                if i + 1 < len && bytes[i + 1] == b'-' {
+                    return true;
+                }
+            }
+            b'.' => {
+                if i + 2 < len && bytes[i + 1] == b'.' && bytes[i + 2] == b'.' {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
 /// 将 n 个连续 hyphen 转换为 em dash 和 en dash 的组合。
 ///
 /// 规则：尽量使用同类 dash。当必须混合时，em dash 在前，en dash 尽量少。
@@ -58,23 +85,28 @@ fn emit_dashes(out: &mut String, count: usize) {
         out.push('-');
         return;
     }
-    // em dash (---) 优先，剩余用 en dash (--)
-    // 特殊情况：count % 3 == 0 → 全 em dash
-    //           count % 3 == 2 → (count/3) em + 1 en
-    //           count % 3 == 1 → (count/3 - 1) em + 2 en
-    let (em, en) = match count % 3 {
-        0 => (count / 3, 0),
-        1 => {
-            if count >= 4 {
-                (count / 3 - 1, 2)
-            } else {
-                // count == 1 已处理
-                (0, count / 2)
+    // CommonMark smart punctuation:
+    // - Prefer homogeneous sequences when possible (all en or all em).
+    // - Otherwise use em first and minimize the number of en dashes.
+    let (em, en) = if count % 3 == 0 {
+        (count / 3, 0)
+    } else if count % 2 == 0 {
+        (0, count / 2)
+    } else {
+        let mut em = count / 3;
+        while em > 0 {
+            let rem = count - em * 3;
+            if rem % 2 == 0 {
+                return emit_dash_pair(out, em, rem / 2);
             }
+            em -= 1;
         }
-        2 => (count / 3, 1),
-        _ => unreachable!(),
+        (0, count / 2)
     };
+    emit_dash_pair(out, em, en);
+}
+
+fn emit_dash_pair(out: &mut String, em: usize, en: usize) {
     for _ in 0..em {
         out.push('\u{2014}'); // —
     }

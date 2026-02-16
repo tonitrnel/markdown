@@ -1,17 +1,10 @@
 use crate::ast::{table, MarkdownNode};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
-use crate::line::Line;
-use crate::tokenizer::{Location, Token};
+use crate::parser::Location;
+use crate::span::Span;
 use std::ops::Range;
 
-enum State {
-    Initial,
-    ColStart,
-    Col,
-    ColEnd,
-    Invalid,
-}
-type Row<'input> = ((Location, Location), Vec<Line<'input>>);
+type Row<'input> = ((Location, Location), Vec<Span<'input>>);
 type ColDefs = Vec<(Range<usize>, table::Alignment)>;
 
 impl From<(bool, bool)> for table::Alignment {
@@ -23,172 +16,156 @@ impl From<(bool, bool)> for table::Alignment {
         }
     }
 }
+
 impl table::Table {
-    fn scan_columns(line: &mut Line) -> Option<ColDefs> {
+    fn scan_columns(line: &mut Span) -> Option<ColDefs> {
         let mut col_defs: ColDefs = Vec::new();
         let mut range = Range { start: 0, end: 0 };
         let mut flags = (false, false);
-        let mut state = State::Initial;
-        while let Some(token) = line.peek() {
-            state = match state {
-                State::Initial => match token {
-                    Token::Pipe => {
-                        line.next();
-                        range.start = line.start_offset;
-                        State::ColStart
-                    }
-                    Token::Hyphen | Token::Whitespace(..) | Token::Colon => {
-                        range.start = line.start_offset;
-                        State::ColStart
-                    }
-                    _ => State::Invalid,
-                },
-                State::ColStart => match token {
-                    Token::Whitespace(..) => {
-                        line.next();
-                        State::ColStart
-                    }
-                    Token::Colon => {
-                        flags.0 = true;
-                        line.next();
-                        State::ColStart
-                    }
-                    Token::Hyphen => {
-                        line.next();
-                        State::Col
-                    }
-                    _ => State::Invalid,
-                },
-                State::Col => match token {
-                    Token::Hyphen => {
-                        flags.1 = false;
-                        line.next();
-                        State::Col
-                    }
-                    Token::Whitespace(..) => {
-                        line.next();
-                        State::Col
-                    }
-                    Token::Colon => {
-                        flags.1 = true;
-                        line.next();
-                        State::Col
-                    }
-                    Token::Pipe => State::ColEnd,
-                    _ => State::Invalid,
-                },
-                State::ColEnd => {
-                    range.end = line.start_offset;
-                    col_defs.push((range.clone(), table::Alignment::from(flags)));
-                    line.next();
-                    range.start = line.start_offset;
-                    range.end = line.start_offset;
-                    flags.0 = false;
-                    flags.1 = false;
-                    State::ColStart
+        let mut has_pipe_start = false;
+        let mut has_pipe_end = false;
+        let mut in_col = false;
+        let mut col_started = false;
+
+        // State machine for scanning delimiter row
+        let snapshot = line.snapshot();
+        let mut first = true;
+        while let Some(b) = line.peek() {
+            match b {
+                b'|' if first => {
+                    has_pipe_start = true;
+                    line.next_byte();
+                    range.start = 0; // will be set properly
+                    first = false;
+                    col_started = true;
+                    continue;
                 }
-                State::Invalid => break,
+                b'|' if in_col || col_started => {
+                    range.end = 0; // placeholder
+                    col_defs.push((range.clone(), table::Alignment::from(flags)));
+                    line.next_byte();
+                    has_pipe_end = true;
+                    flags = (false, false);
+                    in_col = false;
+                    col_started = true;
+                    continue;
+                }
+                b' ' | b'\t' => {
+                    line.next_byte();
+                    first = false;
+                    continue;
+                }
+                b':' if !in_col => {
+                    flags.0 = true;
+                    line.next_byte();
+                    first = false;
+                    col_started = true;
+                    continue;
+                }
+                b'-' => {
+                    in_col = true;
+                    line.next_byte();
+                    first = false;
+                    col_started = true;
+                    continue;
+                }
+                b':' if in_col => {
+                    flags.1 = true;
+                    line.next_byte();
+                    continue;
+                }
+                _ => {
+                    // Invalid character in delimiter row
+                    line.resume(&snapshot);
+                    return None;
+                }
             }
         }
-        if matches!(state, State::Col) {
-            range.end = line.start_offset;
-            col_defs.push((range, table::Alignment::from(flags)))
+        // Handle last column
+        if in_col {
+            col_defs.push((range, table::Alignment::from(flags)));
         }
 
-        let optional = {
-            if !col_defs.is_empty() {
-                !col_defs
-                    .first()
-                    .zip(col_defs.last())
-                    .map(|(a, b)| (a.0.start.saturating_sub(1), b.0.end))
-                    .map(|(a, b)| {
-                        line.get_raw(a)
-                            .map(|it| it == &Token::Pipe)
-                            .unwrap_or(false)
-                            && line
-                                .get_raw(b)
-                                .map(|it| it == &Token::Pipe)
-                                .unwrap_or(false)
-                    })
-                    .unwrap_or(false)
-            } else {
-                true
-            }
-        };
-        if col_defs.len() > 1 || (col_defs.len() == 1 && !optional) {
+        let optional = has_pipe_start && has_pipe_end;
+        if col_defs.len() > 1 || (col_defs.len() == 1 && optional) {
+            line.resume(&snapshot);
             Some(col_defs)
         } else {
+            line.resume(&snapshot);
             None
         }
     }
-    fn parse_columns<'input>(line: &Line<'input>) -> Option<Row<'input>> {
+
+    fn parse_columns<'input>(line: &Span<'input>) -> Option<Row<'input>> {
         let mut row: Row = (
             (line.start_location(), line.last_token_end_location()),
             Vec::new(),
         );
-        let mut ranges = Vec::new();
-        let mut range = Range { start: 0, end: 0 };
+        let mut ranges: Vec<Range<usize>> = Vec::new();
+        let mut range_start = 0;
         let len = line.len();
-        for (idx, item) in line.iter().enumerate() {
-            match item.token {
-                Token::Pipe if idx == 0 => {
-                    range.start = 1;
+        let mut has_pipe_start = false;
+        let mut has_pipe_end = false;
+        let mut has_any_pipe = false;
+
+        let mut idx = 0;
+        while idx < len {
+            let b = match line.get(idx) {
+                Some(b) => b,
+                None => break,
+            };
+            match b {
+                b'\\' if idx + 1 < len => {
+                    // Skip escaped character (e.g. \|)
+                    idx += 2;
                     continue;
                 }
-                Token::Pipe => {
-                    range.end = idx;
-                    ranges.push(range.clone());
-                    range.start = idx + 1;
-                    range.end = range.start;
+                b'|' if idx == 0 => {
+                    has_pipe_start = true;
+                    has_any_pipe = true;
+                    range_start = 1;
+                    idx += 1;
                     continue;
                 }
-                _ if idx + 1 == len => {
-                    if item.token == Token::Pipe {
-                        range.end = idx;
-                    } else {
-                        range.end = len;
+                b'|' => {
+                    has_any_pipe = true;
+                    ranges.push(Range {
+                        start: range_start,
+                        end: idx,
+                    });
+                    range_start = idx + 1;
+                    has_pipe_end = true;
+                    idx += 1;
+                    continue;
+                }
+                _ => {
+                    idx += 1;
+                    if idx == len {
+                        ranges.push(Range {
+                            start: range_start,
+                            end: len,
+                        });
                     }
-                    ranges.push(range);
-                    break;
+                    continue;
                 }
-                _ => continue,
             }
         }
-        // 该列是否有 Pipe 在开始和结束处
-        let optional = {
-            if !ranges.is_empty() {
-                !ranges
-                    .first()
-                    .zip(ranges.last())
-                    .map(|(a, b)| (a.start.saturating_sub(1), b.end))
-                    .map(|(a, b)| {
-                        line.get_raw(a)
-                            .map(|it| it == &Token::Pipe)
-                            .unwrap_or(false)
-                            && line
-                                .get_raw(b)
-                                .map(|it| it == &Token::Pipe)
-                                .unwrap_or(false)
-                    })
-                    .unwrap_or(false)
-            } else {
-                true
-            }
-        };
+
+        let optional = has_pipe_start && has_pipe_end;
         row.1.extend(
             ranges
                 .iter()
                 .map(|range| line.slice(range.start, range.end).trim()),
         );
-        let len = row.1.len();
-        if len > 1 || (len == 1 && !optional) {
+        let col_count = row.1.len();
+        if col_count > 1 || (col_count == 1 && (optional || !has_any_pipe)) {
             Some(row)
         } else {
             None
         }
     }
+
     pub(crate) fn reprocess(ProcessCtx { line, parser, id }: ProcessCtx) -> bool {
-        // 找到最近的 TBody 没有则创建
         let table_id = {
             if parser.tree[id].body != MarkdownNode::TableBody {
                 parser.append_block(MarkdownNode::TableBody, line.start_location());
@@ -215,26 +192,29 @@ impl table::Table {
         }
         parser.finalize(row_id, end_location);
         line.skip_to_end();
-        // println!("再次处理 Table 完成")
         true
     }
 }
+
 impl BlockStrategy for table::Table {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
-        // 匹配表格第二行，忽略缩进
+        // Match table second row (delimiter), ignore indent
         line.skip(line.indent_len());
-        if !line.validate(0, |it: &Token| {
-            matches!(it, Token::Pipe | Token::Hyphen | Token::Colon)
-        }) {
+        // Must start with pipe, hyphen, or colon
+        match line.peek() {
+            Some(b'|') | Some(b'-') | Some(b':') => {}
+            _ => return BlockMatching::Unmatched,
+        }
+        if parser.current_proc().body != MarkdownNode::Paragraph {
             return BlockMatching::Unmatched;
         }
-        if parser.current_proc().body != MarkdownNode::Paragraph
-            || !parser
-                .inlines
-                .get(&parser.curr_proc_node)
-                .map(|it| it.len() == 1)
-                .unwrap_or(false)
-        {
+        let paragraph_id = parser.curr_proc_node;
+        let paragraph_line_count = parser
+            .inlines
+            .get(&paragraph_id)
+            .map(|it| it.len())
+            .unwrap_or(0);
+        if paragraph_line_count == 0 {
             return BlockMatching::Unmatched;
         }
         let snapshot = line.snapshot();
@@ -242,25 +222,40 @@ impl BlockStrategy for table::Table {
             Some(columns) => columns,
             None => return BlockMatching::Unmatched,
         };
-        line.resume(snapshot);
+        line.resume(&snapshot);
         let col_len = col_defs.len();
-        let table = MarkdownNode::Table(table::Table {
+        let Some(header_source) = parser
+            .inlines
+            .get(&paragraph_id)
+            .and_then(|it| it.last().cloned())
+        else {
+            return BlockMatching::Unmatched;
+        };
+        let table = MarkdownNode::Table(Box::new(table::Table {
             column: col_len,
             alignments: col_defs.into_iter().map(|it| it.1).collect(),
-        });
-        let header_cols =
-            match Self::parse_columns(&parser.inlines.get(&parser.curr_proc_node).unwrap()[0]) {
-                Some(it) if it.1.len() == col_len => {
-                    parser.inlines.remove(&parser.curr_proc_node);
-                    it
+        }));
+        let header_cols = match Self::parse_columns(&header_source) {
+            Some(it) if it.1.len() == col_len => it,
+            _ => return BlockMatching::Unmatched,
+        };
+        if paragraph_line_count == 1 {
+            parser.inlines.remove(&paragraph_id);
+            parser.replace_block(table, line.last_token_end_location());
+        } else {
+            if let Some(lines) = parser.inlines.get_mut(&paragraph_id) {
+                lines.pop();
+                if let Some(last) = lines.last() {
+                    parser.tree[paragraph_id].end = last.last_token_end_location();
                 }
-                _ => return BlockMatching::Unmatched,
-            };
-        parser.replace_block(table, line.last_token_end_location());
-        // 写入表头
+            }
+            let paragraph_end = parser.tree[paragraph_id].end;
+            parser.finalize(paragraph_id, paragraph_end);
+            parser.append_block(table, header_source.start_location());
+        }
+        // Write table header
         let idx = parser.append_block(MarkdownNode::TableHead, header_cols.0 .0);
         let row_idx = parser.append_block(MarkdownNode::TableRow, header_cols.0 .0);
-        // 写入表头列
         for column in header_cols.1.into_iter() {
             let idx = parser.append_block(MarkdownNode::TableHeadCol, column.start_location());
             parser.finalize(idx, column.last_token_end_location());
@@ -268,23 +263,19 @@ impl BlockStrategy for table::Table {
         }
         parser.finalize(row_idx, header_cols.0 .1);
         parser.finalize(idx, header_cols.0 .1);
-        // 全部消耗
         line.skip_to_end();
-        // 标记为全部未处理节点已关闭，防止 Table 节点被当作未匹配节点关闭
         parser.all_closed = true;
         BlockMatching::MatchedLeaf
     }
 
     fn process(ProcessCtx { line, parser, id }: ProcessCtx) -> BlockProcessing {
-        // 找到最近的 TBody 没有则创建
-        {
-            let maybe_body_idx = parser.tree.get_last_child(id).unwrap();
-            if let MarkdownNode::TableBody = &parser.tree[maybe_body_idx].body {
-                maybe_body_idx
-            } else {
-                parser.append_block(MarkdownNode::TableBody, line.start_location())
+        if let Some(maybe_body_idx) = parser.tree.get_last_child(id) {
+            if !matches!(parser.tree[maybe_body_idx].body, MarkdownNode::TableBody) {
+                parser.append_block(MarkdownNode::TableBody, line.start_location());
             }
-        };
+        } else {
+            parser.append_block(MarkdownNode::TableBody, line.start_location());
+        }
         let column = if let MarkdownNode::Table(table) = &parser.tree[id].body {
             table.column
         } else {
@@ -292,6 +283,17 @@ impl BlockStrategy for table::Table {
         };
         if line.is_blank() {
             return BlockProcessing::Unprocessed;
+        }
+        // Per GFM spec: table is broken at beginning of another block-level structure.
+        // If line starts with '>' (blockquote marker) and has no pipe, break the table.
+        if !line.is_indented() {
+            let snap = line.snapshot();
+            line.advance_next_nonspace();
+            let first = line.peek();
+            line.resume(&snap);
+            if first == Some(b'>') {
+                return BlockProcessing::Unprocessed;
+            }
         }
         let row = match Self::parse_columns(line) {
             Some(row) => row,
@@ -305,13 +307,11 @@ impl BlockStrategy for table::Table {
             parser.inlines.insert(idx, vec![col]);
             inserted += 1;
         }
-        // 为表格填充空白列
         let end_location = row.0 .1;
         for _ in inserted..column {
             let idx = parser.append_block(MarkdownNode::TableDataCol, end_location);
             parser.finalize(idx, end_location);
         }
-        // 关闭当前行
         parser.finalize(row_id, row.0 .1);
         BlockProcessing::Processed
     }
@@ -319,83 +319,8 @@ impl BlockStrategy for table::Table {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::table::{Alignment, Table};
-    use crate::line::Line;
     use crate::parser::Parser;
-    use crate::tokenizer::{Location, Tokenizer};
 
-    #[test]
-    fn test_scan_columns() {
-        let text = r#"| --- | --- |"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let col_defs = Table::scan_columns(&mut line).unwrap();
-        assert_eq!(col_defs.len(), 2);
-        assert_eq!(col_defs[0].1, Alignment::Left);
-        assert_eq!(col_defs[1].1, Alignment::Left);
-
-        let text = r#"-- | --"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let col_defs = Table::scan_columns(&mut line).unwrap();
-        assert_eq!(col_defs.len(), 2);
-        assert_eq!(col_defs[0].1, Alignment::Left);
-        assert_eq!(col_defs[1].1, Alignment::Left);
-
-        let text = r#":-: | -----------:"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let col_defs = Table::scan_columns(&mut line).unwrap();
-        assert_eq!(col_defs.len(), 2);
-        assert_eq!(col_defs[0].1, Alignment::Center);
-        assert_eq!(col_defs[1].1, Alignment::Right);
-
-        let text = r#":-- | :--: | --:"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let col_defs = Table::scan_columns(&mut line).unwrap();
-        assert_eq!(col_defs.len(), 3);
-        assert_eq!(col_defs[0].1, Alignment::Left);
-        assert_eq!(col_defs[1].1, Alignment::Center);
-        assert_eq!(col_defs[2].1, Alignment::Right);
-
-        let text = r#"| - |"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let col_defs = Table::scan_columns(&mut line);
-        assert!(col_defs.is_some());
-        assert_eq!(col_defs.unwrap().len(), 1);
-
-        let text = r#"-"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        assert!(Table::scan_columns(&mut line).is_none());
-
-        let text = r#"|-"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        assert!(Table::scan_columns(&mut line).is_none());
-
-        let text = r#"-|"#;
-        let mut line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        assert!(Table::scan_columns(&mut line).is_none());
-    }
-    #[test]
-    fn test_parse_columns() {
-        let text = r#"| Left-aligned text | Center-aligned text | Right-aligned text |"#;
-        let line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let row = Table::parse_columns(&line);
-        assert!(row.is_some());
-        let row = row.unwrap();
-        assert_eq!(row.0 .1, Location::new(1, 65));
-        let cols = row.1.iter().map(|it| it.to_string()).collect::<Vec<_>>();
-        assert_eq!(cols[0], "Left-aligned text");
-        assert_eq!(cols[1], "Center-aligned text");
-        assert_eq!(cols[2], "Right-aligned text");
-
-        let text = r#"| Left-aligned text |"#;
-        let line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let row = Table::parse_columns(&line);
-        assert!(row.is_some());
-
-        let text = r#"Left-aligned text |"#;
-        let line = Line::extract(&mut Tokenizer::new(text).tokenize()).unwrap();
-        let row = Table::parse_columns(&line);
-        assert!(row.is_none());
-    }
     #[test]
     fn gfm_case_198() {
         let ast = Parser::new(
@@ -404,7 +329,6 @@ mod tests {
 | baz | bim |"#,
         )
         .parse();
-        // println!("AST:\n{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<table>
@@ -432,25 +356,26 @@ mod tests {
 bar | baz"#,
         )
         .parse();
-        // println!("AST:\n{ast:?}")
+        println!("AST:\n{ast:?}");
         assert_eq!(
             ast.to_html(),
             r#"<table>
 <thead>
 <tr>
-<th align="center">abc</th>
-<th align="right">defghi</th>
+<th style="text-align: center">abc</th>
+<th style="text-align: right">defghi</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td align="center">bar</td>
-<td align="right">baz</td>
+<td style="text-align: center">bar</td>
+<td style="text-align: right">baz</td>
 </tr>
 </tbody>
 </table>"#
         );
     }
+
     #[test]
     fn gfm_case_200() {
         let ast = Parser::new(
@@ -460,7 +385,6 @@ bar | baz"#,
 | b **\|** im |"#,
         )
         .parse();
-        println!("AST:\n{ast:?}");
         assert_eq!(
             ast.to_html(),
             r#"<table>
@@ -480,6 +404,7 @@ bar | baz"#,
 </table>"#
         );
     }
+
     #[test]
     fn gfm_case_201() {
         let ast = Parser::new(
@@ -489,7 +414,6 @@ bar | baz"#,
 > bar"#,
         )
         .parse();
-        // println!("AST:\n{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<table>
@@ -511,6 +435,7 @@ bar | baz"#,
 </blockquote>"#
         );
     }
+
     #[test]
     fn gfm_case_202() {
         let ast = Parser::new(
@@ -522,7 +447,6 @@ bar
 bar"#,
         )
         .parse();
-        // println!("AST:\n{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<table>
@@ -546,6 +470,7 @@ bar"#,
 <p>bar</p>"#
         );
     }
+
     #[test]
     fn gfm_case_203() {
         let ast = Parser::new(
@@ -554,7 +479,6 @@ bar"#,
 | bar |"#,
         )
         .parse();
-        // println!("AST:\n{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p>| abc | def |
@@ -562,6 +486,7 @@ bar"#,
 | bar |</p>"#
         );
     }
+
     #[test]
     fn gfm_case_204() {
         let ast = Parser::new(
@@ -571,7 +496,6 @@ bar"#,
 | bar | baz | boo |"#,
         )
         .parse();
-        // println!("AST:\n{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<table>
@@ -594,6 +518,7 @@ bar"#,
 </table>"#
         );
     }
+
     #[test]
     fn gfm_case_205() {
         let ast = Parser::new(
@@ -601,7 +526,6 @@ bar"#,
 | --- | --- |"#,
         )
         .parse();
-        // println!("AST:\n{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<table>

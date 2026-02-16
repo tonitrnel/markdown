@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
 
@@ -15,7 +15,10 @@ pub struct TreeNode<T> {
 
 impl<T: PartialEq> PartialEq<T> for TreeNode<T> {
     fn eq(&self, other: &T) -> bool {
-        self.item.as_ref().unwrap().eq(other)
+        match self.item.as_ref() {
+            Some(item) => item.eq(other),
+            None => false,
+        }
     }
 }
 
@@ -41,7 +44,7 @@ pub struct Tree<T> {
     /// 存储当前索引，它可能在树主干上，也可能在树分支上或者没有
     cur: Option<usize>,
     /// 所有 free 节点的索引
-    frees: HashSet<usize>,
+    frees: FxHashSet<usize>,
 }
 impl<T> Index<usize> for Tree<T> {
     type Output = T;
@@ -74,7 +77,7 @@ impl<T: Debug> Tree<T> {
             nodes: Vec::with_capacity(cap),
             forks: vec![],
             cur: None,
-            frees: HashSet::new(),
+            frees: FxHashSet::default(),
         }
     }
     #[allow(unused)]
@@ -93,8 +96,7 @@ impl<T: Debug> Tree<T> {
     /// 返回值：
     /// 返回新节点在树中的索引。
     pub fn append(&mut self, node: T) -> usize {
-        let next = self.create_node(node);
-        self.frees.remove(&next);
+        let next = self.create_node_attached(node);
         // 如果当前索引存在则进行顺序追加
         if let Some(cur) = self.cur.filter(|idx| !self.is_free_node(idx)) {
             let parent = self.get_parent(cur);
@@ -119,8 +121,7 @@ impl<T: Debug> Tree<T> {
         next
     }
     pub fn append_child(&mut self, parent: usize, node: T) -> usize {
-        let index = self.create_node(node);
-        self.frees.remove(&index);
+        let index = self.create_node_attached(node);
         if let Some(last_child) = self.nodes[parent].last_child {
             self.nodes[last_child].next = Some(index);
             self.nodes[index].prev = Some(last_child);
@@ -161,7 +162,9 @@ impl<T: Debug> Tree<T> {
     /// 返回值：
     /// 返回分叉点的索引。
     pub fn push(&mut self) -> usize {
-        let cur_ix = self.cur.unwrap();
+        let Some(cur_ix) = self.cur else {
+            panic!("Tree::push called without current node");
+        };
         self.forks.push(cur_ix);
         self.cur = self.nodes[cur_ix].first_child;
         cur_ix
@@ -196,6 +199,20 @@ impl<T: Debug> Tree<T> {
         index
     }
 
+    /// 创建节点但不加入 frees 集合（用于 append/append_child 内部调用，避免 insert+remove 开销）
+    fn create_node_attached(&mut self, item: T) -> usize {
+        let index = self.nodes.len();
+        self.nodes.push(TreeNode {
+            item: Some(item),
+            parent: self.peek_up().unwrap_or(0),
+            first_child: None,
+            last_child: None,
+            next: None,
+            prev: None,
+        });
+        index
+    }
+
     /// 查看当前节点的父节点的 ID
     pub fn peek_up(&self) -> Option<usize> {
         self.forks.last().copied()
@@ -219,6 +236,13 @@ impl<T: Debug> Tree<T> {
         self.nodes.iter().filter(|it| it.item.is_some()).count()
     }
 
+    /// 获取底层节点槽位数量（包含已释放槽位），O(1)。
+    ///
+    /// 适用于预算/上限检测，不适合作为活跃节点数量统计。
+    pub fn node_slots_len(&self) -> usize {
+        self.nodes.len()
+    }
+
     /// 获取上级节点的位置
     ///
     /// 注：查询节点为 Root 时会返回其自身
@@ -240,8 +264,7 @@ impl<T: Debug> Tree<T> {
         if let Some(last_child) = self.nodes[parent].last_child {
             assert!(
                 self.nodes[last_child].next.is_none(),
-                "#{last_child} next node #{} is invalid",
-                self.nodes[last_child].next.unwrap()
+                "#{last_child} next node is invalid"
             );
             self.nodes[last_child].next = Some(index);
             self.nodes[index].prev = Some(last_child);
@@ -326,7 +349,10 @@ impl<T: Debug> Tree<T> {
         self.unlink(idx);
         let node = std::mem::take(&mut self.nodes[idx]);
         self.frees.remove(&idx);
-        node.item.unwrap()
+        match node.item {
+            Some(item) => item,
+            None => panic!("Node #{idx} has been released or has an invalid node index"),
+        }
     }
     /// 断掉节点的前后关系和父级关系，使该节点成为一个 `free` 节点
     ///
@@ -387,7 +413,7 @@ impl<T> Default for Tree<T> {
             nodes: Vec::new(),
             forks: Vec::new(),
             cur: None,
-            frees: HashSet::new(),
+            frees: FxHashSet::default(),
         }
     }
 }
@@ -408,7 +434,11 @@ where
             for _ in 0..indent {
                 write!(f, "  ")?;
             }
-            writeln!(f, "{:?}", &tree.nodes[cur].item.as_ref().unwrap())?;
+            if let Some(item) = tree.nodes[cur].item.as_ref() {
+                writeln!(f, "{:?}", item)?;
+            } else {
+                writeln!(f, "<Free>")?;
+            }
             if let Some(child_ix) = tree.nodes[cur].first_child {
                 debug_tree(tree, child_ix, indent + 1, f)?;
             }

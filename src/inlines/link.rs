@@ -1,10 +1,30 @@
-use crate::ast::{embed, link, reference::Reference, MarkdownNode};
-use crate::inlines::bracket::BracketChain;
+use crate::ast::{MarkdownNode, embed, link, reference::Reference};
 use crate::inlines::ProcessCtx;
-use crate::line::Line;
-use crate::tokenizer::{Token, Whitespace};
+use crate::inlines::bracket::BracketChain;
+use crate::span::{MergedSpan, Span};
 use crate::utils;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
+
+/// 处理反斜杠转义：将 `\X` 替换为 `X`（X 为 ASCII 标点字符）
+pub(super) fn backslash_unescape(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut result = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_punctuation() {
+            result.push(bytes[i + 1] as char);
+            i += 2;
+        } else {
+            // 处理 UTF-8 多字节字符
+            let Some(ch) = s[i..].chars().next() else {
+                break;
+            };
+            result.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    result
+}
 
 enum TitleState {
     Initial,
@@ -15,43 +35,42 @@ enum InString {
     Single,
     Paren,
 }
-pub(crate) fn scan_link_or_image<'input>(
-    line: &mut Line<'input>,
-    opener: &BracketChain<'input>,
-    ref_map: &HashMap<String, (String, Option<String>)>,
-    footnotes: &HashMap<String, usize>,
+
+pub(crate) fn scan_link_or_image(
+    line: &mut Span,
+    opener: &BracketChain,
+    ref_map: &FxHashMap<String, (String, Option<String>)>,
+    footnotes: &FxHashMap<String, usize>,
 ) -> Option<(String, Option<String>, bool)> {
     let snapshot = line.snapshot();
     let mut url = None;
     let mut title = None;
     let mut matched = false;
-    // println!(" -> scan_link_block");
     // 尝试解析 inline link
     'scan_link_url: {
-        if !line.consume(Token::LParen) {
+        if !line.consume(b'(') {
             break 'scan_link_url;
         }
         skip_spaces(line);
-        // println!(" -> scan_link_block::scan_link_url");
         url = match scan_link_url(line) {
-            Some((size, _line)) => {
+            Some((size, url_span)) => {
                 line.skip(size);
-                // println!("### {:?}", _line.to_string());
                 Some(utils::percent_encode::encode(
-                    utils::unescape_string(_line.to_string()),
+                    backslash_unescape(&utils::unescape_string(url_span.to_string())),
                     true,
                 ))
             }
             _ => break 'scan_link_url,
         };
-        // println!(" -> scan_link_block::scan_link_title => url = {url:?}");
         title = {
             let count = skip_spaces(line);
             if count > 0 {
                 match scan_link_title(line) {
-                    Some((size, _line)) => {
+                    Some((size, title_span)) => {
                         line.skip(size);
-                        Some(utils::entities::unescape_string(_line.to_string()))
+                        Some(backslash_unescape(&utils::entities::unescape_string(
+                            title_span.to_string(),
+                        )))
                     }
                     _ => None,
                 }
@@ -60,31 +79,48 @@ pub(crate) fn scan_link_or_image<'input>(
             }
         };
         skip_spaces(line);
-        // println!(" -> scan_link_block::end_matches => title = {title:?}");
-        if !line.consume(Token::RParen) {
+        if !line.consume(b')') {
             break 'scan_link_url;
         };
         matched = true;
     };
-    // println!(" -> scan_link_label = {matched}");
     let mut is_footnote_link = false;
     // 如果上一个块未匹配，尝试解析 link label
     'scan_link_label: {
-        if matched || opener.is_image() {
+        if matched {
             break 'scan_link_label;
         };
-        line.resume(snapshot);
+        line.resume(&snapshot);
         let ref_label = match scan_link_label(line) {
             Some((size, label)) => {
                 line.skip(size);
-                label
+                // If label is empty [], use the opener content as reference
+                if label == "[]" {
+                    let mut opener_idx = opener.borrow().index;
+                    // For images, skip the '!' character
+                    if opener.is_image() {
+                        opener_idx += 1;
+                    }
+                    let cur = line.cursor() - size; // Before the []
+                    let s = line.slice_from_abs(opener_idx, cur);
+                    s.to_string()
+                } else {
+                    label
+                }
             }
-            None if !opener.borrow().bracket_after => line
-                .slice_raw(opener.borrow().index, line.start_offset)
-                .to_string(),
+            None if !opener.borrow().bracket_after => {
+                // 从 opener 的 index 到当前 cursor 的内容
+                let mut opener_idx = opener.borrow().index;
+                // For images, skip the '!' character
+                if opener.is_image() {
+                    opener_idx += 1;
+                }
+                let cur = line.cursor();
+                let s = line.slice_from_abs(opener_idx, cur);
+                s.to_string()
+            }
             _ => break 'scan_link_label,
         };
-        // println!("scan_link_label ref_label={ref_label:?}");
         if ref_label.starts_with("[^") {
             let ref_label = &ref_label[2..ref_label.len() - 1];
             if footnotes.contains_key(ref_label) {
@@ -101,86 +137,103 @@ pub(crate) fn scan_link_or_image<'input>(
             }
         }
     }
-    // println!(" -> matched = {matched}");
     if !matched {
         return None;
     }
-    Some((url.unwrap(), title, is_footnote_link))
+    url.map(|u| (u, title, is_footnote_link))
 }
-pub(super) fn scan_link_url<'input>(line: &Line<'input>) -> Option<(usize, Line<'input>)> {
-    if line.validate(0, Token::Lt) {
-        let mut i = 0;
-        let mut end = false;
-        let iter = line.iter().skip(1);
-        for it in iter {
-            i += 1;
-            match it.token {
-                Token::Gt => {
-                    end = true;
+
+pub(super) fn scan_link_url<'input>(line: &Span<'input>) -> Option<(usize, Span<'input>)> {
+    if line.validate(0, b'<') {
+        // <url> 格式 - 尖括号内不允许反斜杠转义
+        // 反斜杠被视为字面字符，不能用于转义 >
+        let mut i = 1;
+        loop {
+            match line.get(i) {
+                Some(b'>') => {
                     break;
                 }
-                Token::Whitespace(Whitespace::NewLine(..)) | Token::Lt => {
-                    return None;
+                Some(b'\\') => {
+                    // 在尖括号URL中，反斜杠后必须跟着非 > 的字符
+                    // 如果反斜杠后是 >，这是无效的（反斜杠不能转义 >）
+                    if let Some(b'>') = line.get(i + 1) {
+                        return None; // 无效：\> 不被允许
+                    }
+                    i += 1;
                 }
-                _ => (),
-            };
+                Some(b'\n') | Some(b'\r') | Some(b'<') | None => return None,
+                Some(_) => i += 1,
+            }
         }
-        if !end {
-            return None;
-        }
-        let line = line.slice(1, i);
-        Some((i + 1, line))
+        let url_span = line.slice(1, i);
+        Some((i + 1, url_span))
     } else {
+        // 普通 url 格式
         let mut i = 0;
-        let mut p = 0;
-        let iter = line.iter();
-        for it in iter {
-            match it.token {
-                Token::LParen => {
+        let mut p = 0; // 括号深度
+        loop {
+            match line.get(i) {
+                Some(b'\\') => {
+                    // 反斜杠转义：跳过下一个 ASCII 标点字符
+                    if let Some(next) = line.get(i + 1) {
+                        if next.is_ascii_punctuation() {
+                            i += 2;
+                        } else {
+                            i += 1;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+                Some(b'(') => {
                     i += 1;
                     p += 1;
                     if p > 32 {
                         return None;
                     }
                 }
-                Token::RParen => {
+                Some(b')') => {
                     if p == 0 {
                         break;
                     }
                     p -= 1;
                     i += 1;
                 }
-                Token::Whitespace(..) => {
-                    break;
-                }
-                t if t.is_control() => break,
-                _ => i += 1,
+                Some(b' ') | Some(b'\t') | Some(b'\n') | Some(b'\r') => break,
+                Some(b) if b < 0x20 => break, // control chars
+                None => break,
+                Some(_) => i += 1,
             }
         }
-        // 括号不对称
         if p != 0 {
             return None;
         }
-        let line = line.slice(0, i);
-        Some((i, line))
+        let url_span = line.slice(0, i);
+        Some((i, url_span))
     }
 }
-pub(super) fn scan_link_title<'input>(line: &Line<'input>) -> Option<(usize, Line<'input>)> {
+
+pub(super) fn scan_link_title<'input>(line: &Span<'input>) -> Option<(usize, Span<'input>)> {
     let mut i = 0;
     let mut state = TitleState::Initial;
-    for item in line.iter() {
+    loop {
+        let b = match line.get(i) {
+            Some(b) => b,
+            None => break,
+        };
         i += 1;
-        match (&state, item.token) {
-            (TitleState::Initial, Token::DoubleQuote) => {
-                state = TitleState::InString(InString::Double)
+        match (&state, b) {
+            (TitleState::Initial, b'"') => state = TitleState::InString(InString::Double),
+            (TitleState::Initial, b'\'') => state = TitleState::InString(InString::Single),
+            (TitleState::Initial, b'(') => state = TitleState::InString(InString::Paren),
+            (TitleState::InString(_), b'\\') => {
+                if line.get(i).is_some() {
+                    i += 1;
+                }
             }
-            (TitleState::Initial, Token::SingleQuote) => {
-                state = TitleState::InString(InString::Single)
-            }
-            (TitleState::Initial, Token::LParen) => state = TitleState::InString(InString::Paren),
-            (TitleState::InString(InString::Double), Token::DoubleQuote)
-            | (TitleState::InString(InString::Single), Token::SingleQuote)
-            | (TitleState::InString(InString::Paren), Token::RParen) => {
+            (TitleState::InString(InString::Double), b'"')
+            | (TitleState::InString(InString::Single), b'\'')
+            | (TitleState::InString(InString::Paren), b')') => {
                 state = TitleState::Initial;
                 break;
             }
@@ -191,78 +244,144 @@ pub(super) fn scan_link_title<'input>(line: &Line<'input>) -> Option<(usize, Lin
     if !matches!(state, TitleState::Initial) {
         return None;
     }
-    Some((i, line.slice(1, i - 1)))
+    Some((i, line.slice(1, i.saturating_sub(1))))
 }
 
 /// 扫描链接的 Label，用于 Reference
-///
-/// 返回结束位置和 Label
-pub(super) fn scan_link_label(line: &Line) -> Option<(usize, String)> {
-    if !line.validate(0, Token::LBracket) {
+pub(super) fn scan_link_label(line: &Span) -> Option<(usize, String)> {
+    if line.get(0) != Some(b'[') {
         return None;
     }
-    let iter = line.iter().skip(1);
     let mut end = 0;
-    let mut len = 0;
-    for (i, item) in iter.enumerate() {
-        len += item.len();
-        if i > 1000 {
-            return None;
-        }
-        match item.token {
-            Token::RBracket => {
-                end = i + 1; // included skip item
+    let mut i = 1;
+    loop {
+        match line.get(i) {
+            Some(b']') => {
+                end = i;
                 break;
             }
-            Token::LBracket => return None,
-            _ => (),
+            Some(b'[') => return None,
+            Some(b'\\') => {
+                // 反斜杠转义：跳过下一个字符
+                i += 1;
+                if let Some(next) = line.get(i) {
+                    let char_len = if next < 0x80 {
+                        1
+                    } else if next < 0xE0 {
+                        2
+                    } else if next < 0xF0 {
+                        3
+                    } else {
+                        4
+                    };
+                    i += char_len;
+                }
+                if i > 1001 {
+                    return None;
+                }
+            }
+            None => break,
+            Some(b) => {
+                // 计算字符长度
+                let char_len = if b < 0x80 {
+                    1
+                } else if b < 0xE0 {
+                    2
+                } else if b < 0xF0 {
+                    3
+                } else {
+                    4
+                };
+                i += char_len;
+                if i > 1001 {
+                    return None;
+                }
+            }
         }
     }
-    if end == 0 || len <= 2 {
+    if end == 0 {
         return None;
     }
+    // Allow empty labels like [] for collapsed reference links
     Some((end + 1, line.slice(0, end + 1).to_string()))
 }
-/// 跳过多个连续空格包含换行（不过应该最多只有 1 个换行符）
-///
-/// 返回：
-/// 跳过的数量
-pub(super) fn skip_spaces(line: &mut Line) -> usize {
-    let count = line.starts_count_matches(|it| matches!(it, Token::Whitespace(..)));
+
+/// 跳过空白字符（空格、制表符、换行），返回跳过的数量
+pub(super) fn skip_spaces(line: &mut Span) -> usize {
+    let count = line.starts_count_matches(|b: u8| matches!(b, b' ' | b'\t' | b'\n' | b'\r'));
     if count > 0 {
         line.skip(count);
-    };
+    }
     count
 }
+
 pub(super) fn normalize_reference(str: String) -> String {
-    str[1..str.len() - 1]
-        .trim()
-        .to_uppercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    // CommonMark requires Unicode case-folding
+    // The German ẞ (U+1E9E) should fold to "ss", not "ß"
+    // We also normalize all whitespace runs to a single space.
+    let trimmed = str.trim();
+    let content = if trimmed.starts_with('[') && trimmed.ends_with(']') && trimmed.len() >= 2 {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+    let content = content.trim();
+
+    let mut normalized = String::with_capacity(content.len());
+    let mut pending_space = false;
+    for ch in content.chars() {
+        if ch.is_whitespace() {
+            pending_space = !normalized.is_empty();
+            continue;
+        }
+        if pending_space {
+            normalized.push(' ');
+            pending_space = false;
+        }
+        if ch == 'ẞ' {
+            normalized.push('s');
+            normalized.push('s');
+        } else {
+            normalized.extend(ch.to_lowercase());
+        }
+    }
+    normalized
 }
 
-/// Block Id
-///
-/// https://help.obsidian.md/Linking+notes+and+files/Internal+links#Link+to+a+block+in+a+note
+/// Block Id (OFM)
 pub(super) fn process_block_id(
     ProcessCtx {
         id, line, parser, ..
     }: &mut ProcessCtx,
 ) -> bool {
-    line.next();
-    for item in line.iter() {
-        match &item.token {
-            Token::Text(str) if str.chars().all(|ch| ch.is_ascii_alphabetic()) => continue,
-            Token::Digit(_) => continue,
-            Token::Hyphen => continue,
+    // 跳过 '^'
+    line.next_byte();
+    let start = line.cursor();
+    let mut len = 0usize;
+    while let Some(b) = line.get(len) {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' => len += 1,
+            _ => break,
+        }
+    }
+    if len == 0 {
+        return false;
+    }
+
+    // 允许行尾空格/制表符；若后续出现其它字符则不是合法 block-id 行
+    let mut skip_count = len;
+    while let Some(b) = line.get(skip_count) {
+        match b {
+            b' ' | b'\t' => skip_count += 1,
+            b'\n' | b'\r' => break,
             _ => return false,
         }
     }
-    let block_id = line.slice(0, line.len()).to_string();
-    parser.tree[*id].id = Some(block_id);
-    line.skip_to_end();
+
+    let end = start + len;
+    let block_id = unsafe { std::str::from_utf8_unchecked(&line.source_slice()[start..end]) };
+    parser.tree[*id].id = Some(Box::new(block_id.to_string()));
+    line.skip(skip_count);
     true
 }
 
@@ -286,131 +405,220 @@ pub(super) fn process_wikilink(
     }: &mut ProcessCtx,
 ) -> bool {
     let start_location = line.start_location();
-    line.next();
+    // 跳过 '[['
+    line.next_byte(); // 第一个 '['
+    line.next_byte(); // 第二个 '['
+    // 现在 cursor 指向内容开始
+    let content_start = line.cursor();
+    let bytes = line.source_slice();
+    // 找到 ']]' 的位置
+    let mut _parts = Vec::<(usize, usize)>::new(); // 收集各部分的字节范围
     let mut state = WikilinkState::Initial;
-    let mut pr = (0, 0); // path range: start, end
-    let mut rrs = (false, Vec::new()); // ref range: is_block, start, end
-    let mut tr = (0, 0); // text range: start, end
-    for (end, item) in line.iter().enumerate() {
-        match (&state, &item.token) {
-            (WikilinkState::Initial, Token::DoubleRBracket) => return false,
-            (WikilinkState::Initial, _) => state = WikilinkState::InPath,
-            (WikilinkState::InPath, Token::Pipe) => {
-                pr.1 = end;
-                tr.0 = end + 1;
-                state = WikilinkState::InText
+    let mut pr = (0usize, 0usize); // path range (relative to content_start)
+    let mut rrs: (bool, Vec<(usize, usize)>) = (false, Vec::new());
+    let mut tr = (0usize, 0usize); // text range
+
+    let mut i = content_start;
+    let mut rel = 0; // relative position
+    while i + 1 < line.end() {
+        let b = bytes[i];
+        let b_next = bytes[i + 1];
+        let is_double_rbracket = b == b']' && b_next == b']';
+        match (&state, b, is_double_rbracket) {
+            (WikilinkState::Initial, _, true) => return false,
+            (WikilinkState::Initial, _, _) => {
+                state = WikilinkState::InPath;
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
             }
-            (WikilinkState::InPath, Token::Crosshatch) => {
-                pr.1 = end;
-                state = WikilinkState::InRef(InRef::Ref)
+            (WikilinkState::InPath, b'|', _) => {
+                pr.1 = rel;
+                tr.0 = rel + 1;
+                state = WikilinkState::InText;
             }
-            (WikilinkState::InPath, Token::DoubleRBracket) => {
-                pr.1 = end;
+            (WikilinkState::InPath, b'#', _) => {
+                pr.1 = rel;
+                state = WikilinkState::InRef(InRef::Ref);
+            }
+            (WikilinkState::InPath, _, true) => {
+                pr.1 = rel;
                 state = WikilinkState::Initial;
+                i += 2;
                 break;
             }
-            (WikilinkState::InPath, _) => continue,
-            (WikilinkState::InText, Token::DoubleRBracket) => {
-                tr.1 = end;
+            (WikilinkState::InPath, _, _) => {
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
+            }
+            (WikilinkState::InText, _, true) => {
+                tr.1 = rel;
                 state = WikilinkState::Initial;
+                i += 2;
                 break;
             }
-            (WikilinkState::InText, _) => continue,
-            (WikilinkState::InRef(InRef::Ref), Token::Caret) => {
+            (WikilinkState::InText, _, _) => {
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
+            }
+            (WikilinkState::InRef(InRef::Ref), b'^', _) => {
                 rrs.0 = true;
-                rrs.1.push((end + 1, end + 1));
-                state = WikilinkState::InRef(InRef::RefBlock)
+                rrs.1.push((rel + 1, rel + 1));
+                state = WikilinkState::InRef(InRef::RefBlock);
             }
-            (WikilinkState::InRef(InRef::Ref), Token::Text(_) | Token::Digit(..)) => {
+            (WikilinkState::InRef(InRef::Ref), _, _) if b.is_ascii_alphanumeric() || b >= 0x80 => {
                 rrs.0 = false;
-                rrs.1.push((end, end));
-                state = WikilinkState::InRef(InRef::RefHeading(0))
+                rrs.1.push((rel, rel));
+                state = WikilinkState::InRef(InRef::RefHeading(0));
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
             }
-            (WikilinkState::InRef(InRef::RefBlock), Token::DoubleRBracket) => {
-                rrs.1[0].1 = end;
+            (WikilinkState::InRef(InRef::RefBlock), _, true) => {
+                rrs.1[0].1 = rel;
                 state = WikilinkState::Initial;
+                i += 2;
                 break;
             }
-            (WikilinkState::InRef(InRef::RefBlock), Token::Pipe) => {
-                rrs.1[0].1 = end;
-                tr.0 = end + 1;
-                state = WikilinkState::InText
+            (WikilinkState::InRef(InRef::RefBlock), b'|', _) => {
+                rrs.1[0].1 = rel;
+                tr.0 = rel + 1;
+                state = WikilinkState::InText;
             }
-            (
-                WikilinkState::InRef(InRef::RefBlock),
-                Token::Text(_) | Token::Digit(..) | Token::Hyphen,
-            ) => continue,
-            (WikilinkState::InRef(InRef::RefHeading(index)), Token::DoubleRBracket) => {
-                rrs.1[*index].1 = end;
+            (WikilinkState::InRef(InRef::RefBlock), _, _)
+                if b.is_ascii_alphanumeric() || b == b'-' || b >= 0x80 =>
+            {
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
+            }
+            (WikilinkState::InRef(InRef::RefHeading(index)), _, true) => {
+                rrs.1[*index].1 = rel;
                 state = WikilinkState::Initial;
+                i += 2;
                 break;
             }
-            (WikilinkState::InRef(InRef::RefHeading(index)), Token::Pipe) => {
-                rrs.1[*index].1 = end;
-                tr.0 = end + 1;
-                state = WikilinkState::InText
+            (WikilinkState::InRef(InRef::RefHeading(index)), b'|', _) => {
+                rrs.1[*index].1 = rel;
+                tr.0 = rel + 1;
+                state = WikilinkState::InText;
             }
-            (WikilinkState::InRef(InRef::RefHeading(index)), Token::Crosshatch) => {
-                rrs.1[*index].1 = end;
-                rrs.1.push((end + 1, end + 1));
-                state = WikilinkState::InRef(InRef::RefHeading(index + 1))
+            (WikilinkState::InRef(InRef::RefHeading(index)), b'#', _) => {
+                rrs.1[*index].1 = rel;
+                rrs.1.push((rel + 1, rel + 1));
+                state = WikilinkState::InRef(InRef::RefHeading(index + 1));
             }
-            (WikilinkState::InRef(InRef::RefHeading(_)), _) => continue,
+            (WikilinkState::InRef(InRef::RefHeading(_)), _, _) => {
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
+            }
             _ => return false,
         }
+        i += utf8_char_len(b);
+        rel += 1;
     }
-    if !matches!(state, WikilinkState::Initial) || pr.0 == pr.1 {
+    // 处理最后一个字节是 ']]' 的情况
+    if !matches!(state, WikilinkState::Initial) {
+        // 检查最后是否是 ]]
+        if i + 1 == line.end() && bytes[i] == b']' {
+            // 只有一个 ']'，不匹配
+            return false;
+        }
         return false;
     }
-    let path = line.slice(pr.0, pr.1).to_string();
-    let reference = extract_ref(line, &rrs);
+    if pr.0 == pr.1 {
+        return false;
+    }
+    // 使用 content_start 为基准，通过 slice 提取各部分
+    // 注意：这里的 rel 索引是基于字符的，但 Span.slice 是基于字节的
+    // 我们需要用字节偏移。重新用字节方式提取。
+    let _content_bytes = &bytes[content_start..i];
+    let path = extract_range_str(bytes, content_start, pr);
+    let reference = extract_ref_from_bytes(bytes, content_start, &rrs);
     let text = if tr.0 != tr.1 {
-        Some(line.slice(tr.0, tr.1).to_string())
+        Some(extract_range_str(bytes, content_start, tr))
     } else {
         None
     };
-    let end = pr.1.max(rrs.1.last().map(|it| it.1).unwrap_or(0)).max(tr.1);
-    let end_location = line[end].end_location();
-    line.skip(end + 1);
+    let end_location = line.location_at_byte(i);
+    let skip_count = i - line.cursor();
+    line.skip(skip_count);
     parser.append_to(
         *id,
-        MarkdownNode::Link(
+        MarkdownNode::Link(Box::new(
             link::Wikilink {
                 path,
                 reference,
                 text,
             }
             .into(),
-        ),
+        )),
         (start_location, end_location),
     );
     true
 }
 
-fn extract_ref(line: &Line, range: &(bool, Vec<(usize, usize)>)) -> Option<Reference> {
+/// 从字节范围提取字符串（范围是基于"token 索引"的，这里我们用字节扫描重新实现）
+/// 注意：wikilink 中的 rel 索引实际上是按字符计数的，需要转换为字节偏移
+fn extract_range_str(source: &[u8], base: usize, range: (usize, usize)) -> String {
+    // range 是字符索引，需要转换为字节偏移
+    let mut byte_start = base;
+    let mut char_count = 0;
+    while char_count < range.0 && byte_start < source.len() {
+        byte_start += utf8_char_len(source[byte_start]);
+        char_count += 1;
+    }
+    let mut byte_end = byte_start;
+    while char_count < range.1 && byte_end < source.len() {
+        byte_end += utf8_char_len(source[byte_end]);
+        char_count += 1;
+    }
+    unsafe { std::str::from_utf8_unchecked(&source[byte_start..byte_end]) }.to_string()
+}
+
+fn extract_ref_from_bytes(
+    source: &[u8],
+    base: usize,
+    range: &(bool, Vec<(usize, usize)>),
+) -> Option<Reference> {
     if !range.1.is_empty() {
         Some(if range.0 {
-            let value = line.slice(range.1[0].0, range.1[0].1).to_string();
+            let value = extract_range_str(source, base, range.1[0]);
             Reference::BlockId(value)
         } else if range.1.len() == 1 {
-            Reference::Heading(line.slice(range.1[0].0, range.1[0].1).to_string())
+            Reference::Heading(extract_range_str(source, base, range.1[0]))
         } else {
             Reference::MultiHeading(
                 range
                     .1
                     .iter()
-                    .map(|(start, end)| {
-                        if start == end {
+                    .map(|r| {
+                        if r.0 == r.1 {
                             String::new()
                         } else {
-                            line.slice(*start, *end).to_string()
+                            extract_range_str(source, base, *r)
                         }
                     })
-                    .collect::<Vec<_>>(),
+                    .collect(),
             )
         })
     } else {
         None
+    }
+}
+
+fn utf8_char_len(b: u8) -> usize {
+    if b < 0x80 {
+        1
+    } else if b < 0xE0 {
+        2
+    } else if b < 0xF0 {
+        3
+    } else {
+        4
     }
 }
 
@@ -427,116 +635,158 @@ enum InSize {
     Width,
     Height,
 }
+
 pub(super) fn process_embed(
     ProcessCtx {
         id, line, parser, ..
     }: &mut ProcessCtx,
 ) -> bool {
     let start_location = line.start_location();
-    line.skip(2);
+    // 跳过 '![[' 三个字节
+    line.skip(3);
+    let content_start = line.cursor();
+    let bytes = line.source_slice();
     let mut state = EmbedState::Initial;
-    let mut pr = (0, 0); // path range: start, end
-    let mut sr = (0, 0); // size range: start, end
-    let mut rrs = (false, Vec::new()); // ref range: is_block, start, end
-    let mut ars = Vec::new(); // attrs range: is_block, start, end
-    for (end, item) in line.iter().enumerate() {
-        match (&state, &item.token) {
-            (EmbedState::Initial, Token::DoubleRBracket) => return false,
-            (EmbedState::Initial, _) => state = EmbedState::InPath,
-            (EmbedState::InPath, Token::Crosshatch) => {
-                pr.1 = end;
+    let mut pr = (0usize, 0usize);
+    let mut sr = (0usize, 0usize);
+    let mut rrs: (bool, Vec<(usize, usize)>) = (false, Vec::new());
+    let mut ars: Vec<(usize, usize)> = Vec::new();
+
+    let mut i = content_start;
+    let mut rel = 0;
+    while i + 1 < line.end() {
+        let b = bytes[i];
+        let b_next = bytes[i + 1];
+        let is_double_rbracket = b == b']' && b_next == b']';
+        match (&state, b, is_double_rbracket) {
+            (EmbedState::Initial, _, true) => return false,
+            (EmbedState::Initial, _, _) => {
+                state = EmbedState::InPath;
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
+            }
+            (EmbedState::InPath, b'#', _) => {
+                pr.1 = rel;
                 state = EmbedState::InRef(InRef::Ref);
             }
-            (EmbedState::InPath, Token::Pipe) => {
-                pr.1 = end;
-                sr.0 = end + 1;
+            (EmbedState::InPath, b'|', _) => {
+                pr.1 = rel;
+                sr.0 = rel + 1;
                 state = EmbedState::InSize(InSize::Width);
             }
-            (EmbedState::InPath, Token::DoubleRBracket) => {
-                pr.1 = end;
+            (EmbedState::InPath, _, true) => {
+                pr.1 = rel;
                 state = EmbedState::Initial;
+                i += 2;
                 break;
             }
-            (EmbedState::InPath, _) => continue,
-
-            (EmbedState::InSize(InSize::Width), Token::Text(str)) if *str == "x" => {
-                state = EmbedState::InSize(InSize::Height)
+            (EmbedState::InPath, _, _) => {
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
             }
-            (EmbedState::InSize(_), Token::DoubleRBracket) => {
-                sr.1 = end;
+            (EmbedState::InSize(InSize::Width), b'x', _) => {
+                state = EmbedState::InSize(InSize::Height);
+            }
+            (EmbedState::InSize(_), _, true) => {
+                sr.1 = rel;
                 state = EmbedState::Initial;
+                i += 2;
                 break;
             }
-            (EmbedState::InSize(InSize::Width), Token::Digit(..)) => continue,
-            (EmbedState::InSize(InSize::Height), Token::Digit(..)) => continue,
-
-            (EmbedState::InRef(InRef::Ref), Token::Caret) => {
+            (EmbedState::InSize(InSize::Width), b'0'..=b'9', _) => {
+                i += 1;
+                rel += 1;
+                continue;
+            }
+            (EmbedState::InSize(InSize::Height), b'0'..=b'9', _) => {
+                i += 1;
+                rel += 1;
+                continue;
+            }
+            (EmbedState::InRef(InRef::Ref), b'^', _) => {
                 rrs.0 = true;
-                rrs.1.push((end + 1, end + 1));
-                state = EmbedState::InRef(InRef::RefBlock)
+                rrs.1.push((rel + 1, rel + 1));
+                state = EmbedState::InRef(InRef::RefBlock);
             }
-            (EmbedState::InRef(InRef::Ref), Token::Text(_) | Token::Digit(..)) => {
+            (EmbedState::InRef(InRef::Ref), _, _) if b.is_ascii_alphanumeric() || b >= 0x80 => {
                 rrs.0 = false;
-                rrs.1.push((end, end));
-                state = EmbedState::InRef(InRef::RefHeading(0))
+                rrs.1.push((rel, rel));
+                state = EmbedState::InRef(InRef::RefHeading(0));
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
             }
-            (EmbedState::InRef(InRef::RefBlock), Token::DoubleRBracket) => {
-                rrs.1[0].1 = end;
+            (EmbedState::InRef(InRef::RefBlock), _, true) => {
+                rrs.1[0].1 = rel;
                 state = EmbedState::Initial;
+                i += 2;
                 break;
             }
-            (
-                EmbedState::InRef(InRef::RefBlock),
-                Token::Text(_) | Token::Digit(..) | Token::Hyphen,
-            ) => continue,
-
-            (EmbedState::InRef(InRef::RefHeading(index)), Token::Crosshatch) => {
-                rrs.1[*index].1 = end;
-                rrs.1.push((end + 1, end + 1));
-                state = EmbedState::InRef(InRef::RefHeading(index + 1))
+            (EmbedState::InRef(InRef::RefBlock), _, _)
+                if b.is_ascii_alphanumeric() || b == b'-' || b >= 0x80 =>
+            {
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
             }
-            (EmbedState::InRef(InRef::RefHeading(index)), Token::Eq) => {
-                rrs.1[*index].1 = end;
+            (EmbedState::InRef(InRef::RefHeading(index)), b'#', _) => {
+                rrs.1[*index].1 = rel;
+                rrs.1.push((rel + 1, rel + 1));
+                state = EmbedState::InRef(InRef::RefHeading(index + 1));
+            }
+            (EmbedState::InRef(InRef::RefHeading(index)), b'=', _) => {
+                rrs.1[*index].1 = rel;
                 ars.push(rrs.1[*index]);
                 rrs.1.pop();
-                state = EmbedState::InAttr(0)
+                state = EmbedState::InAttr(0);
             }
-            (EmbedState::InRef(InRef::RefHeading(index)), Token::DoubleRBracket) => {
-                rrs.1[*index].1 = end;
+            (EmbedState::InRef(InRef::RefHeading(index)), _, true) => {
+                rrs.1[*index].1 = rel;
                 state = EmbedState::Initial;
+                i += 2;
                 break;
             }
-            (EmbedState::InRef(InRef::RefHeading(_)), _) => continue,
-
-            (EmbedState::InAttr(index), Token::Ampersand) => {
-                ars[*index].1 = end;
-                ars.push((end + 1, end + 1));
-                state = EmbedState::InAttr(index + 1)
+            (EmbedState::InRef(InRef::RefHeading(_)), _, _) => {
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
             }
-            (EmbedState::InAttr(index), Token::DoubleRBracket) => {
-                ars[*index].1 = end;
+            (EmbedState::InAttr(index), b'&', _) => {
+                ars[*index].1 = rel;
+                ars.push((rel + 1, rel + 1));
+                state = EmbedState::InAttr(index + 1);
+            }
+            (EmbedState::InAttr(index), _, true) => {
+                ars[*index].1 = rel;
                 state = EmbedState::Initial;
+                i += 2;
                 break;
             }
-            (EmbedState::InAttr(_), _) => continue,
-
+            (EmbedState::InAttr(_), _, _) => {
+                i += utf8_char_len(b);
+                rel += 1;
+                continue;
+            }
             _ => return false,
         }
+        i += utf8_char_len(b);
+        rel += 1;
     }
-
     if !matches!(state, EmbedState::Initial) || pr.0 == pr.1 {
         return false;
     }
-    let path = line.slice(pr.0, pr.1).to_string();
-    let reference = extract_ref(line, &rrs);
+    let path = extract_range_str(bytes, content_start, pr);
+    let reference = extract_ref_from_bytes(bytes, content_start, &rrs);
     let attrs = if !ars.is_empty() {
         Some(
             ars.iter()
-                .map(|(start, end)| {
-                    if start == end {
+                .map(|r| {
+                    if r.0 == r.1 {
                         String::new()
                     } else {
-                        line.slice(*start, *end).to_string()
+                        extract_range_str(bytes, content_start, *r)
                     }
                 })
                 .filter_map(|it| {
@@ -553,8 +803,8 @@ pub(super) fn process_embed(
         None
     };
     let size = if sr.0 != sr.1 {
-        let size = line.slice(sr.0, sr.1).to_string();
-        let mut parts = size.split('x');
+        let size_str = extract_range_str(bytes, content_start, sr);
+        let mut parts = size_str.split('x');
         let first = parts.next().and_then(|it| it.parse::<u32>().ok());
         let second = parts.next().and_then(|it| it.parse::<u32>().ok());
         match (first, second) {
@@ -565,20 +815,17 @@ pub(super) fn process_embed(
     } else {
         None
     };
-    let end =
-        pr.1.max(rrs.1.last().map(|it| it.1).unwrap_or(0))
-            .max(ars.last().map(|it| it.1).unwrap_or(0))
-            .max(sr.1);
-    let end_location = line[end].end_location();
-    line.skip(end + 1);
+    let end_location = line.location_at_byte(i);
+    let skip_count = i - line.cursor();
+    line.skip(skip_count);
     parser.append_to(
         *id,
-        MarkdownNode::Embed(embed::Embed {
+        MarkdownNode::Embed(Box::new(embed::Embed {
             path,
             size,
             reference,
             attrs,
-        }),
+        })),
         (start_location, end_location),
     );
     true
@@ -589,158 +836,279 @@ pub(super) fn process_autolink(
         id, line, parser, ..
     }: &mut ProcessCtx,
 ) -> bool {
-    let start_location = line.start_location();
-    line.next();
-    if let Some(end) = scan_email(line) {
-        let link = line.slice(0, end);
-        let end_location = line[end].end_location();
-        line.skip(end + 1);
+    let current_span = match line.current_span_mut() {
+        Some(span) => span,
+        None => return false,
+    };
+    let start_location = current_span.start_location();
+    current_span.next_byte(); // skip '<'
+    if let Some(end) = scan_email(current_span) {
+        let link_span = current_span.slice(0, end);
+        let end_location = current_span.location_at_byte(current_span.cursor() + end + 1);
+        current_span.skip(end + 1); // skip content + '>'
+        let link_str = link_span.to_string();
         let node = parser.append_to(
             *id,
-            MarkdownNode::Link(
+            MarkdownNode::Link(Box::new(
                 link::DefaultLink {
-                    url: format!("mailto:{}", link),
+                    url: format!("mailto:{}", link_str),
                     title: None,
                 }
                 .into(),
-            ),
+            )),
             (start_location, end_location),
         );
-        let locations = (link.start_location(), link.last_token_end_location());
-        parser.append_text_to(node, link.to_string(), locations);
+        let locations = (
+            link_span.start_location(),
+            link_span.last_token_end_location(),
+        );
+        parser.append_text_to_owned(node, link_str, locations);
         true
-    } else if let Some((end, escaped_esc)) = scan_url(line) {
-        let link = line.slice(0, end);
-        let end_location = line[end].end_location();
-        let mut unescaped_string = link.to_unescape_string();
+    } else if let Some((end, escaped_esc)) = scan_url(current_span) {
+        let link_span = current_span.slice(0, end);
+        let skip_amount = if escaped_esc { end + 2 } else { end + 1 }; // escaped_esc: skip '\' + '>'
+        let end_location = current_span.location_at_byte(current_span.cursor() + skip_amount);
+        let mut unescaped_string = link_span.to_unescape_string();
         if escaped_esc {
             unescaped_string.push('\\')
         }
-        line.skip(end + 1);
+        current_span.skip(skip_amount); // skip content + '>' (or '\>')
         let node = parser.append_to(
             *id,
-            MarkdownNode::Link(
+            MarkdownNode::Link(Box::new(
                 link::DefaultLink {
-                    url: utils::percent_encode::encode(utils::escape_xml(&unescaped_string), true),
+                    url: utils::percent_encode::encode(&unescaped_string, true),
                     title: None,
                 }
                 .into(),
-            ),
+            )),
             (start_location, end_location),
         );
-        let mut locations = (link.start_location(), link.last_token_end_location());
+        let mut locations = (
+            link_span.start_location(),
+            link_span.last_token_end_location(),
+        );
         if escaped_esc {
             locations.1.column += 1;
         }
-        parser.append_text_to(node, unescaped_string, locations);
+        parser.append_text_to_owned(node, unescaped_string, locations);
         true
     } else {
         false
     }
 }
-// pub(super) fn process_autolink_with_protocol(
-//     protocol: &str,
-//     ProcessCtx {
-//         id, line, parser, ..
-//     }: &mut ProcessCtx,
-// ) -> bool {
-//     todo!()
-//     // if !line.validate(1, Token::Colon) {
-//     //     return false;
-//     // };
-//     // match protocol {
-//     //     "http" | "https" => scan_valid_domain(),
-//     //     "mailto" | "xmpp" => scan_valid_domain(),
-//     //     _ => return false,
-//     // }
-//     // let start_location = line.start_location();
-//     // line.skip(2);
-//     // true
-// }
-// pub(super) fn process_autolink_with_prefix(
-//     prefix: &str,
-//     ProcessCtx {
-//         id, line, parser, ..
-//     }: &mut ProcessCtx,
-// ) -> bool {
-//     if !line.validate(1, Token::Period) {
-//         return false;
-//     };
-//     let start_location = line.start_location();
-//     line.skip(2);
-//     true
-// }
-// #[derive(Debug)]
-// enum ValidDomain {
-//     Initial,
-//     InLabel,
-//     Dot,
-// }
-// /// 规则：
-// /// 由字母、数字、`_`和`-`组成，由`.`分割，必需有一个 `.` 并且最后两段不能出现 `_`
-// fn scan_valid_domain(line: &Line) -> Option<usize> {
-//     let mut state = ValidDomain::Initial;
-//     let mut flags = [false; 3]; // 0,1 最后两段是否存在 `_`, 2 存在 `.`
-//     let mut end = 0;
-//     for (i, item) in line.iter().enumerate() {
-//         match (&state, &item.token) {
-//             (ValidDomain::Initial, Token::Text(..) | Token::Digit(..)) => {
-//                 state = ValidDomain::InLabel
-//             }
-//             (ValidDomain::Initial, _) => return None,
-//             (ValidDomain::InLabel, Token::Text(..) | Token::Digit(..) | Token::Hyphen) => continue,
-//             (ValidDomain::InLabel, Token::Underscore) => {
-//                 flags[i % 2] = true;
-//                 continue;
-//             }
-//             (ValidDomain::InLabel, Token::Period) => state = ValidDomain::Dot,
-//             (ValidDomain::Dot, Token::Text(..) | Token::Digit(..)) => {
-//                 flags[2] = true;
-//                 state = ValidDomain::InLabel
-//             }
-//             _ => {
-//                 end = i;
-//                 break;
-//             }
-//         }
-//     }
-//     if end == 0 {
-//         end = line.len()
-//     }
-//     todo!()
-// }
 
-fn scan_url(line: &Line) -> Option<(usize, bool)> {
-    let mut end = 0;
-    let mut escaped_esc = false;
-    let mut iter = line.iter().enumerate();
-    let mut len = 0;
-    for (i, item) in iter.by_ref() {
-        // println!("scan_url first loop#{len} -> {:?}", item.token);
-        match item.token {
-            Token::Text(str) if str.chars().all(|it| it.is_ascii_alphabetic()) => (),
-            Token::Digit(..) | Token::Plus | Token::Period | Token::Hyphen if i > 0 => (),
-            Token::Colon if (2..32).contains(&len) => break,
-            _ => return None,
-        }
-        len += item.len();
+pub(super) fn process_gfm_autolink(
+    ProcessCtx {
+        id, line, parser, ..
+    }: &mut ProcessCtx,
+) -> bool {
+    let start_location = line.start_location();
+    let Some((end, needs_http_prefix)) = scan_gfm_url(line) else {
+        return false;
+    };
+    let end_location = line.location_at_byte(line.cursor() + end);
+    let text = extract_bytes_from_merged(line, end);
+    line.skip(end);
+    let mut url = String::new();
+    if needs_http_prefix {
+        url.push_str("http://");
     }
-    for (i, item) in iter.by_ref() {
-        // println!("scan_url second loop#{len} -> {:?}", item.token);
-        match item.token {
-            Token::Gt | Token::Escaped('>') => {
-                escaped_esc = item.token == Token::Escaped('>');
-                end = i;
+    url.push_str(&text);
+    let node = parser.append_to(
+        *id,
+        MarkdownNode::Link(Box::new(
+            link::DefaultLink {
+                url: utils::percent_encode::encode(&url, true),
+                title: None,
+            }
+            .into(),
+        )),
+        (start_location, end_location),
+    );
+    parser.append_text_to_owned(node, text, (start_location, end_location));
+    true
+}
+
+fn scan_gfm_url(line: &MergedSpan) -> Option<(usize, bool)> {
+    let (prefix_len, needs_http_prefix) = if starts_with_ci(line, b"https://") {
+        (8usize, false)
+    } else if starts_with_ci(line, b"http://") {
+        (7usize, false)
+    } else if starts_with_ci(line, b"www.") {
+        (4usize, true)
+    } else {
+        return None;
+    };
+    let next = line.get(prefix_len)?;
+    if next.is_ascii_control() || next.is_ascii_whitespace() {
+        return None;
+    }
+
+    let mut i = prefix_len;
+    while let Some(b) = line.get(i) {
+        if b.is_ascii_control() || b.is_ascii_whitespace() || b == b'<' {
+            break;
+        }
+        i += utf8_char_len(b);
+    }
+    if i <= prefix_len {
+        return None;
+    }
+    let trimmed = trim_gfm_url_end(line, prefix_len, i);
+    if trimmed <= prefix_len {
+        return None;
+    }
+    Some((trimmed, needs_http_prefix))
+}
+
+fn starts_with_ci(line: &MergedSpan, prefix: &[u8]) -> bool {
+    for (i, &want) in prefix.iter().enumerate() {
+        let Some(got) = line.get(i) else {
+            return false;
+        };
+        if got.to_ascii_lowercase() != want {
+            return false;
+        }
+    }
+    true
+}
+
+fn trim_gfm_url_end(line: &MergedSpan, start: usize, mut end: usize) -> usize {
+    while end > start {
+        let Some(last) = line.get(end - 1) else {
+            break;
+        };
+        let trim = matches!(
+            last,
+            b'.' | b',' | b'?' | b'!' | b':' | b'*' | b'_' | b'~' | b'\'' | b'"'
+        ) || (last == b')' && has_extra_closing_paren(line, start, end))
+            || (last == b';' && ends_with_html_entity(line, start, end));
+        if !trim {
+            break;
+        }
+        end -= 1;
+    }
+    end
+}
+
+fn has_extra_closing_paren(line: &MergedSpan, start: usize, end: usize) -> bool {
+    let mut open = 0usize;
+    let mut close = 0usize;
+    for i in start..end {
+        match line.get(i) {
+            Some(b'(') => open += 1,
+            Some(b')') => close += 1,
+            _ => {}
+        }
+    }
+    close > open
+}
+
+fn ends_with_html_entity(line: &MergedSpan, start: usize, end: usize) -> bool {
+    if end <= start + 1 {
+        return false;
+    }
+    let mut i = end - 2; // skip ';'
+    while i > start {
+        let Some(b) = line.get(i) else {
+            return false;
+        };
+        if b == b'&' {
+            let entity_start = i + 1;
+            if entity_start >= end - 1 {
+                return false;
+            }
+            for j in entity_start..(end - 1) {
+                let Some(ch) = line.get(j) else {
+                    return false;
+                };
+                if !(ch.is_ascii_alphanumeric() || ch == b'#') {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if !(b.is_ascii_alphanumeric() || b == b'#') {
+            return false;
+        }
+        i -= 1;
+    }
+    false
+}
+
+fn extract_bytes_from_merged(line: &MergedSpan, len: usize) -> String {
+    if let Some(span) = line.current_span() {
+        let start = span.cursor();
+        let end = start.saturating_add(len);
+        if end <= span.end() {
+            let source = span.source_slice();
+            let slice = unsafe { std::str::from_utf8_unchecked(&source[start..end]) };
+            return slice.to_owned();
+        }
+    }
+
+    let mut bytes = Vec::with_capacity(len);
+    for i in 0..len {
+        let Some(b) = line.get(i) else {
+            break;
+        };
+        bytes.push(b);
+    }
+    String::from_utf8(bytes).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+}
+
+fn scan_url(line: &Span) -> Option<(usize, bool)> {
+    let mut i = 0;
+    // let mut escaped_esc = false;
+    let mut len = 0;
+    // 第一阶段：扫描 scheme（字母开头，后跟字母/数字/+/./-)
+    loop {
+        match line.get(i) {
+            Some(b) if b.is_ascii_alphabetic() && len == 0 => {
+                len += 1;
+                i += 1;
+            }
+            Some(b)
+                if (b.is_ascii_alphanumeric() || b == b'+' || b == b'.' || b == b'-')
+                    && len > 0 =>
+            {
+                len += 1;
+                i += 1;
+            }
+            Some(b':') if (2..32).contains(&len) => {
+                i += 1;
                 break;
             }
-            Token::Lt | Token::Escaped('<') => return None,
-            t if t.is_control() => return None,
-            _ => (),
+            _ => return None,
         }
-        len += item.len();
     }
-    Some((end, escaped_esc))
+    // 第二阶段：扫描 URL 内容直到 '>'
+    loop {
+        match line.get(i) {
+            Some(b'>') => {
+                return Some((i, false));
+            }
+            Some(b'\\') => {
+                // 检查下一个字节
+                if line.get(i + 1) == Some(b'>') {
+                    // escaped_esc = true;
+                    return Some((i, true));
+                }
+                if line.get(i + 1) == Some(b'<') {
+                    return None;
+                }
+                i += 1;
+            }
+            Some(b'<') => return None,
+            Some(b' ') => return None, // 空格不允许出现在 autolink URL 中
+            Some(b) if b < 0x20 => return None, // control chars
+            None => return None,
+            Some(_) => i += 1,
+        }
+    }
 }
+
 #[derive(Debug)]
 enum EmailState {
     Initial,
@@ -749,57 +1117,56 @@ enum EmailState {
     Domain(usize),
     Tld(usize),
 }
-fn scan_email(line: &Line) -> Option<usize> {
-    let mut end = 0;
+
+fn scan_email(line: &Span) -> Option<usize> {
     let mut state = EmailState::Initial;
     let mut len = 0;
-    for (i, item) in line.iter().enumerate() {
-        // println!("scan_email#{len} -> {state:?} = {:?}", item.token);
-        match (&state, &item.token) {
-            (EmailState::Initial, Token::Text(..) | Token::Digit(..)) => {
-                state = EmailState::Username
+    let mut i = 0;
+    loop {
+        let b = match line.get(i) {
+            Some(b) => b,
+            None => break,
+        };
+        match (&state, b) {
+            (EmailState::Initial, b) if b.is_ascii_alphanumeric() => {
+                state = EmailState::Username;
             }
-            (EmailState::Username, Token::Punctuation('@')) if len > 2 => state = EmailState::At,
-            (EmailState::Username, Token::Text(str))
-                if str.chars().all(|it| it.is_ascii_alphabetic()) => {}
-            (EmailState::Username, Token::Digit(..)) => (),
-            (EmailState::Username, t) if t.in_str(".!#$%&'*+\\/=?^_`{|}~-") => (),
-            (EmailState::At, t) if t.is_ascii_alphanumeric() => state = EmailState::Domain(len),
-            (EmailState::Domain(_), Token::Text(..) | Token::Digit(..) | Token::Hyphen) => (),
-            (EmailState::Domain(s), Token::Period) if (2..62).contains(&(len - *s)) => {
+            (EmailState::Username, b'@') if len > 2 => state = EmailState::At,
+            (EmailState::Username, b) if b.is_ascii_alphanumeric() => (),
+            (EmailState::Username, b) if b".!#$%&'*+/=?^_`{|}~-".contains(&b) => (),
+            (EmailState::At, b) if b.is_ascii_alphanumeric() => state = EmailState::Domain(len),
+            (EmailState::Domain(_), b) if b.is_ascii_alphanumeric() || b == b'-' => (),
+            (EmailState::Domain(s), b'.') if (2..62).contains(&(len - *s)) => {
                 state = EmailState::Tld(len)
             }
-            (EmailState::Tld(_), Token::Text(..) | Token::Digit(..) | Token::Hyphen) => (),
-            (EmailState::Tld(s), Token::Period) if (2..62).contains(&(len - *s)) => {
+            (EmailState::Tld(_), b) if b.is_ascii_alphanumeric() || b == b'-' => (),
+            (EmailState::Tld(s), b'.') if (2..62).contains(&(len - *s)) => {
                 state = EmailState::Tld(len)
             }
-            (EmailState::Tld(s), Token::Gt) if (2..62).contains(&(len - *s)) => {
-                state = EmailState::Initial;
-                end = i;
-                break;
+            (EmailState::Tld(s), b'>') if (2..62).contains(&(len - *s)) => {
+                return Some(i);
             }
             _ => return None,
         }
-        len += item.len();
+        // 计算字符长度
+        let char_len = utf8_char_len(b);
+        len += char_len;
+        i += char_len;
     }
-    if !matches!(state, EmailState::Initial) {
-        return None;
-    }
-    Some(end)
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use crate::ast::reference::Reference;
-    use crate::ast::{embed, link, MarkdownNode};
+    use crate::ast::{MarkdownNode, embed, link};
     use crate::parser::{Parser, ParserOptions};
 
     #[test]
     fn ofm_case_block_id() {
         let text = r#""You do not rise to the level of your goals. You fall to the level of your systems." by James Clear ^quote-of-the-day"#;
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
-        // println!("{ast:?}")
-        assert_eq!(ast[1].id, Some("quote-of-the-day".to_string()))
+        assert_eq!(ast[1].id, Some(Box::new("quote-of-the-day".to_string())))
     }
 
     #[test]
@@ -808,14 +1175,14 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Link(
+            MarkdownNode::Link(Box::new(
                 link::Wikilink {
                     path: "Three laws of motion".to_string(),
                     reference: None,
                     text: None
                 }
                 .into()
-            )
+            ))
         )
     }
     #[test]
@@ -824,14 +1191,14 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Link(
+            MarkdownNode::Link(Box::new(
                 link::Wikilink {
                     path: "Three laws of motion".to_string(),
                     reference: Some(Reference::Heading("Second law".to_string())),
                     text: None
                 }
                 .into()
-            )
+            ))
         )
     }
     #[test]
@@ -840,7 +1207,7 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Link(
+            MarkdownNode::Link(Box::new(
                 link::Wikilink {
                     path: "My note".to_string(),
                     reference: Some(Reference::MultiHeading(vec![
@@ -850,7 +1217,7 @@ mod tests {
                     text: None
                 }
                 .into()
-            )
+            ))
         )
     }
     #[test]
@@ -859,14 +1226,14 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Link(
+            MarkdownNode::Link(Box::new(
                 link::Wikilink {
                     path: "2023-01-01".to_string(),
                     reference: Some(Reference::BlockId("quote-of-the-day".to_string())),
                     text: None
                 }
                 .into()
-            )
+            ))
         )
     }
     #[test]
@@ -875,14 +1242,14 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Link(
+            MarkdownNode::Link(Box::new(
                 link::Wikilink {
                     path: "Internal links".to_string(),
                     reference: None,
                     text: Some("custom display text".to_string())
                 }
                 .into()
-            )
+            ))
         )
     }
 
@@ -892,12 +1259,12 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(embed::Embed {
+            MarkdownNode::Embed(Box::new(embed::Embed {
                 path: "Internal links".to_string(),
                 size: None,
                 reference: None,
                 attrs: None,
-            })
+            }))
         )
     }
     #[test]
@@ -906,12 +1273,12 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(embed::Embed {
+            MarkdownNode::Embed(Box::new(embed::Embed {
                 path: "Internal links".to_string(),
                 size: None,
                 reference: Some(Reference::BlockId("b15695".to_string())),
                 attrs: None,
-            })
+            }))
         )
     }
     #[test]
@@ -920,12 +1287,12 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(embed::Embed {
+            MarkdownNode::Embed(Box::new(embed::Embed {
                 path: "Engelbart.jpg".to_string(),
                 size: Some((100, Some(145))),
                 reference: None,
                 attrs: None,
-            })
+            }))
         )
     }
     #[test]
@@ -934,12 +1301,12 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(embed::Embed {
+            MarkdownNode::Embed(Box::new(embed::Embed {
                 path: "Engelbart.jpg".to_string(),
                 size: Some((100, None)),
                 reference: None,
                 attrs: None,
-            })
+            }))
         )
     }
     #[test]
@@ -948,12 +1315,12 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(embed::Embed {
+            MarkdownNode::Embed(Box::new(embed::Embed {
                 path: "Document.pdf".to_string(),
                 size: None,
                 reference: None,
                 attrs: Some(vec![("page".to_string(), "3".to_string()),]),
-            })
+            }))
         )
     }
     #[test]
@@ -962,7 +1329,7 @@ mod tests {
         let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         assert_eq!(
             ast[2].body,
-            MarkdownNode::Embed(embed::Embed {
+            MarkdownNode::Embed(Box::new(embed::Embed {
                 path: "Document.pdf".to_string(),
                 size: None,
                 reference: None,
@@ -970,7 +1337,7 @@ mod tests {
                     ("page".to_string(), "3".to_string()),
                     ("theme".to_string(), "dark".to_string()),
                 ]),
-            })
+            }))
         )
     }
 
@@ -987,6 +1354,7 @@ mod tests {
     fn case_595() {
         let text = r#"<https://foo.bar.baz/test?q=hello&id=22&boolean>"#;
         let ast = Parser::new(text).parse();
+        println!("AST:\n{ast:?}");
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean">https://foo.bar.baz/test?q=hello&amp;id=22&amp;boolean</a></p>"#
@@ -1048,6 +1416,51 @@ mod tests {
         let text = r#"<foo\+@bar.example.com>"#;
         let ast = Parser::new(text).parse();
         assert_eq!(ast.to_html(), r#"<p>&lt;foo+@bar.example.com&gt;</p>"#)
+    }
+    #[test]
+    fn gfm_extended_autolink_http() {
+        let text = "see https://example.com/path?q=1";
+        let ast = Parser::new_with_options(
+            text,
+            ParserOptions::default()
+                .enabled_gfm()
+                .enabled_gfm_autolink(),
+        )
+        .parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p>see <a href="https://example.com/path?q=1">https://example.com/path?q=1</a></p>"#
+        );
+    }
+    #[test]
+    fn gfm_extended_autolink_www() {
+        let text = "www.example.com/docs";
+        let ast = Parser::new_with_options(
+            text,
+            ParserOptions::default()
+                .enabled_gfm()
+                .enabled_gfm_autolink(),
+        )
+        .parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p><a href="http://www.example.com/docs">www.example.com/docs</a></p>"#
+        );
+    }
+    #[test]
+    fn gfm_extended_autolink_trim_punct() {
+        let text = "visit https://example.com/test).";
+        let ast = Parser::new_with_options(
+            text,
+            ParserOptions::default()
+                .enabled_gfm()
+                .enabled_gfm_autolink(),
+        )
+        .parse();
+        assert_eq!(
+            ast.to_html(),
+            r#"<p>visit <a href="https://example.com/test">https://example.com/test</a>).</p>"#
+        );
     }
     #[test]
     fn test() {

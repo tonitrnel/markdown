@@ -1,0 +1,55 @@
+// Non-BMP character emphasis tests
+// These characters (mathematical symbols, Avestan script) are NOT CJK,
+// so standard CommonMark delimiter rules apply — emphasis should NOT open/close
+// when flanked by non-CJK non-punctuation non-whitespace on both sides.
+
+## CJK Non-BMP: Non-CJK symbols should not trigger CJK rules
+
+```````````````````````````````` example
+a**a«**a
+.
+<p>a**a«**a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**»a**a
+.
+<p>a**»a**a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**a∇**a
+.
+<p>a**a∇**a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**∇a**a
+.
+<p>a**∇a**a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**a𝜵**a
+.
+<p>a**a𝜵**a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**𝜵a**a
+.
+<p>a**𝜵a**a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**𐬻a**a
+.
+<p>a**𐬻a**a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**a𐬻**a
+.
+<p>a**a𐬻**a</p>
+````````````````````````````````
+

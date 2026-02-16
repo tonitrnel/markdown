@@ -338,7 +338,7 @@ is `!`, `"`, `#`, `$`, `%`, `&`, `'`, `(`, `)`,
 `{`, `|`, `}`, or `~` (U+007B–007E).
 
 A [Unicode punctuation character](@) is a character in the Unicode `P`
-(puncuation) or `S` (symbol) general categories.
+(punctuation) or `S` (symbol) general categories.
 
 ## Tabs
 
@@ -651,7 +651,7 @@ references and their corresponding code points.
 &frac34; &HilbertSpace; &DifferentialD;
 &ClockwiseContourIntegral; &ngE;
 .
-<p>  &amp; © Æ Ď
+<p>  &amp; © Æ Ď
 ¾ ℋ ⅆ
 ∲ ≧̸</p>
 ````````````````````````````````
@@ -2411,7 +2411,8 @@ the string `/>`.\
 7.  **Start condition:**  line begins with a complete [open tag]
 (with any [tag name] other than `pre`, `script`,
 `style`, or `textarea`) or a complete [closing tag],
-followed by zero or more spaces and tabs, followed by the end of the line.\
+all on a single line, followed by zero or more spaces and tabs,
+followed by the end of the line.\
 **End condition:** line is followed by a [blank line].
 
 HTML blocks continue until they are closed by their appropriate
@@ -2608,7 +2609,7 @@ foo
 
 Everything until the next blank line or end of document
 gets included in the HTML block.  So, in the following
-example, what looks like a Markdown code block
+examples, what looks like a Markdown code block or block quote
 is actually part of the HTML block, which continues until a blank
 line or the end of the document is reached:
 
@@ -2622,6 +2623,15 @@ int x = 33;
 ``` c
 int x = 33;
 ```
+````````````````````````````````
+
+
+```````````````````````````````` example
+<div
+> not quoted text
+.
+<div
+> not quoted text
 ````````````````````````````````
 
 
@@ -2707,7 +2717,7 @@ line).  So the contents get interpreted as CommonMark:
 ````````````````````````````````
 
 
-Finally, in this case, the `<del>` tags are interpreted
+Finally, in these cases, the `<del>` tags are interpreted
 as [raw HTML] *inside* the CommonMark paragraph.  (Because
 the tag is not on a line by itself, we get inline HTML
 rather than an [HTML block].)
@@ -2716,6 +2726,18 @@ rather than an [HTML block].)
 <del>*foo*</del>
 .
 <p><del><em>foo</em></del></p>
+````````````````````````````````
+
+```````````````````````````````` example
+<del
+class="foo">
+*foo*
+</del>
+.
+<p><del
+class="foo">
+<em>foo</em>
+</del></p>
 ````````````````````````````````
 
 
@@ -5931,18 +5953,18 @@ Only [spaces], and not [unicode whitespace] in general, are
 stripped in this way:
 
 ```````````````````````````````` example
-` b `
+` b `
 .
-<p><code> b </code></p>
+<p><code> b </code></p>
 ````````````````````````````````
 
 No stripping occurs if the code span contains only spaces:
 
 ```````````````````````````````` example
-` `
+` `
 `  `
 .
-<p><code> </code>
+<p><code> </code>
 <code>  </code></p>
 ````````````````````````````````
 
@@ -6336,9 +6358,9 @@ a*"foo"*
 Unicode nonbreaking spaces count as whitespace, too:
 
 ```````````````````````````````` example
-* a *
+* a *
 .
-<p>* a *</p>
+<p>* a *</p>
 ````````````````````````````````
 
 
@@ -6350,10 +6372,13 @@ Unicode symbols count as punctuation, too:
 *£*bravo.
 
 *€*charlie.
+
+*𞋿*delta.
 .
 <p>*$*alpha.</p>
 <p>*£*bravo.</p>
 <p>*€*charlie.</p>
+<p>*𞋿*delta.</p>
 ````````````````````````````````
 
 
@@ -7580,7 +7605,7 @@ the destination may be omitted:
 ````````````````````````````````
 
 The destination can only contain spaces if it is
-enclosed in pointy brackets:
+enclosed in angle brackets:
 
 ```````````````````````````````` example
 [link](/my uri)
@@ -7595,7 +7620,7 @@ enclosed in pointy brackets:
 ````````````````````````````````
 
 The destination cannot contain line endings,
-even if enclosed in pointy brackets:
+even if enclosed in angle brackets:
 
 ```````````````````````````````` example
 [link](foo
@@ -7614,7 +7639,7 @@ bar>)</p>
 ````````````````````````````````
 
 The destination can contain `)` if it is enclosed
-in pointy brackets:
+in angle brackets:
 
 ```````````````````````````````` example
 [a](<b)c>)
@@ -7622,7 +7647,7 @@ in pointy brackets:
 <p><a href="b)c">a</a></p>
 ````````````````````````````````
 
-Pointy brackets that enclose links must be unescaped:
+Angle brackets that enclose links must be unescaped:
 
 ```````````````````````````````` example
 [link](<foo\>)
@@ -7630,7 +7655,7 @@ Pointy brackets that enclose links must be unescaped:
 <p>[link](&lt;foo&gt;)</p>
 ````````````````````````````````
 
-These are not links, because the opening pointy bracket
+These are not links, because the opening angle bracket
 is not matched properly:
 
 ```````````````````````````````` example
@@ -7774,7 +7799,7 @@ ending.
 Other [Unicode whitespace] like non-breaking space doesn't work.
 
 ```````````````````````````````` example
-[link](/url "title")
+[link](/url "title")
 .
 <p><a href="/url%C2%A0%22title%22">link</a></p>
 ````````````````````````````````
@@ -9007,7 +9032,7 @@ A [CDATA section](@) consists of
 the string `<![CDATA[`, a string of characters not including the string
 `]]>`, and the string `]]>`.
 
-An [HTML tag](@) consists of an [open tag], a [closing tag],
+An [HTML tag](@) is an [open tag], a [closing tag],
 an [HTML comment], a [processing instruction], a [declaration],
 or a [CDATA section].
 
@@ -9199,6 +9224,20 @@ foo <a href="\*">
 <a href="\"">
 .
 <p>&lt;a href=&quot;&quot;&quot;&gt;</p>
+````````````````````````````````
+
+
+A block quote can prevent a line from being parsed as inline HTML,
+even though line breaks are allowed in tags:
+
+```````````````````````````````` example
+<a
+> quoted text
+.
+<p>&lt;a</p>
+<blockquote>
+<p>quoted text</p>
+</blockquote>
 ````````````````````````````````
 
 
@@ -9720,7 +9759,23 @@ closers:
 
 - Now, look back in the stack (staying above `stack_bottom` and
   the `openers_bottom` for this delimiter type) for the
-  first matching potential opener ("matching" means same delimiter).
+  first valid potential opener, where being "valid" requires that:
+
+  + the token is a potential opener; and
+
+  + the token has the same delimiter type as the current potential
+    closer; and
+
+  + any of the following are true:
+
+    * the closer is not a potential opener and the opener is not a
+      potential closer; or
+
+    * the original length of the closing delimiter run is a multiple
+      of 3; or
+
+    * the original length of the opening delimiter run + the original
+      length of the closing delimiter run is not a multiple of 3
 
 - If one is found:
 

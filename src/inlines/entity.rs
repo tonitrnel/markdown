@@ -1,7 +1,5 @@
 use crate::inlines::ProcessCtx;
-use crate::tokenizer::Token;
 use crate::utils;
-use crate::utils::entities::EscapeState;
 
 pub(super) fn process(
     ProcessCtx {
@@ -9,70 +7,100 @@ pub(super) fn process(
     }: &mut ProcessCtx,
 ) -> bool {
     let start_location = line.start_location();
-    line.next();
-    let mut state = EscapeState::Entity;
-    let mut start = 0;
-    for (end, item) in line.iter().enumerate() {
-        match (&state, &item.token) {
-            (EscapeState::Entity, Token::Crosshatch) => {
-                state = EscapeState::Numeric;
+    // 跳过 '&'
+    line.next_byte();
+
+    let _scan_start = line.cursor();
+    let bytes = line.source_slice();
+
+    // 检查第一个字节确定类型
+    let first = match line.peek() {
+        Some(b) => b,
+        None => return false,
+    };
+
+    if first == b'#' {
+        // Numeric entity: &#... or &#x...
+        line.next_byte();
+        let hex = match line.peek() {
+            Some(b'x') | Some(b'X') => {
+                line.next_byte();
+                true
             }
-            (EscapeState::Entity, Token::Text(..) | Token::Digit(..)) => {
-                start = end;
-                state = EscapeState::Named
-            }
-            (EscapeState::Numeric, Token::Text(str)) if str.starts_with(['x', 'X']) => {
-                start = end;
-                state = EscapeState::Hex;
-            }
-            (EscapeState::Numeric, Token::Digit(_)) => {
-                start = end;
-                state = EscapeState::Dec;
-            }
-            (EscapeState::Named, Token::Text(_) | Token::Digit(..)) => continue,
-            (EscapeState::Named, Token::Semicolon) => {
-                let buf = line.slice(start, end).to_string();
-                if let Some(val) = utils::lookup_entity(buf.as_bytes()) {
-                    parser.append_text_to(*id, val, (start_location, item.end_location()));
-                    line.skip(end + 1);
-                    return true;
-                };
-                return false;
-            }
-            (EscapeState::Hex, Token::Text(_) | Token::Digit(..)) => continue,
-            (EscapeState::Hex, Token::Semicolon) => {
-                let buf = line.slice(start, end).to_string();
-                if let Ok(Some(mut ch)) = u32::from_str_radix(&buf[1..], 16).map(char::from_u32) {
-                    ch = if ch == '\u{0000}' { '\u{FFFD}' } else { ch };
-                    parser.append_text_to(
-                        *id,
-                        ch.to_string(),
-                        (start_location, item.end_location()),
-                    );
-                    line.skip(end + 1);
-                    return true;
-                }
-                return false;
-            }
-            (EscapeState::Dec, Token::Digit(..)) => continue,
-            (EscapeState::Dec, Token::Semicolon) => {
-                let buf = line.slice(start, end).to_string();
-                if let Ok(Some(mut ch)) = buf.parse::<u32>().map(char::from_u32) {
-                    ch = if ch == '\u{0000}' { '\u{FFFD}' } else { ch };
-                    parser.append_text_to(
-                        *id,
-                        ch.to_string(),
-                        (start_location, item.end_location()),
-                    );
-                    line.skip(end + 1);
-                    return true;
-                }
-                return false;
-            }
+            Some(b'0'..=b'9') => false,
             _ => return false,
+        };
+
+        let num_start = line.cursor();
+        while let Some(b) = line.peek() {
+            match (hex, b) {
+                (true, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F') => {
+                    line.next_byte();
+                }
+                (false, b'0'..=b'9') => {
+                    line.next_byte();
+                }
+                (_, b';') => {
+                    let num_end = line.cursor();
+                    if num_end == num_start {
+                        return false;
+                    }
+                    let num_str =
+                        unsafe { std::str::from_utf8_unchecked(&bytes[num_start..num_end]) };
+                    let end_location = line.location_at_byte(line.cursor() + 1);
+                    line.next_byte(); // skip ';'
+
+                    let result = if hex {
+                        u32::from_str_radix(num_str, 16)
+                            .ok()
+                            .and_then(char::from_u32)
+                    } else {
+                        num_str.parse::<u32>().ok().and_then(char::from_u32)
+                    };
+
+                    if let Some(mut ch) = result {
+                        if ch == '\u{0000}' {
+                            ch = '\u{FFFD}';
+                        }
+                        parser.append_text_char_to(*id, ch, (start_location, end_location));
+                        return true;
+                    }
+                    return false;
+                }
+                _ => return false,
+            }
         }
+        false
+    } else if first.is_ascii_alphabetic() || first.is_ascii_digit() {
+        // Named entity: &name;
+        let name_start = line.cursor();
+        while let Some(b) = line.peek() {
+            match b {
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' => {
+                    line.next_byte();
+                }
+                b';' => {
+                    let name_end = line.cursor();
+                    if name_end == name_start {
+                        return false;
+                    }
+                    let name = &bytes[name_start..name_end];
+                    let end_location = line.location_at_byte(line.cursor() + 1);
+                    line.next_byte(); // skip ';'
+
+                    if let Some(val) = utils::lookup_entity(name) {
+                        parser.append_text_to(*id, val, (start_location, end_location));
+                        return true;
+                    }
+                    return false;
+                }
+                _ => return false,
+            }
+        }
+        false
+    } else {
+        false
     }
-    false
 }
 
 #[cfg(test)]
@@ -85,26 +113,21 @@ mod tests {
 &frac34; &HilbertSpace; &DifferentialD;
 &ClockwiseContourIntegral; &ngE;"#;
         let ast = Parser::new(text).parse();
-        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
-            r#"<p>  &amp; © Æ Ď
-¾ ℋ ⅆ
-∲ ≧̸</p>"#
+            "<p>\u{a0} &amp; © Æ Ď\n¾ ℋ ⅆ\n∲ ≧\u{338}</p>"
         )
     }
     #[test]
     fn case_26() {
         let text = r#"&#35; &#1234; &#992; &#0;"#;
         let ast = Parser::new(text).parse();
-        // println!("{ast:?}")
         assert_eq!(ast.to_html(), r#"<p># Ӓ Ϡ �</p>"#)
     }
     #[test]
     fn case_27() {
         let text = r#"&#X22; &#XD06; &#xcab;"#;
         let ast = Parser::new(text).parse();
-        // println!("{ast:?}")
         assert_eq!(ast.to_html(), r#"<p>&quot; ആ ಫ</p>"#)
     }
 }

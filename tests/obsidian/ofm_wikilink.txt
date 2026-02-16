@@ -1,0 +1,71 @@
+// Obsidian Flavored Markdown - Internal Links (Wikilinks)
+// Reference: https://help.obsidian.md/Linking+notes+and+files/Internal+links
+
+## Internal Links (extension)
+
+OFM enables the `wikilink` extension. Double brackets (`[[]]`) create internal
+links to other notes.
+
+Basic wikilink:
+
+```````````````````````````````` example
+[[My Note]]
+.
+<p><a href="My Note" class="internal-link">My Note</a></p>
+````````````````````````````````
+
+Wikilink with custom display text using pipe:
+
+```````````````````````````````` example
+[[My Note|custom text]]
+.
+<p><a href="My Note" class="internal-link">custom text</a></p>
+````````````````````````````````
+
+Wikilink to a heading:
+
+```````````````````````````````` example
+[[My Note#Heading 2]]
+.
+<p><a href="My Note#Heading 2" class="internal-link">My Note &gt; Heading 2</a></p>
+````````````````````````````````
+
+Wikilink to a block:
+
+```````````````````````````````` example
+[[My Note#^block-id]]
+.
+<p><a href="My Note#^block-id" class="internal-link">My Note</a></p>
+````````````````````````````````
+
+Wikilink to heading with custom display text:
+
+```````````````````````````````` example
+[[My Note#Heading|display]]
+.
+<p><a href="My Note#Heading" class="internal-link">display</a></p>
+````````````````````````````````
+
+Wikilink inline with other text:
+
+```````````````````````````````` example
+See [[My Note]] for details.
+.
+<p>See <a href="My Note" class="internal-link">My Note</a> for details.</p>
+````````````````````````````````
+
+Multiple wikilinks in one line:
+
+```````````````````````````````` example
+Link to [[Note A]] and [[Note B]].
+.
+<p>Link to <a href="Note A" class="internal-link">Note A</a> and <a href="Note B" class="internal-link">Note B</a>.</p>
+````````````````````````````````
+
+Empty wikilink is not valid:
+
+```````````````````````````````` example
+[[]]
+.
+<p>[[]]</p>
+````````````````````````````````

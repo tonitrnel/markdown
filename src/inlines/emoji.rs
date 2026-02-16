@@ -1,6 +1,5 @@
 use crate::ast::MarkdownNode;
 use crate::inlines::ProcessCtx;
-use crate::tokenizer::Token;
 
 pub(super) fn process(
     ProcessCtx {
@@ -8,29 +7,41 @@ pub(super) fn process(
     }: &mut ProcessCtx,
 ) -> bool {
     let start_location = line.start_location();
-    let mut end = 0;
-    line.next();
-    for (i, item) in line.iter().enumerate() {
-        match item.token {
-            Token::Text(..) | Token::Digit(..) => continue,
-            Token::Underscore | Token::Plus | Token::Hyphen => continue,
-            Token::Colon if i > 0 => {
-                end = i;
+    // 跳过开头的 ':'
+    line.next_byte();
+    // 扫描 emoji 名称：字母、数字、_、+、-，直到遇到 ':'
+    let scan_start = line.cursor();
+    let mut end_pos = None;
+    let mut i = line.cursor();
+    while i < line.end() {
+        let b = line.source_slice()[i];
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'+' | b'-' => {
+                i += 1;
+            }
+            b':' if i > scan_start => {
+                end_pos = Some(i);
                 break;
             }
             _ => return false,
         }
     }
-    if end == 0 {
-        return false;
-    }
-    let end_location = line.end_location();
+    let end_pos = match end_pos {
+        Some(p) => p,
+        None => return false,
+    };
+    let emoji_name =
+        unsafe { std::str::from_utf8_unchecked(&line.source_slice()[scan_start..end_pos]) };
+    let end_location = line.location_at_byte(end_pos + 1);
     parser.append_to(
         *id,
-        MarkdownNode::Emoji(line.slice(0, end).to_string()),
+        MarkdownNode::Emoji(emoji_name.to_string()),
         (start_location, end_location),
     );
-    line.skip(end + 1);
+    // 跳过 emoji 名称 + 结尾的 ':'
+    // cursor 当前在 scan_start，需要跳到 end_pos + 1
+    let skip_count = end_pos + 1 - line.cursor();
+    line.skip(skip_count);
     true
 }
 

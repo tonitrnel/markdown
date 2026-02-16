@@ -50,11 +50,12 @@ impl Html {
             Html::Inline(t) => t,
         };
         match typ {
-            HtmlType::Type1(e, _) | HtmlType::Type6(e, _) | HtmlType::Type7(e, _) => {
-                DISALLOWED_TAG_NAMES
-                    .iter()
-                    .any(|it| e.name.eq_ignore_ascii_case(it))
-            }
+            HtmlType::RawTextContainer(e, _)
+            | HtmlType::CanonicalBlockTag(e, _)
+            | HtmlType::GenericTag(e, _)
+            | HtmlType::Component(e, _) => DISALLOWED_TAG_NAMES
+                .iter()
+                .any(|it| e.name.eq_ignore_ascii_case(it)),
             _ => false,
         }
     }
@@ -63,9 +64,10 @@ impl Html {
             Html::Block(t) | Html::Inline(t) => t,
         };
         match _type {
-            HtmlType::Type1(_, flag) | HtmlType::Type6(_, flag) | HtmlType::Type7(_, flag) => {
-                *flag = Flag::Full
-            }
+            HtmlType::RawTextContainer(_, flag)
+            | HtmlType::CanonicalBlockTag(_, flag)
+            | HtmlType::GenericTag(_, flag)
+            | HtmlType::Component(_, flag) => *flag = Flag::Full,
             _ => (),
         }
     }
@@ -73,37 +75,44 @@ impl Html {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HtmlType {
-    /// HTML Elements(pre, script, style, textarea)
+    /// 用途：处理 `pre/script/style/textarea` 这类 raw-text 容器标签。
+    /// 对应：CommonMark HTML block type 1。
     ///
     /// - Start condition: line begins with the string`<pre`,`<script`,`<style`, or`<textarea`(case-insensitive), followed by a space, a tab, the string`>`, or the end of the line.  
     /// - End condition: line contains an end tag`</pre>`,`</script>`,`</style>`, or`</textarea>`(case-insensitive; it need not match the start tag).
-    Type1(Element, Flag),
+    RawTextContainer(Element, Flag),
 
-    ///  HTML Comments
+    /// 用途：处理 HTML 注释块。
+    /// 对应：CommonMark HTML block type 2。
     ///
     /// - Start condition: line begins with the string `<!--`.
     /// - End condition  : line contains the string `-->`.
-    Type2,
+    HtmlComment,
 
-    /// Processing Instruction
+    /// 用途：处理 processing instruction（如 `<? ... ?>`）。
+    /// 对应：CommonMark HTML block type 3。
     ///
     /// - Start condition: line begins with the string `<?`.
     /// - End condition  : line contains the string `?>`.
-    Type3,
+    ProcessingInstruction,
 
-    /// Declaration
+    /// 用途：处理声明类标签（如 `<!DOCTYPE ...>`）。
+    /// 对应：CommonMark HTML block type 4。
     ///
     /// - Start condition: line begins with the string `<!` followed by an ASCII letter.
     /// - End condition  : line contains the character `>`.
-    Type4,
+    Declaration,
 
-    /// CDATA
+    /// 用途：处理 CDATA 区块。
+    /// 对应：CommonMark HTML block type 5。
     ///
     /// - Start condition: line begins with the string `<![CDATA[`.
     /// - End condition  : line contains the string `]]>`.
-    Type5,
+    CDataSection,
 
-    /// HTML canonical elements
+    /// 用途：处理 CommonMark 规定的“块级 HTML 标签白名单”（规范内 canonical 列表）。
+    /// 对应：CommonMark HTML block type 6。
+    /// 语义：支持 `Begin/End/Full/SelfClose`，用于在块级容器中做配对与闭合管理。
     ///
     /// - Start condition: line begins with the string `<` or `</` followed by one of the strings (case-insensitive):  
     ///     `address`,`article`,`aside`,`base`,
@@ -123,15 +132,24 @@ pub enum HtmlType {
     ///     `ul`
     ///     followed by a space, a tab, the end of the line, the string`>`, or the string`/>`.
     /// - End condition: line is followed by a blank line.
-    Type6(Element, Flag),
+    CanonicalBlockTag(Element, Flag),
 
-    /// Other Non-HTML canonical elements
-    ///
+    /// 用途：处理不在 type6 白名单里的其他标签。
+    /// 对应：CommonMark HTML block type 7。
+    /// 语义：?
     /// - Start condition: line begins with a complete open tag (with any tag name other than `pre`, `script`, `style`, or `textarea`) or a complete closing tag, followed by zero or more spaces and tabs, followed by the end of the line.
     /// - End condition:
     ///    1. line is followed by a blank line.
     ///    2. find the closing tag that matches(custom rule, non cfm spec).
-    Type7(Element, Flag),
+    GenericTag(Element, Flag),
+    /// 用途: 自定义组件标签
+    /// 对应: JSX 组件, 扩展了“同容器配对闭合”规则
+    /// 语义：常用于最小 MDX 场景（例如 `<Button>...</Button>`）的 Begin/Full 标记。
+    Component(Element, Flag),
+    /// 用途: JS 风格的注释（`{/* ... */}`）
+    JSComment(String),
+    /// 用途: JS 表达式（包含类型、函数字面量、对象字面量等）
+    JSExpression(String),
 }
 
 impl Serialize for HtmlType {
@@ -141,21 +159,28 @@ impl Serialize for HtmlType {
     {
         let mut obj = serializer.serialize_map(Some(4))?;
         match self {
-            HtmlType::Type1(..) => obj.serialize_entry("type", "type1")?,
-            HtmlType::Type2 => obj.serialize_entry("type", "type2")?,
-            HtmlType::Type3 => obj.serialize_entry("type", "type3")?,
-            HtmlType::Type4 => obj.serialize_entry("type", "type4")?,
-            HtmlType::Type5 => obj.serialize_entry("type", "type5")?,
-            HtmlType::Type6(..) => obj.serialize_entry("type", "type6")?,
-            HtmlType::Type7(..) => obj.serialize_entry("type", "type7")?,
+            HtmlType::RawTextContainer(..) => obj.serialize_entry("type", "type1")?,
+            HtmlType::HtmlComment => obj.serialize_entry("type", "type2")?,
+            HtmlType::ProcessingInstruction => obj.serialize_entry("type", "type3")?,
+            HtmlType::Declaration => obj.serialize_entry("type", "type4")?,
+            HtmlType::CDataSection => obj.serialize_entry("type", "type5")?,
+            HtmlType::CanonicalBlockTag(..) => obj.serialize_entry("type", "type6")?,
+            HtmlType::GenericTag(..) => obj.serialize_entry("type", "type7")?,
+            HtmlType::Component(..) => obj.serialize_entry("type", "component")?,
+            HtmlType::JSComment(..) => obj.serialize_entry("type", "js_comment")?,
+            HtmlType::JSExpression(..) => obj.serialize_entry("type", "js_expression")?,
         }
         match self {
-            HtmlType::Type1(element, flag)
-            | HtmlType::Type6(element, flag)
-            | HtmlType::Type7(element, flag) => {
+            HtmlType::RawTextContainer(element, flag)
+            | HtmlType::CanonicalBlockTag(element, flag)
+            | HtmlType::GenericTag(element, flag)
+            | HtmlType::Component(element, flag) => {
                 obj.serialize_entry("name", &element.name)?;
                 obj.serialize_entry("props", &element.props)?;
                 obj.serialize_entry("flag", flag)?;
+            }
+            HtmlType::JSComment(value) | HtmlType::JSExpression(value) => {
+                obj.serialize_entry("value", value)?;
             }
             _ => (),
         }
@@ -166,7 +191,61 @@ impl Serialize for HtmlType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Element {
     pub name: String,
-    pub props: Option<Vec<(String, String)>>,
+    pub props: Option<Vec<(String, PropValue)>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PropValue {
+    Literal(String),
+    Expr(String),
+}
+
+impl PropValue {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Literal(s) | Self::Expr(s) => s,
+        }
+    }
+
+    pub fn is_literal(&self) -> bool {
+        matches!(self, Self::Literal(_))
+    }
+    pub fn is_expression(&self) -> bool {
+        matches!(self, Self::Expr(_))
+    }
+
+    pub fn literal(&self) -> Option<&str> {
+        if let Self::Literal(s) = self {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    pub fn expression(&self) -> Option<&str> {
+        if let Self::Expr(s) = self {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.as_str().is_empty()
+    }
+}
+
+impl AsRef<str> for PropValue {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl std::fmt::Display for PropValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 impl Element {
@@ -179,9 +258,12 @@ impl Element {
     ) -> Self {
         Self {
             name: name.as_ref().to_string(),
-            props: props
-                .filter(|it| !it.is_empty())
-                .map(|props| props.into_iter().map(|(n, v)| (n, v.to_string())).collect()),
+            props: props.filter(|it| !it.is_empty()).map(|props| {
+                props
+                    .into_iter()
+                    .map(|(n, v)| (n, PropValue::Literal(v.to_string())))
+                    .collect()
+            }),
         }
     }
     #[cfg_attr(not(test), cfg(feature = "html"))]
@@ -192,7 +274,10 @@ impl Element {
                 if value.is_empty() {
                     str.push_str(&format!(" {name}"))
                 } else {
-                    str.push_str(&format!(" {name}=\"{value}\""))
+                    match value {
+                        PropValue::Literal(v) => str.push_str(&format!(" {name}=\"{v}\"")),
+                        PropValue::Expr(v) => str.push_str(&format!(" {name}={{{v}}}")),
+                    }
                 }
             }
         }

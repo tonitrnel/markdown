@@ -1,9 +1,8 @@
 use crate::ast::MarkdownNode;
 use crate::inlines::link;
 use crate::inlines::link::scan_link_title;
-use crate::line::Line;
 use crate::parser::Parser;
-use crate::tokenizer::Token;
+use crate::span::Span;
 use crate::utils;
 
 pub(crate) fn process_link_reference(parser: &mut Parser, node_id: usize) {
@@ -14,22 +13,24 @@ pub(crate) fn process_link_reference(parser: &mut Parser, node_id: usize) {
     let mut line = match parser.inlines.get(&node_id).filter(|item| {
         item.first()
             .and_then(|it| it.get(0))
-            .map(|it| matches!(it, Token::LBracket))
+            .map(|it| it == b'[')
             .unwrap_or(false)
     }) {
-        Some(_) => Line::extends(parser.inlines.remove(&node_id).unwrap()),
+        Some(_) => {
+            let Some(spans) = parser.inlines.remove(&node_id) else {
+                return;
+            };
+            match Span::merge(&spans) {
+                Some(merged) => merged,
+                None => return,
+            }
+        }
         _ => return,
     };
-    // println!(
-    //     "检测是否存在 reference #{node_id} => {:?}",
-    //     parser.inlines.keys().collect::<Vec<_>>()
-    // );
-    // println!("{:?}", line)
     loop {
         let snapshot = line.snapshot();
         match scan_link_reference(&mut line) {
             Some((ref_label, url, title)) => {
-                // println!("写入 reference {ref_label:?} ({url:?},{title:?})");
                 parser
                     .link_refs
                     .entry(ref_label)
@@ -37,7 +38,7 @@ pub(crate) fn process_link_reference(parser: &mut Parser, node_id: usize) {
                 continue;
             }
             _ => {
-                line.resume(snapshot);
+                line.resume(&snapshot);
             }
         }
         break;
@@ -48,7 +49,48 @@ pub(crate) fn process_link_reference(parser: &mut Parser, node_id: usize) {
         parser.inlines.insert(node_id, vec![line]);
     }
 }
-fn scan_link_reference(line: &mut Line) -> Option<(String, String, Option<String>)> {
+
+pub(crate) fn process_setext_heading_link_reference(parser: &mut Parser, node_id: usize) {
+    if !matches!(
+        parser.tree[node_id].body,
+        MarkdownNode::Heading(crate::ast::heading::Heading::SETEXT(_))
+    ) {
+        return;
+    }
+    let Some(spans) = parser.inlines.remove(&node_id) else {
+        return;
+    };
+    let mut consumed = 0usize;
+    for span in spans.iter() {
+        let mut line = span.clone();
+        let Some((ref_label, url, title)) = scan_link_reference(&mut line) else {
+            break;
+        };
+        if !line.is_end() {
+            break;
+        }
+        parser
+            .link_refs
+            .entry(ref_label)
+            .or_insert((url, title.map(utils::entities::unescape_string)));
+        consumed += 1;
+    }
+    if consumed == 0 {
+        parser.inlines.insert(node_id, spans);
+        return;
+    }
+    let remains = spans.into_iter().skip(consumed).collect::<Vec<_>>();
+    if !remains.is_empty() {
+        parser.inlines.insert(node_id, remains);
+    }
+}
+
+pub(crate) fn is_link_reference_line(span: &Span) -> bool {
+    let mut line = span.clone();
+    scan_link_reference(&mut line).is_some() && line.is_end()
+}
+
+fn scan_link_reference(line: &mut Span) -> Option<(String, String, Option<String>)> {
     let ref_label = match link::scan_link_label(line) {
         Some((size, label)) => {
             line.skip(size);
@@ -56,42 +98,53 @@ fn scan_link_reference(line: &mut Line) -> Option<(String, String, Option<String
         }
         _ => return None,
     };
-    // println!("scan_link_reference label={ref_label:?}")
-    if ref_label.is_empty() || !line.consume(Token::Colon) {
+    if ref_label.is_empty() || !line.consume(b':') {
         return None;
     }
     link::skip_spaces(line);
     let url = match link::scan_link_url(line) {
         Some((size, url)) => {
+            // Reference definitions must have an explicit destination token.
+            // `size == 0` means nothing was consumed (e.g. `[foo]:`), which is invalid.
+            if size == 0 {
+                return None;
+            }
             line.skip(size);
-            utils::percent_encode::encode(utils::unescape_string(url.to_string()), true)
+            utils::percent_encode::encode(
+                link::backslash_unescape(&utils::unescape_string(url.to_string())),
+                true,
+            )
         }
         _ => return None,
     };
-    // println!("scan_link_reference url={url:?}")
     let before_title_snapshot = line.snapshot();
-    let mut title = {
-        let count = link::skip_spaces(line);
-        if count > 0 {
-            match scan_link_title(line) {
-                Some((size, _line)) => {
-                    line.skip(size);
-                    Some(_line.to_string())
-                }
-                _ => None,
+    let mut title = None;
+    let mut title_probe = false;
+    if skip_spaces_tabs(line) > 0 {
+        title_probe = true;
+    }
+    if skip_line_ending(line) {
+        skip_spaces_tabs(line);
+        title_probe = true;
+    }
+    if title_probe {
+        match scan_link_title(line) {
+            Some((size, _line)) => {
+                line.skip(size);
+                title = Some(link::backslash_unescape(&_line.to_string()));
             }
-        } else {
-            None
+            None => {
+                line.resume(&before_title_snapshot);
+            }
         }
-    };
-    // println!("scan_link_reference title={title:?} line={line:?}")
-    let at_line_end = if !line.only_space_to_end() {
+    }
+    let at_line_end = if !only_space_to_eol(line) {
         if title.is_none() {
             false
         } else {
             title = None;
-            line.resume(before_title_snapshot);
-            line.only_space_to_end()
+            line.resume(&before_title_snapshot);
+            only_space_to_eol(line)
         }
     } else {
         true
@@ -99,9 +152,45 @@ fn scan_link_reference(line: &mut Line) -> Option<(String, String, Option<String
     if !at_line_end {
         return None;
     }
-    link::skip_spaces(line);
+    skip_spaces_and_line_ending(line);
     Some((ref_label, url, title))
 }
+
+fn only_space_to_eol(line: &Span) -> bool {
+    let mut i = 0;
+    while let Some(b) = line.get(i) {
+        match b {
+            b' ' | b'\t' => i += 1,
+            b'\n' | b'\r' => return true,
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn skip_spaces_and_line_ending(line: &mut Span) {
+    skip_spaces_tabs(line);
+    skip_line_ending(line);
+}
+
+fn skip_spaces_tabs(line: &mut Span) -> usize {
+    let mut count = 0usize;
+    while matches!(line.get(0), Some(b' ' | b'\t')) {
+        line.skip(1);
+        count += 1;
+    }
+    count
+}
+
+fn skip_line_ending(line: &mut Span) -> bool {
+    if line.consume(b'\r') {
+        line.consume(b'\n');
+        true
+    } else {
+        line.consume(b'\n')
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::parser::Parser;
@@ -114,7 +203,6 @@ mod tests {
 [foo]"#,
         );
         let ast = p.parse();
-        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/url" title="title">foo</a></p>"#
@@ -130,7 +218,6 @@ mod tests {
 [foo]"#,
         );
         let ast = p.parse();
-        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/url" title="the title">foo</a></p>"#
@@ -144,7 +231,6 @@ mod tests {
 [Foo*bar\]]"#,
         );
         let ast = p.parse();
-        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="my_(url)" title="title (with parens)">Foo*bar]</a></p>"#
@@ -160,7 +246,6 @@ mod tests {
 [Foo bar]"#,
         );
         let ast = p.parse();
-        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="my%20url" title="title">Foo bar</a></p>"#
@@ -178,7 +263,6 @@ line2
 [foo]"#,
         );
         let ast = p.parse();
-        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/url" title="
@@ -198,7 +282,6 @@ with blank line'
 [foo]"#,
         );
         let ast = p.parse();
-        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p>[foo]: /url 'title</p>
@@ -219,7 +302,6 @@ with blank line'
 [baz]"#,
         );
         let ast = p.parse();
-        // println!("{ast:?}")
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/foo-url" title="foo">foo</a>,

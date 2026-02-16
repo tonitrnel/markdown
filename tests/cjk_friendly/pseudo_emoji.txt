@@ -1,0 +1,46 @@
+// Pseudo-emoji CJK character tests
+// 〰 (U+3030) and 〽 (U+303D) are EAW=W but NOT default emoji presentation,
+// so they ARE CJK characters and emphasis should work.
+// 🈂 (U+1F202), 🈷 (U+1F237), ㊗ (U+3297), ㊙ (U+3299) are default emoji
+// presentation characters, so they are NOT CJK characters.
+
+## CJK Pseudo-emoji: CJK characters that look like emoji
+
+```````````````````````````````` example
+a**〰**a
+.
+<p>a<strong>〰</strong>a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**〽**a
+.
+<p>a<strong>〽</strong>a</p>
+````````````````````````````````
+
+## CJK Pseudo-emoji: Default emoji presentation characters (NOT CJK)
+
+```````````````````````````````` example
+a**🈂**a
+.
+<p>a**🈂**a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**🈷**a
+.
+<p>a**🈷**a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**㊗**a
+.
+<p>a**㊗**a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a**㊙**a
+.
+<p>a**㊙**a</p>
+````````````````````````````````
+

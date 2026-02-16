@@ -1,4 +1,3 @@
-use crate::tokenizer::Token;
 use serde::Serialize;
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
@@ -9,13 +8,20 @@ pub enum Code {
     Indented(IndentedCode),
 }
 
+/// Marker type for fenced code blocks
+#[derive(Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FenceMarker {
+    Backtick,
+    Tilde,
+}
+
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct FencedCode {
     /// 记录指定的语言
     pub language: Option<String>,
     pub(crate) length: usize,
     pub(crate) indent: usize,
-    pub(crate) marker: Token<'static>,
+    pub(crate) marker: FenceMarker,
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]

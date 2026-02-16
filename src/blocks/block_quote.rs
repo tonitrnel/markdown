@@ -1,15 +1,14 @@
 use crate::ast::{block_quote, MarkdownNode};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
-use crate::tokenizer::Token;
 
 impl BlockStrategy for block_quote::BlockQuote {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         let location = line.start_location();
-        if !line.is_indented() && line.advance_next_nonspace().starts_with(&Token::Gt, 1) {
-            // skip '>' token.
-            line.next();
-            // optional following space.
-            line.consume(|it: &Token| it.is_space_or_tab());
+        if !line.is_indented() && line.advance_next_nonspace().starts_with(b'>', 1) {
+            // skip '>' byte
+            line.next_byte();
+            // optional following space
+            line.consume_if(|b| b == b' ' || b == b'\t');
             line.re_find_indent();
             parser.close_unmatched_blocks();
             parser.append_block(MarkdownNode::BlockQuote, location);
@@ -18,11 +17,11 @@ impl BlockStrategy for block_quote::BlockQuote {
         BlockMatching::Unmatched
     }
     fn process(ctx: ProcessCtx) -> BlockProcessing {
-        if !ctx.line.is_indented() && ctx.line.advance_next_nonspace().starts_with(&Token::Gt, 1) {
-            // skip '>' token.
-            ctx.line.next();
-            // optional following space.
-            ctx.line.consume(|it: &Token| it.is_space_or_tab());
+        if !ctx.line.is_indented() && ctx.line.advance_next_nonspace().starts_with(b'>', 1) {
+            // skip '>' byte
+            ctx.line.next_byte();
+            // optional following space
+            ctx.line.consume_if(|b| b == b' ' || b == b'\t');
             ctx.line.re_find_indent();
             return BlockProcessing::Further;
         }

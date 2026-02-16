@@ -1,6 +1,5 @@
 use crate::ast::{thematic_break, MarkdownNode};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
-use crate::tokenizer::Token;
 
 impl BlockStrategy for thematic_break::ThematicBreak {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
@@ -8,21 +7,21 @@ impl BlockStrategy for thematic_break::ThematicBreak {
             return BlockMatching::Unmatched;
         }
         let location = line.start_location();
-        let marker = match line.skip_indent().next() {
-            Some(Token::Hyphen) => Token::Hyphen,
-            Some(Token::Underscore) => Token::Underscore,
-            Some(Token::Asterisk) => Token::Asterisk,
+        let marker = match line.skip_indent().next_byte() {
+            Some(b'-') => b'-',
+            Some(b'_') => b'_',
+            Some(b'*') => b'*',
             _ => return BlockMatching::Unmatched,
         };
         let mut len = 1;
-        while let Some(next) = line.next() {
+        while let Some(next) = line.next_byte() {
             if next == marker {
                 len += 1;
+            } else if next == b' ' || next == b'\t' {
                 continue;
-            } else if next.is_space_or_tab() {
-                continue;
+            } else {
+                return BlockMatching::Unmatched;
             }
-            return BlockMatching::Unmatched;
         }
         if len < 3 {
             return BlockMatching::Unmatched;

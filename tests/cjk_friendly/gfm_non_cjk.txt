@@ -1,0 +1,151 @@
+// GFM strikethrough and table tests under CJK-friendly mode
+// These are non-CJK content and should behave identically to standard GFM.
+
+## CJK GFM: Strikethrough (non-CJK content)
+
+```````````````````````````````` example
+~~Hi~~ Hello, ~there~ world!
+.
+<p><del>Hi</del> Hello, <del>there</del> world!</p>
+````````````````````````````````
+
+```````````````````````````````` example
+This ~~has a
+
+new paragraph~~.
+.
+<p>This ~~has a</p>
+<p>new paragraph~~.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+This will ~~~not~~~ strike.
+.
+<p>This will ~~~not~~~ strike.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+A proper ~strikethrough~.
+.
+<p>A proper <del>strikethrough</del>.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+These are ~not strikethroughs.
+.
+<p>These are ~not strikethroughs.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+No, they are not~
+.
+<p>No, they are not~</p>
+````````````````````````````````
+
+```````````````````````````````` example
+This ~is ~ legit~ isn't ~ legit.
+.
+<p>This <del>is ~ legit</del> isn't ~ legit.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+This is not ~~~~~one~~~~~ huge strikethrough.
+.
+<p>This is not ~~~~~one~~~~~ huge strikethrough.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+~one~ ~~two~~ ~~~three~~~
+.
+<p><del>one</del> <del>two</del> ~~~three~~~</p>
+````````````````````````````````
+
+```````````````````````````````` example
+No ~mismatch~~
+.
+<p>No <del>mismatch</del>~</p>
+````````````````````````````````
+
+```````````````````````````````` example
+~~**_`this`_**~~  
+~~***`this`***~~  
+~~___`this`___~~
+.
+<p><del><strong><em><code>this</code></em></strong></del><br />
+<del><em><strong><code>this</code></strong></em></del><br />
+<del><em><strong><code>this</code></strong></em></del></p>
+````````````````````````````````
+
+```````````````````````````````` example
+~~**_this_**~~  
+~~***this***~~  
+~~___this___~~
+.
+<p><del><strong><em>this</em></strong></del><br />
+<del><em><strong>this</strong></em></del><br />
+<del><em><strong>this</strong></em></del></p>
+````````````````````````````````
+
+```````````````````````````````` example
+~Hi~ Hello, world!
+.
+<p><del>Hi</del> Hello, world!</p>
+````````````````````````````````
+
+```````````````````````````````` example
+This ~text~ ~~is~~ ~~~curious~~~.
+.
+<p>This <del>text</del> <del>is</del> ~~~curious~~~.</p>
+````````````````````````````````
+
+```````````````````````````````` example
+[^~~is~~1]
+.
+<p>[^~~is~~1]</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a~~()a~~a
+.
+<p>a~~()a~~a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+a~~a()~~a
+.
+<p>a~~a()~~a</p>
+````````````````````````````````
+
+```````````````````````````````` example
+~~()~~
+.
+<p><del>()</del></p>
+````````````````````````````````
+
+```````````````````````````````` example
+(~~()~~)
+.
+<p>(<del>()</del>)</p>
+````````````````````````````````
+
+## CJK GFM: Table (non-CJK content)
+
+```````````````````````````````` example
+| A |
+| - |
+| https://example.com/ |
+.
+<table>
+<thead>
+<tr>
+<th>A</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>https://example.com/</td>
+</tr>
+</tbody>
+</table>
+````````````````````````````````
+

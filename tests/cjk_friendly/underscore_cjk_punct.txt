@@ -1,0 +1,50 @@
+// Underscore emphasis with CJK punctuation
+// Under CJK-friendly rules, CJK punctuation is NOT treated as non-CJK punctuation,
+// so _ can open/close emphasis adjacent to CJK punctuation sequences.
+
+## CJK Underscore: CJK punctuation adjacency
+
+```````````````````````````````` example
+__注意__：注意事項
+.
+<p><strong>注意</strong>：注意事項</p>
+````````````````````````````````
+
+```````````````````````````````` example
+注意：__注意事項__
+.
+<p>注意：<strong>注意事項</strong></p>
+````````````````````````````````
+
+## CJK Underscore: CJK ambiguous punctuation sequences (SVS fullwidth form)
+
+```````````````````````````````` example
+正體字。︁_Traditional._
+.
+<p>正體字。︁<em>Traditional.</em></p>
+````````````````````````````````
+
+```````````````````````````````` example
+正體字。︁__Hong Kong and Taiwan.__
+.
+<p>正體字。︁<strong>Hong Kong and Taiwan.</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example
+简体字 / 新字体。︀_Simplified._
+.
+<p>简体字 / 新字体。︀<em>Simplified.</em></p>
+````````````````````````````````
+
+```````````````````````````````` example
+简体字 / 新字体。︀__Mainland China or Japan.__
+.
+<p>简体字 / 新字体。︀<strong>Mainland China or Japan.</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example
+"︁Git"︁__Hub__
+.
+<p>&quot;︁Git&quot;︁<strong>Hub</strong></p>
+````````````````````````````````
+

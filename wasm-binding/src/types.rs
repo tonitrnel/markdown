@@ -2,12 +2,27 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPESCRIPT_TYPE_CONST: &'static str = r##"
-export type Frontmatter = Map<string, string | number | boolean | string[]>;
+export type YamlValue = string | number | boolean | null | readonly YamlValue[];
+export type Frontmatter = Record<string, YamlValue>;
 export interface Location{
     line: number,
     column: number
 }
 export type Tags = string[];
+export interface ParserOptions {
+    readonly github_flavored?: boolean
+    readonly gfm_extended_autolink?: boolean
+    readonly obsidian_flavored?: boolean
+    readonly mdx_component?: boolean
+    readonly cjk_autocorrect?: boolean
+    readonly smart_punctuation?: boolean
+    readonly normalize_chinese_punctuation?: boolean
+    readonly cjk_friendly_delimiters?: boolean
+    readonly max_input_bytes?: number
+    readonly max_nodes?: number
+    readonly cjk_nouns?: readonly string[]
+    readonly cjk_nouns_from_frontmatter?: string
+}
 export type Reference = {
     readonly variant: 'heading',
     readonly value: string
@@ -39,6 +54,7 @@ export interface DocumentNode extends Node{
 }
 export interface FrontMatterNode extends Node{
     readonly kind: "frontmatter"
+    readonly content: Frontmatter
 }
 export interface ParagraphNode extends Node{
     readonly kind: "paragraph"
@@ -200,16 +216,17 @@ export interface CalloutNode extends Node{
         readonly foldable: boolean | undefined
     }
 }
+export type PropValue = { literal: string } | { expr: string };
 export interface HtmlNode extends Node{
     readonly kind: "html"
     readonly content: {
         readonly variant: "inline" | "block"
-        readonly type: "type2" | "type3" | "type4" | "type5"
+        readonly type: "type2" | "type3" | "type4" | "type5" | "js_comment" | "js_expression"
     } | {
         readonly variant: "inline" | "block"
-        readonly type: "type1" | "type6" | "type7"
+        readonly type: "type1" | "type6" | "type7" | "component"
         readonly name: string
-        readonly props: readonly [name: string, value: string][] | undefined
+        readonly props: readonly [name: string, value: PropValue][] | undefined
         readonly flag: "begin" | "end" | "full" | "self-close"
     }
 }
