@@ -2,10 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.1] - 2026-02-17
+
+### Added
+- Exposed package version from wasm binding API via `version()` for runtime verification.
+- Added two-phase frontmatter parsing flow to improve parser behavior around metadata extraction.
+- Improved and expanded TypeScript type annotations/comments in wasm binding output.
+
+### Changed
+- Updated release/build docs and examples for current Rust/WASM usage.
+- Improved Makefile flow for wasm packaging and profiling commands.
+
+### Fixed
+- Cleaned repository metadata artifacts and unrelated files from release history.
+
 ## [1.0.0] - 2026-02-16
 
 ### Breaking / Major
-- Squashed the long feature/fix train since `a58745a` into a single release commit for a clean `1.0.0` baseline.
+- Squashed the long feature/fix train into a single release commit for a clean `1.0.0` baseline.
 - Bumped crate versions to `1.0.0`:
   - `markdown` (`Cargo.toml`)
   - `markdown-binding` (`wasm-binding/Cargo.toml`)

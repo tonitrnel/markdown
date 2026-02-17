@@ -1,6 +1,6 @@
 [package]
 name = "markdown-binding"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "markdown wasm binding"
 repository = "https://github.com/tonitrnel/markdown"
@@ -10,7 +10,7 @@ license = "MIT"
 
 [dependencies]
 wasm-bindgen = "0.2.92"
-markdown = { path = "../", version = "1.0.0", features = [] }
+markdown = { path = "../", version = "1.0.1", features = [] }
 serde = { version = "1.0.200", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
 console_error_panic_hook = "0.1.7"
