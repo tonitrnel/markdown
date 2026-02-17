@@ -1,0 +1,111 @@
+name: Publish WASM Packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check OIDC environment
+        run: |
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" || {
+            echo "::error::ACTIONS_ID_TOKEN_REQUEST_URL is missing. OIDC is not available."
+            exit 1
+          }
+          test -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" || {
+            echo "::error::ACTIONS_ID_TOKEN_REQUEST_TOKEN is missing. OIDC is not available."
+            exit 1
+          }
+
+      - name: Verify OIDC token can be minted for npm audience
+        run: |
+          set -euo pipefail
+          RESP="$(curl -sS -w '\n%{http_code}' \
+            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org")"
+          CODE="$(printf '%s\n' "$RESP" | tail -n1)"
+          BODY="$(printf '%s\n' "$RESP" | sed '$d')"
+          if [ "$CODE" != "200" ]; then
+            echo "::error::OIDC token mint failed with status $CODE"
+            echo "$BODY"
+            exit 1
+          fi
+          printf '%s' "$BODY" | grep -q '"value"' || {
+            echo "::error::OIDC response does not contain a token value."
+            echo "$BODY"
+            exit 1
+          }
+
+  publish:
+    needs: preflight
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - package_name: "@ptdgrp/markdown-wasm"
+            package_dir: "wasm-binding/pkg-web"
+          - package_name: "@ptdgrp/markdown-wasm-node"
+            package_dir: "wasm-binding/pkg-node"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25.6.1"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Ensure npm version for trusted publishing
+        run: |
+          npm i -g npm@11.5.1
+          node --version
+          npm --version
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache wasm-pack and cargo install artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-pack
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-wasm-pack-v0.14.0
+          restore-keys: |
+            ${{ runner.os }}-wasm-pack-
+
+      - name: Install wasm-pack
+        run: |
+          if ! command -v wasm-pack >/dev/null 2>&1; then
+            cargo install wasm-pack --locked --version 0.14.0
+          fi
+          wasm-pack --version
+
+      - name: Build web/node wasm packages
+        run: make wasm-build-all
+
+      - name: Preflight package metadata
+        working-directory: ${{ matrix.package_dir }}
+        run: |
+          NAME="$(node -p "require('./package.json').name")"
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "Publishing $NAME@$VERSION from $PWD"
+          test "$NAME" = "${{ matrix.package_name }}"
+
+      - name: Publish ${{ matrix.package_name }}
+        working-directory: ${{ matrix.package_dir }}
+        run: npm publish --provenance --access public
