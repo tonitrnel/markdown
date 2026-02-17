@@ -9,6 +9,8 @@ use markdown::{
 
 mod types;
 
+/// TypeScript type bindings for WASM exports
+/// WASM 导出的 TypeScript 类型绑定
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(typescript_type = "Frontmatter")]
@@ -85,11 +87,15 @@ impl From<&Node> for AstNode {
     }
 }
 
+/// Parsed markdown document with AST and metadata
+/// 解析后的 Markdown 文档，包含 AST 和元数据
 #[wasm_bindgen]
 pub struct Document {
     ast: Tree<Node>,
     // Internal set for fast merge in deferred phase.
     // Exposed to JS as unsorted `string[]` via getter.
+    // 内部使用的集合，用于延迟阶段的快速合并
+    // 通过 getter 暴露给 JS 为无序的 `string[]`
     tags: FxHashSet<String>,
     source: Option<String>,
     snapshot: Option<ParserPhaseSnapshot>,
@@ -105,13 +111,17 @@ fn transform_ast(ast: &Tree<Node>, index: usize, children: &mut Vec<AstNode>) {
     }
 }
 
+/// Parse mode configuration
+/// 解析模式配置
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ParseMode {
     /// Parse full document in one call.
+    /// 一次性解析完整文档
     #[default]
     Full,
     /// Parse frontmatter only in phase 1, then call `continue_parse` for phase 2.
+    /// 第一阶段仅解析 frontmatter，然后调用 `continue_parse` 进行第二阶段
     FrontmatterOnly,
 }
 
@@ -240,6 +250,8 @@ fn parse_error_to_js(err: ParseError) -> JsValue {
 
 #[wasm_bindgen]
 impl Document {
+    /// Get the complete AST tree
+    /// 获取完整的 AST 树
     #[wasm_bindgen(getter)]
     pub fn tree(&self) -> TAstNode {
         let mut tree = AstNode::from(&self.ast[0]);
@@ -250,6 +262,8 @@ impl Document {
     }
     /// Returns document tags as an unsorted array.
     /// Ordering is not guaranteed and should not be relied upon.
+    /// 返回文档标签的无序数组
+    /// 不保证顺序，不应依赖顺序
     #[wasm_bindgen(getter)]
     pub fn tags(&self) -> Tags {
         let tags = self.tags.iter().cloned().collect::<Vec<_>>();
@@ -258,16 +272,22 @@ impl Document {
             .unchecked_into::<Tags>()
     }
 
+    /// Get total number of nodes in the AST
+    /// 获取 AST 中的节点总数
     #[wasm_bindgen(getter)]
     pub fn total_nodes(&self) -> u32 {
         self.ast.len() as u32
     }
 
+    /// Convert the document to HTML
+    /// 将文档转换为 HTML
     #[wasm_bindgen]
     pub fn to_html(&self) -> String {
         self.ast.to_html()
     }
 
+    /// Get the frontmatter metadata if present
+    /// 获取 frontmatter 元数据（如果存在）
     #[wasm_bindgen(getter)]
     pub fn frontmatter(&self) -> Frontmatter {
         // Find frontmatter node in AST
@@ -283,6 +303,8 @@ impl Document {
 
     /// Completes phase 2 parse when `parse_mode = "frontmatter_only"`.
     /// No-op if document is already fully parsed.
+    /// 当 `parse_mode = "frontmatter_only"` 时完成第二阶段解析
+    /// 如果文档已完全解析则为空操作
     #[wasm_bindgen]
     pub fn continue_parse(&mut self) -> Result<(), JsValue> {
         let Some(snapshot) = self.snapshot.take() else {
@@ -305,6 +327,14 @@ impl Document {
     }
 }
 
+/// Parse markdown with default options (GFM + OFM + CJK autocorrect enabled)
+/// 使用默认选项解析 Markdown（启用 GFM + OFM + CJK 自动纠正）
+///
+/// # Arguments
+/// * `text` - The markdown text to parse / 要解析的 Markdown 文本
+///
+/// # Returns
+/// A `Document` containing the parsed AST and metadata / 包含解析后的 AST 和元数据的 `Document`
 #[wasm_bindgen]
 pub fn parse(text: String) -> Document {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -319,12 +349,21 @@ pub fn parse(text: String) -> Document {
     Document::from(document)
 }
 
-/// Parses markdown with user options.
+/// Parses markdown with user-specified options.
+/// 使用用户指定的选项解析 Markdown
 ///
-/// `parse_mode` behavior:
-/// - `full` (default): parse full document immediately.
+/// # Arguments
+/// * `text` - The markdown text to parse / 要解析的 Markdown 文本
+/// * `options` - Parser configuration options / 解析器配置选项
+///
+/// # Parse Mode Behavior
+/// - `full` (default): parse full document immediately / 立即解析完整文档
 /// - `frontmatter_only`: phase 1 only (Document + FrontMatter),
-///   then call `Document::continue_parse()` to run phase 2.
+///   then call `Document::continue_parse()` to run phase 2
+///   / 仅第一阶段（Document + FrontMatter），然后调用 `Document::continue_parse()` 运行第二阶段
+///
+/// # Returns
+/// A `Document` containing the parsed AST and metadata / 包含解析后的 AST 和元数据的 `Document`
 #[wasm_bindgen]
 pub fn parse_with_options(text: String, options: TParserOptions) -> Document {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -343,6 +382,11 @@ pub fn parse_with_options(text: String, options: TParserOptions) -> Document {
     }
 }
 
+/// Get the parser version string
+/// 获取解析器版本字符串
+///
+/// # Returns
+/// Version string in semver format / semver 格式的版本字符串
 #[wasm_bindgen]
 pub fn version() -> String {
     Parser::version().to_string()
