@@ -1,4 +1,4 @@
-use crate::ast::{block_quote, MarkdownNode};
+use crate::ast::{MarkdownNode, block_quote};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
 
 impl BlockStrategy for block_quote::BlockQuote {

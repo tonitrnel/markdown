@@ -1,2 +1,2 @@
-pub mod yaml;
 pub mod frontmatter;
+pub mod yaml;

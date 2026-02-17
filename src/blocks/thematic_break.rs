@@ -1,4 +1,4 @@
-use crate::ast::{thematic_break, MarkdownNode};
+use crate::ast::{MarkdownNode, thematic_break};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
 
 impl BlockStrategy for thematic_break::ThematicBreak {

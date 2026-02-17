@@ -16,8 +16,8 @@ pub(super) fn process(ProcessCtx { line, .. }: &mut ProcessCtx) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::{
-        parser::{Parser, ParserOptions},
         MarkdownNode,
+        parser::{Parser, ParserOptions},
     };
 
     #[test]

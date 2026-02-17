@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 // 需要将 utils 模块暴露给 bench，通过 lib 的 pub(crate) 无法直接访问
 // 所以我们直接内联测试逻辑，或者通过集成方式测试

@@ -83,11 +83,8 @@ Paragraph with $x$ and **bold**.
 1. item
 2. item
 "#;
-    let doc = Parser::new_with_options(
-        input,
-        ParserOptions::default().enabled_gfm().enabled_ofm(),
-    )
-    .parse();
+    let doc = Parser::new_with_options(input, ParserOptions::default().enabled_gfm().enabled_ofm())
+        .parse();
 
     assert_location_invariants(&doc.tree, 0);
 }

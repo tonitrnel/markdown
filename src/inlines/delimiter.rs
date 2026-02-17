@@ -237,7 +237,10 @@ fn is_cjk_sequence_before(source: &[u8], pos: usize) -> bool {
     is_cjk_character(ch)
 }
 
-pub(super) fn scan_delimiters(line: &mut MergedSpan, cjk_friendly: bool) -> (u8, usize, bool, bool) {
+pub(super) fn scan_delimiters(
+    line: &mut MergedSpan,
+    cjk_friendly: bool,
+) -> (u8, usize, bool, bool) {
     let start = line.cursor();
     let Some(initial_byte) = line.peek() else {
         return (b'*', 1, false, false);
@@ -256,8 +259,8 @@ pub(super) fn scan_delimiters(line: &mut MergedSpan, cjk_friendly: bool) -> (u8,
     let after_byte = line.get(length).unwrap_or(b'\n');
     let after_cursor = start + length;
     // 对于多字节 UTF-8 字符，需要检查实际字符
-    let after_is_whitespace =
-        is_whitespace_byte(after_byte) || is_multibyte_whitespace(line.source_slice(), after_cursor);
+    let after_is_whitespace = is_whitespace_byte(after_byte)
+        || is_multibyte_whitespace(line.source_slice(), after_cursor);
     let after_is_punctuation = !after_is_whitespace
         && (is_punctuation_byte(after_byte)
             || (after_cursor < line.source_slice().len()

@@ -249,27 +249,7 @@ impl<'input> Parser<'input> {
     }
     pub fn parse_checked(mut self) -> Result<Document, ParseError> {
         self.ensure_limits()?;
-        if let Some(frontmatter) = self.parse_frontmatter() {
-            self.merge_cjk_nouns_from_frontmatter(&frontmatter);
-            let idx = self.tree.append_child(
-                self.doc,
-                Node::new(
-                    MarkdownNode::FrontMatter(Box::new(frontmatter)),
-                    Location::default(),
-                ),
-            );
-            self.tree[idx].processing = false;
-            self.tree[idx].end = self.scanner.location();
-            if self.reach_node_limit() {
-                if let Some(err) = self.parse_error.take() {
-                    return Err(err);
-                }
-                return Err(ParseError::NodeLimitExceeded {
-                    limit: self.options.max_nodes.unwrap_or(0),
-                    actual: self.tree.node_slots_len(),
-                });
-            }
-        }
+        self.parse_frontmatter()?;
         self.tree.push();
         self.parse_blocks();
         if let Some(err) = self.parse_error.take() {
@@ -319,8 +299,29 @@ impl<'input> Parser<'input> {
         }
         self.options.cjk_nouns = merged;
     }
-    pub fn parse_frontmatter(&mut self) -> Option<crate::exts::yaml::YamlMap> {
-        exts::frontmatter::parse(self)
+    pub fn parse_frontmatter(&mut self) -> Result<(), ParseError> {
+        if let Some(frontmatter) = exts::frontmatter::parse(self) {
+            self.merge_cjk_nouns_from_frontmatter(&frontmatter);
+            let idx = self.tree.append_child(
+                self.doc,
+                Node::new(
+                    MarkdownNode::FrontMatter(Box::new(frontmatter)),
+                    Location::default(),
+                ),
+            );
+            self.tree[idx].processing = false;
+            self.tree[idx].end = self.scanner.location();
+            if self.reach_node_limit() {
+                if let Some(err) = self.parse_error.take() {
+                    return Err(err);
+                }
+                return Err(ParseError::NodeLimitExceeded {
+                    limit: self.options.max_nodes.unwrap_or(0),
+                    actual: self.tree.node_slots_len(),
+                });
+            }
+        }
+        Ok(())
     }
 
     // +9.1691ms

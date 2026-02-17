@@ -1,4 +1,4 @@
-use crate::ast::{heading, MarkdownNode};
+use crate::ast::{MarkdownNode, heading};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
 use crate::span::Span;
 
@@ -110,9 +110,7 @@ impl BlockStrategy for heading::ATXHeading {
                 return BlockMatching::Unmatched;
             };
             let idx = parser.append_block(
-                MarkdownNode::Heading(heading::Heading::ATX(heading::ATXHeading {
-                    level,
-                })),
+                MarkdownNode::Heading(heading::Heading::ATX(heading::ATXHeading { level })),
                 location,
             );
             parser.append_inline(idx, line.slice(start, end));
@@ -178,7 +176,7 @@ impl BlockStrategy for heading::SetextHeading {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{heading, MarkdownNode};
+    use crate::ast::{MarkdownNode, heading};
     use crate::parser::Location;
     use crate::parser::Parser;
 

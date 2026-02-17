@@ -1,4 +1,4 @@
-use crate::ast::{link, MarkdownNode};
+use crate::ast::{MarkdownNode, link};
 use crate::parser::Parser;
 
 pub(crate) fn process_footnote_list(parser: &mut Parser, node_refcounts: Vec<(usize, usize)>) {

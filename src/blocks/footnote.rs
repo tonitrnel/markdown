@@ -1,4 +1,4 @@
-use crate::ast::{footnote, MarkdownNode};
+use crate::ast::{MarkdownNode, footnote};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
 use crate::parser::Parser;
 use crate::utils;

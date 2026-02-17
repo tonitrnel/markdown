@@ -1,5 +1,5 @@
 use crate::ast;
-use crate::ast::{callout, MarkdownNode};
+use crate::ast::{MarkdownNode, callout};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
 
 impl BlockStrategy for callout::Callout {

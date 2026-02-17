@@ -1,6 +1,6 @@
 use crate::ast::MarkdownNode;
-use crate::inlines::link;
 use crate::inlines::ProcessCtx;
+use crate::inlines::link;
 
 fn skip_leading_continuation_ws(
     ProcessCtx {
@@ -35,8 +35,11 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
             let offset = text.len() - trimmed.len();
             *text = trimmed;
             ctx.parser.tree[child_idx].end.column -= offset as u64;
-            ctx.parser
-                .append_to(ctx.id, node, (ctx.line.start_location(), ctx.line.end_location()));
+            ctx.parser.append_to(
+                ctx.id,
+                node,
+                (ctx.line.start_location(), ctx.line.end_location()),
+            );
             ctx.line.next_byte();
             skip_leading_continuation_ws(ctx);
             return true;
@@ -140,7 +143,9 @@ baz</p>"
 \* not a list
 \# not a heading
 \[foo]: /url "not a reference""#;
-        let ast = Parser::new_with_options(text, crate::parser::ParserOptions::default().enabled_gfm()).parse();
+        let ast =
+            Parser::new_with_options(text, crate::parser::ParserOptions::default().enabled_gfm())
+                .parse();
         assert_eq!(
             ast.to_html(),
             "<p>*not emphasized*\n&lt;br/&gt; not a tag\n[not a link](/foo)\n`not code`\n1. not a list\n* not a list\n# not a heading\n[foo]: /url &quot;not a reference&quot;</p>"

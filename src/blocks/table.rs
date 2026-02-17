@@ -1,4 +1,4 @@
-use crate::ast::{table, MarkdownNode};
+use crate::ast::{MarkdownNode, table};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
 use crate::parser::Location;
 use crate::span::Span;
@@ -254,15 +254,15 @@ impl BlockStrategy for table::Table {
             parser.append_block(table, header_source.start_location());
         }
         // Write table header
-        let idx = parser.append_block(MarkdownNode::TableHead, header_cols.0 .0);
-        let row_idx = parser.append_block(MarkdownNode::TableRow, header_cols.0 .0);
+        let idx = parser.append_block(MarkdownNode::TableHead, header_cols.0.0);
+        let row_idx = parser.append_block(MarkdownNode::TableRow, header_cols.0.0);
         for column in header_cols.1.into_iter() {
             let idx = parser.append_block(MarkdownNode::TableHeadCol, column.start_location());
             parser.finalize(idx, column.last_token_end_location());
             parser.inlines.insert(idx, vec![column]);
         }
-        parser.finalize(row_idx, header_cols.0 .1);
-        parser.finalize(idx, header_cols.0 .1);
+        parser.finalize(row_idx, header_cols.0.1);
+        parser.finalize(idx, header_cols.0.1);
         line.skip_to_end();
         parser.all_closed = true;
         BlockMatching::MatchedLeaf
@@ -299,7 +299,7 @@ impl BlockStrategy for table::Table {
             Some(row) => row,
             None => return BlockProcessing::Unprocessed,
         };
-        let row_id = parser.append_block(MarkdownNode::TableRow, row.0 .0);
+        let row_id = parser.append_block(MarkdownNode::TableRow, row.0.0);
         let mut inserted = 0;
         for col in row.1.into_iter().take(column) {
             let idx = parser.append_block(MarkdownNode::TableDataCol, col.start_location());
@@ -307,12 +307,12 @@ impl BlockStrategy for table::Table {
             parser.inlines.insert(idx, vec![col]);
             inserted += 1;
         }
-        let end_location = row.0 .1;
+        let end_location = row.0.1;
         for _ in inserted..column {
             let idx = parser.append_block(MarkdownNode::TableDataCol, end_location);
             parser.finalize(idx, end_location);
         }
-        parser.finalize(row_id, row.0 .1);
+        parser.finalize(row_id, row.0.1);
         BlockProcessing::Processed
     }
 }
