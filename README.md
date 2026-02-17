@@ -70,10 +70,30 @@ const doc = parse_with_options("# Hello", {
 });
 
 const tree = doc.tree;
-const tags = doc.tags;
+const tags = doc.tags; // unsorted string[]
 const frontmatter = doc.frontmatter;
 const html = doc.to_html(); // debug/testing
+
+// Two-phase parse
+// phase 1: parse frontmatter only
+const deferred = parse_with_options(content, {
+  parse_mode: "frontmatter_only",
+});
+const phase1Ast = deferred.tree; // Document + FrontMatter
+if (deferred.frontmatter?.draft) {
+  // skip
+} else {
+  // phase 2: continue parsing body/inlines
+  deferred.continue_parse();
+  const phase2Ast = deferred.tree; // Document + FrontMatter + ...
+}
 ```
+
+`parse_mode` supports:
+- `"full"` (default): one-shot full parse
+- `"frontmatter_only"`: run phase 1 only, then call `continue_parse()` to enter phase 2
+
+`tags` is returned as an unsorted array. Do not rely on ordering.
 
 ### WASM API (Node.js)
 

@@ -8,8 +8,14 @@ export interface Location{
     line: number,
     column: number
 }
+// tags getter returns an unsorted array; do not rely on order.
 export type Tags = string[];
+export type ParseMode = "full" | "frontmatter_only";
 export interface ParserOptions {
+    // Parse strategy:
+    // - "full" (default): parse full document in one call.
+    // - "frontmatter_only": phase 1 only (Document + FrontMatter), then call continue_parse() for phase 2.
+    readonly parse_mode?: ParseMode
     readonly github_flavored?: boolean
     readonly gfm_extended_autolink?: boolean
     readonly obsidian_flavored?: boolean

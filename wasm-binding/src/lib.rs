@@ -1,8 +1,10 @@
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use markdown::{
-    Document as MarkdownDocument, Location, MarkdownNode, Node, Parser, ParserOptions, Tree,
+    Document as MarkdownDocument, Location, MarkdownNode, Node, ParseError, Parser, ParserOptions,
+    ParserPhaseSnapshot, Tree,
 };
 
 mod types;
@@ -86,7 +88,11 @@ impl From<&Node> for AstNode {
 #[wasm_bindgen]
 pub struct Document {
     ast: Tree<Node>,
-    tags: Vec<String>,
+    // Internal set for fast merge in deferred phase.
+    // Exposed to JS as unsorted `string[]` via getter.
+    tags: FxHashSet<String>,
+    source: Option<String>,
+    snapshot: Option<ParserPhaseSnapshot>,
 }
 
 fn transform_ast(ast: &Tree<Node>, index: usize, children: &mut Vec<AstNode>) {
@@ -100,24 +106,55 @@ fn transform_ast(ast: &Tree<Node>, index: usize, children: &mut Vec<AstNode>) {
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ParseMode {
+    /// Parse full document in one call.
+    #[default]
+    Full,
+    /// Parse frontmatter only in phase 1, then call `continue_parse` for phase 2.
+    FrontmatterOnly,
+}
+
+/// JS-facing parser options (deserialized from `ParserOptions` TS type).
+///
+/// Notes:
+/// - Uses serde defaults so all fields are optional from JS.
+/// - `parse_mode` controls one-shot vs deferred two-phase parsing.
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 struct WasmParserOptions {
+    /// `"full"` or `"frontmatter_only"`.
+    parse_mode: ParseMode,
+    /// Enable GitHub Flavored Markdown mode.
     github_flavored: bool,
+    /// Enable extended GFM autolink.
     gfm_extended_autolink: bool,
+    /// Enable Obsidian Flavored Markdown mode.
     obsidian_flavored: bool,
+    /// Enable MDX component parsing behavior.
     mdx_component: bool,
+    /// Enable CJK autocorrect.
     cjk_autocorrect: bool,
+    /// Enable smart punctuation transforms.
     smart_punctuation: bool,
+    /// Normalize Chinese punctuation.
     normalize_chinese_punctuation: bool,
+    /// Enable CJK-friendly delimiter rules.
     cjk_friendly_delimiters: bool,
+    /// Optional input size guard (bytes).
     max_input_bytes: Option<usize>,
+    /// Optional node-count guard.
     max_nodes: Option<usize>,
+    /// Preconfigured CJK nouns.
     cjk_nouns: Vec<String>,
+    /// Read extra CJK nouns from frontmatter field.
     cjk_nouns_from_frontmatter: Option<String>,
 }
 
-fn build_parser_options(input: Option<WasmParserOptions>) -> ParserOptions {
+/// Converts wasm options payload into core parser options and parse mode.
+fn build_parser_options(input: Option<WasmParserOptions>) -> (ParserOptions, ParseMode) {
     let input = input.unwrap_or_default();
+    let parse_mode = input.parse_mode.clone();
     let mut options = ParserOptions::default();
     if input.github_flavored {
         options = options.enabled_gfm();
@@ -155,16 +192,50 @@ fn build_parser_options(input: Option<WasmParserOptions>) -> ParserOptions {
     if let Some(field) = input.cjk_nouns_from_frontmatter {
         options = options.with_cjk_nouns_from_frontmatter(field)
     }
-    options
+    (options, parse_mode)
 }
 
 impl From<MarkdownDocument> for Document {
     fn from(value: MarkdownDocument) -> Self {
         Self {
             ast: value.tree,
-            tags: value.tags.into_iter().collect(),
+            tags: value.tags,
+            source: None,
+            snapshot: None,
         }
     }
+}
+
+impl Document {
+    /// Build a deferred document after phase 1 parse (frontmatter only).
+    fn from_frontmatter_phase(
+        source: String,
+        document: MarkdownDocument,
+        snapshot: ParserPhaseSnapshot,
+    ) -> Self {
+        Self {
+            ast: document.tree,
+            tags: document.tags,
+            source: Some(source),
+            snapshot: Some(snapshot),
+        }
+    }
+}
+
+/// Maps Rust parse errors to JS error strings.
+fn parse_error_to_js(err: ParseError) -> JsValue {
+    let msg = match err {
+        ParseError::InputTooLarge { limit, actual } => {
+            format!("input exceeds max_input_bytes limit={limit}, actual={actual}")
+        }
+        ParseError::NodeLimitExceeded { limit, actual } => {
+            format!("node count exceeds max_nodes limit={limit}, actual={actual}")
+        }
+        ParseError::SnapshotInputLengthMismatch { expected, actual } => {
+            format!("snapshot source length mismatch expected={expected}, actual={actual}")
+        }
+    };
+    JsValue::from_str(&msg)
 }
 
 #[wasm_bindgen]
@@ -177,9 +248,12 @@ impl Document {
             .unwrap_or(JsValue::NULL)
             .unchecked_into::<TAstNode>()
     }
+    /// Returns document tags as an unsorted array.
+    /// Ordering is not guaranteed and should not be relied upon.
     #[wasm_bindgen(getter)]
     pub fn tags(&self) -> Tags {
-        serde_wasm_bindgen::to_value(&self.tags)
+        let tags = self.tags.iter().cloned().collect::<Vec<_>>();
+        serde_wasm_bindgen::to_value(&tags)
             .expect("Failed to serialize tags of document")
             .unchecked_into::<Tags>()
     }
@@ -206,6 +280,29 @@ impl Document {
         }
         JsValue::NULL.unchecked_into::<Frontmatter>()
     }
+
+    /// Completes phase 2 parse when `parse_mode = "frontmatter_only"`.
+    /// No-op if document is already fully parsed.
+    #[wasm_bindgen]
+    pub fn continue_parse(&mut self) -> Result<(), JsValue> {
+        let Some(snapshot) = self.snapshot.take() else {
+            return Ok(());
+        };
+        let Some(source) = self.source.as_deref() else {
+            return Err(JsValue::from_str("missing source for deferred parse"));
+        };
+        let deferred_document = MarkdownDocument {
+            tree: std::mem::take(&mut self.ast),
+            tags: std::mem::take(&mut self.tags),
+        };
+        let parser = Parser::from_phase_snapshot(source, snapshot, deferred_document)
+            .map_err(parse_error_to_js)?;
+        let document = parser.continue_parse_checked().map_err(parse_error_to_js)?;
+        self.ast = document.tree;
+        self.tags = document.tags;
+        self.source = None;
+        Ok(())
+    }
 }
 
 #[wasm_bindgen]
@@ -222,14 +319,28 @@ pub fn parse(text: String) -> Document {
     Document::from(document)
 }
 
+/// Parses markdown with user options.
+///
+/// `parse_mode` behavior:
+/// - `full` (default): parse full document immediately.
+/// - `frontmatter_only`: phase 1 only (Document + FrontMatter),
+///   then call `Document::continue_parse()` to run phase 2.
 #[wasm_bindgen]
 pub fn parse_with_options(text: String, options: TParserOptions) -> Document {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let raw = options.unchecked_into::<JsValue>();
     let parsed_options = serde_wasm_bindgen::from_value::<WasmParserOptions>(raw).ok();
-    let parser = Parser::new_with_options(&text, build_parser_options(parsed_options));
-    let document = parser.parse();
-    Document::from(document)
+    let (options, parse_mode) = build_parser_options(parsed_options);
+    let parser = Parser::new_with_options(&text, options);
+    match parse_mode {
+        ParseMode::Full => Document::from(parser.parse()),
+        ParseMode::FrontmatterOnly => {
+            let (document, snapshot) = parser
+                .parse_frontmatter_phase()
+                .expect("parse failed: input exceeds parser limits");
+            Document::from_frontmatter_phase(text, document, snapshot)
+        }
+    }
 }
 
 #[wasm_bindgen]

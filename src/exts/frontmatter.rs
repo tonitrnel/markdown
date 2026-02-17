@@ -107,6 +107,7 @@ pub fn parse(parser: &mut Parser) -> Option<YamlMap> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MarkdownNode;
     use crate::exts::yaml::YamlValue;
     use crate::parser::ParserOptions;
 
@@ -124,7 +125,12 @@ date: 2022-11-05
 Hello world        "#
                 .trim_start(),
         );
-        let frontmatter = parser.parse_frontmatter().unwrap();
+        parser.parse_frontmatter().unwrap();
+        let frontmatter = if let MarkdownNode::FrontMatter(frontmatter) = &parser.tree[1].body {
+            frontmatter
+        } else {
+            panic!("Failed to get frontmatter node")
+        };
         assert_eq!(frontmatter.get("external"), Some(&YamlValue::Bool(false)));
         assert_eq!(frontmatter.get("draft"), Some(&YamlValue::Bool(true)));
         assert_eq!(
@@ -145,14 +151,19 @@ Hello world        "#
     #[test]
     fn test_no_frontmatter() {
         let mut parser = Parser::new("# Hello\n\nWorld");
-        assert!(parser.parse_frontmatter().is_none());
+        parser.parse_frontmatter().unwrap();
+        let ast = parser.into_ast();
+        assert!(ast.is_empty())
     }
 
     #[test]
     fn test_incomplete_frontmatter() {
         // 没有结束标记
         let mut parser = Parser::new("---\ntitle: Test\n\nContent");
-        assert!(parser.parse_frontmatter().is_none());
+        parser.parse_frontmatter().unwrap();
+        let ast = parser.into_ast();
+        println!("AST:\n{ast:?}");
+        assert!(ast.is_empty());
     }
 
     #[test]
@@ -165,7 +176,12 @@ note: -- not a marker
 ---
 Content"#,
         );
-        let frontmatter = parser.parse_frontmatter().unwrap();
+        parser.parse_frontmatter().unwrap();
+        let frontmatter = if let MarkdownNode::FrontMatter(frontmatter) = &parser.tree[1].body {
+            frontmatter
+        } else {
+            panic!("Failed to get frontmatter node")
+        };
         assert_eq!(
             frontmatter.get("title"),
             Some(&YamlValue::String("Test".to_string()))
@@ -184,7 +200,12 @@ title: Test
 +++
 Content"#,
         );
-        let frontmatter = parser.parse_frontmatter().unwrap();
+        parser.parse_frontmatter().unwrap();
+        let frontmatter = if let MarkdownNode::FrontMatter(frontmatter) = &parser.tree[1].body {
+            frontmatter
+        } else {
+            panic!("Failed to get frontmatter node")
+        };
         assert_eq!(
             frontmatter.get("title"),
             Some(&YamlValue::String("Test".to_string()))

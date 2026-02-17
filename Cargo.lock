@@ -348,6 +348,7 @@ version = "1.0.0"
 dependencies = [
  "console_error_panic_hook",
  "markdown",
+ "rustc-hash",
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",

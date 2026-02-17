@@ -1,7 +1,7 @@
 use crate::ast::MarkdownNode;
 use crate::blocks::{BlockMatching, BlockProcessing};
 use crate::exts;
-use crate::scanner::Scanner;
+use crate::scanner::{Scanner, ScannerSnapshot};
 use crate::span::Span;
 use crate::tree::Tree;
 use crate::{blocks, inlines};
@@ -80,10 +80,17 @@ impl Debug for Document {
     }
 }
 
+pub struct ParserPhaseSnapshot {
+    pub(crate) scanner_snapshot: ScannerSnapshot,
+    pub(crate) options: ParserOptions,
+    pub(crate) text_len: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
     InputTooLarge { limit: usize, actual: usize },
     NodeLimitExceeded { limit: usize, actual: usize },
+    SnapshotInputLengthMismatch { expected: usize, actual: usize },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -250,6 +257,13 @@ impl<'input> Parser<'input> {
     pub fn parse_checked(mut self) -> Result<Document, ParseError> {
         self.ensure_limits()?;
         self.parse_frontmatter()?;
+        self.continue_parse_checked()
+    }
+    pub fn continue_parse(self) -> Document {
+        self.continue_parse_checked()
+            .expect("parse failed: input exceeds parser limits")
+    }
+    pub fn continue_parse_checked(mut self) -> Result<Document, ParseError> {
         self.tree.push();
         self.parse_blocks();
         if let Some(err) = self.parse_error.take() {
@@ -262,10 +276,48 @@ impl<'input> Parser<'input> {
             return Err(err);
         }
         self.tree.pop();
-        Ok(Document {
-            tree: self.tree,
-            tags: self.tags,
-        })
+        Ok(self.into_ast())
+    }
+    pub fn parse_frontmatter_phase(
+        mut self,
+    ) -> Result<(Document, ParserPhaseSnapshot), ParseError> {
+        self.ensure_limits()?;
+        self.parse_frontmatter()?;
+        Ok((
+            Document {
+                tree: self.tree,
+                tags: self.tags,
+            },
+            ParserPhaseSnapshot {
+                scanner_snapshot: self.scanner.snapshot(),
+                options: self.options,
+                text_len: self.scanner.source().len(),
+            },
+        ))
+    }
+    pub fn from_phase_snapshot(
+        text: &'input str,
+        snapshot: ParserPhaseSnapshot,
+        document: Document,
+    ) -> Result<Self, ParseError> {
+        let actual = text.len();
+        if actual != snapshot.text_len {
+            return Err(ParseError::SnapshotInputLengthMismatch {
+                expected: snapshot.text_len,
+                actual,
+            });
+        }
+        let mut parser = Self::new_with_options(text, snapshot.options);
+        parser.scanner.resume(&snapshot.scanner_snapshot);
+        parser.tree = document.tree;
+        parser.tags = document.tags;
+        parser.curr_proc_node = parser.doc;
+        parser.prev_proc_node = parser.doc;
+        parser.last_matched_node = parser.doc;
+        parser.last_location = Location::default();
+        parser.all_closed = true;
+        parser.parse_error = None;
+        Ok(parser)
     }
     fn merge_cjk_nouns_from_frontmatter(&mut self, frontmatter: &crate::exts::yaml::YamlMap) {
         use crate::exts::yaml::YamlValue;
@@ -385,6 +437,12 @@ impl<'input> Parser<'input> {
             return;
         }
         self.parse_footnote_list();
+    }
+    pub fn into_ast(self) -> Document {
+        Document {
+            tree: self.tree,
+            tags: self.tags,
+        }
     }
     fn ensure_limits(&self) -> Result<(), ParseError> {
         if let Some(limit) = self.options.max_input_bytes {
@@ -1021,6 +1079,46 @@ mod tests {
         assert!(matches!(
             result,
             Err(ParseError::NodeLimitExceeded { limit: 1, .. })
+        ));
+    }
+
+    #[test]
+    fn snapshot_resume_matches_full_parse() {
+        let text = r#"---
+title: Hello
+---
+# Hi
+
+Text
+"#;
+        let options = ParserOptions::default().enabled_gfm();
+        let full = Parser::new_with_options(text, options.clone())
+            .parse_checked()
+            .expect("full parse should succeed");
+        let (deferred_doc, snapshot) = Parser::new_with_options(text, options)
+            .parse_frontmatter_phase()
+            .expect("frontmatter phase should succeed");
+        let resumed = Parser::from_phase_snapshot(text, snapshot, deferred_doc)
+            .expect("snapshot restore should succeed")
+            .continue_parse_checked()
+            .expect("continue parse should succeed");
+        assert_eq!(full.to_html(), resumed.to_html());
+        assert_eq!(full.len(), resumed.len());
+    }
+
+    #[test]
+    fn snapshot_resume_rejects_input_length_mismatch() {
+        let text = "---\na: 1\n---\ncontent";
+        let (deferred_doc, snapshot) = Parser::new(text)
+            .parse_frontmatter_phase()
+            .expect("frontmatter phase should succeed");
+        let result = Parser::from_phase_snapshot("x", snapshot, deferred_doc);
+        assert!(matches!(
+            result,
+            Err(ParseError::SnapshotInputLengthMismatch {
+                expected: _,
+                actual: 1
+            })
         ));
     }
 }
