@@ -231,3 +231,8 @@ pub fn parse_with_options(text: String, options: TParserOptions) -> Document {
     let document = parser.parse();
     Document::from(document)
 }
+
+#[wasm_bindgen]
+pub fn version() -> String {
+    Parser::version().to_string()
+}

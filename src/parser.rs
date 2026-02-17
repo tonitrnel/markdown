@@ -207,6 +207,9 @@ pub struct Parser<'input> {
 }
 
 impl<'input> Parser<'input> {
+    pub fn version() -> &'static str {
+        env!("CARGO_PKG_VERSION")
+    }
     pub fn new(text: &'input str) -> Self {
         Self::new_with_options(text, ParserOptions::default())
     }
