@@ -68,7 +68,7 @@ jobs:
           WASM_VERSION: ${{ steps.wasm_version.outputs.version }}
         run: |
           set -euo pipefail
-          npm pkg set "dependencies.binding=npm:@ptdgrp/markdown-wasm@${WASM_VERSION}"
+          npm pkg set "dependencies[@ptdgrp/markdown-wasm]=${WASM_VERSION}"
           cat package.json
 
       - name: Install and build playground

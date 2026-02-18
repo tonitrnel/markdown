@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onMount } from 'solid-js';
+import { createEffect, createSignal } from 'solid-js';
 import { codeToHtml } from 'shiki';
 
 interface HtmlViewerProps {
@@ -13,10 +13,10 @@ function HtmlViewer(props: HtmlViewerProps) {
     let formatted = '';
     let indent = 0;
     const tab = '  ';
-    
+
     // Split by tags while preserving them
-    const parts = html.split(/(<[^>]+>)/g).filter(part => part.trim());
-    
+    const parts = html.split(/(<[^>]+>)/g).filter((part) => part.trim());
+
     parts.forEach((part) => {
       if (part.startsWith('</')) {
         // Closing tag - decrease indent before adding
@@ -24,11 +24,14 @@ function HtmlViewer(props: HtmlViewerProps) {
         formatted += tab.repeat(indent) + part + '\n';
       } else if (part.startsWith('<')) {
         // Opening tag or self-closing tag
-        const isSelfClosing = part.endsWith('/>') || 
-          /^<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)/.test(part);
-        
+        const isSelfClosing =
+          part.endsWith('/>') ||
+          /^<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)/.test(
+            part,
+          );
+
         formatted += tab.repeat(indent) + part + '\n';
-        
+
         if (!isSelfClosing) {
           indent++;
         }
@@ -46,11 +49,11 @@ function HtmlViewer(props: HtmlViewerProps) {
 
   createEffect(async () => {
     const formatted = formatHtml(props.html);
-    
+
     try {
       const highlighted = await codeToHtml(formatted, {
         lang: 'html',
-        theme: 'github-dark'
+        theme: 'github-dark',
       });
       setHighlightedHtml(highlighted);
     } catch (error) {
@@ -59,9 +62,7 @@ function HtmlViewer(props: HtmlViewerProps) {
     }
   });
 
-  return (
-    <div class="html-viewer-container" innerHTML={highlightedHtml()} />
-  );
+  return <div class="html-viewer-container" innerHTML={highlightedHtml()} />;
 }
 
 export default HtmlViewer;
