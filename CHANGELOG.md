@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.2] - 2026-02-18
+
+### Added
+- Added a wasm regression test to assert two-phase parsing (`frontmatter_only` + `continue_parse`) matches one-phase full parsing for node count, tags, and HTML output.
+
+### Changed
+- Refactored wasm `Document` internals to hold a single `inner: MarkdownDocument` state instead of split `ast` and `tags` fields.
+- Bumped crate versions to `1.0.2` for both `markdown` and `markdown-binding`.
+
+### Fixed
+- Removed split-state handoff in deferred parsing resume path by moving/restoring the whole document state during `continue_parse`.
+- Marked wasm `frontmatter` getter as nullable at the TypeScript boundary (`FrontmatterOrNull`) to match runtime behavior when frontmatter is absent.
+
 ## [1.0.1] - 2026-02-17
 
 ### Added
