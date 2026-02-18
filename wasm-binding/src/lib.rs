@@ -1,4 +1,3 @@
-use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
@@ -91,12 +90,7 @@ impl From<&Node> for AstNode {
 /// 解析后的 Markdown 文档，包含 AST 和元数据
 #[wasm_bindgen]
 pub struct Document {
-    ast: Tree<Node>,
-    // Internal set for fast merge in deferred phase.
-    // Exposed to JS as unsorted `string[]` via getter.
-    // 内部使用的集合，用于延迟阶段的快速合并
-    // 通过 getter 暴露给 JS 为无序的 `string[]`
-    tags: FxHashSet<String>,
+    inner: MarkdownDocument,
     source: Option<String>,
     snapshot: Option<ParserPhaseSnapshot>,
 }
@@ -208,8 +202,7 @@ fn build_parser_options(input: Option<WasmParserOptions>) -> (ParserOptions, Par
 impl From<MarkdownDocument> for Document {
     fn from(value: MarkdownDocument) -> Self {
         Self {
-            ast: value.tree,
-            tags: value.tags,
+            inner: value,
             source: None,
             snapshot: None,
         }
@@ -224,8 +217,7 @@ impl Document {
         snapshot: ParserPhaseSnapshot,
     ) -> Self {
         Self {
-            ast: document.tree,
-            tags: document.tags,
+            inner: document,
             source: Some(source),
             snapshot: Some(snapshot),
         }
@@ -254,8 +246,8 @@ impl Document {
     /// 获取完整的 AST 树
     #[wasm_bindgen(getter)]
     pub fn tree(&self) -> TAstNode {
-        let mut tree = AstNode::from(&self.ast[0]);
-        transform_ast(&self.ast, 0, &mut tree.children);
+        let mut tree = AstNode::from(&self.inner.tree[0]);
+        transform_ast(&self.inner.tree, 0, &mut tree.children);
         serde_wasm_bindgen::to_value(&tree)
             .unwrap_or(JsValue::NULL)
             .unchecked_into::<TAstNode>()
@@ -266,7 +258,7 @@ impl Document {
     /// 不保证顺序，不应依赖顺序
     #[wasm_bindgen(getter)]
     pub fn tags(&self) -> Tags {
-        let tags = self.tags.iter().cloned().collect::<Vec<_>>();
+        let tags = self.inner.tags.iter().cloned().collect::<Vec<_>>();
         serde_wasm_bindgen::to_value(&tags)
             .expect("Failed to serialize tags of document")
             .unchecked_into::<Tags>()
@@ -276,14 +268,14 @@ impl Document {
     /// 获取 AST 中的节点总数
     #[wasm_bindgen(getter)]
     pub fn total_nodes(&self) -> u32 {
-        self.ast.len() as u32
+        self.inner.tree.len() as u32
     }
 
     /// Convert the document to HTML
     /// 将文档转换为 HTML
     #[wasm_bindgen]
     pub fn to_html(&self) -> String {
-        self.ast.to_html()
+        self.inner.tree.to_html()
     }
 
     /// Get the frontmatter metadata if present
@@ -291,8 +283,8 @@ impl Document {
     #[wasm_bindgen(getter)]
     pub fn frontmatter(&self) -> Frontmatter {
         // Find frontmatter node in AST
-        if let Some(first_child_idx) = self.ast.get_first_child(0) {
-            if let MarkdownNode::FrontMatter(fm) = &self.ast[first_child_idx].body {
+        if let Some(first_child_idx) = self.inner.tree.get_first_child(0) {
+            if let MarkdownNode::FrontMatter(fm) = &self.inner.tree[first_child_idx].body {
                 return serde_wasm_bindgen::to_value(fm.as_ref())
                     .unwrap_or(JsValue::NULL)
                     .unchecked_into::<Frontmatter>();
@@ -313,15 +305,10 @@ impl Document {
         let Some(source) = self.source.as_deref() else {
             return Err(JsValue::from_str("missing source for deferred parse"));
         };
-        let deferred_document = MarkdownDocument {
-            tree: std::mem::take(&mut self.ast),
-            tags: std::mem::take(&mut self.tags),
-        };
-        let parser = Parser::from_phase_snapshot(source, snapshot, deferred_document)
+        let parser = Parser::from_phase_snapshot(source, snapshot, std::mem::take(&mut self.inner))
             .map_err(parse_error_to_js)?;
         let document = parser.continue_parse_checked().map_err(parse_error_to_js)?;
-        self.ast = document.tree;
-        self.tags = document.tags;
+        self.inner = document;
         self.source = None;
         Ok(())
     }
@@ -390,4 +377,68 @@ pub fn parse_with_options(text: String, options: TParserOptions) -> Document {
 #[wasm_bindgen]
 pub fn version() -> String {
     Parser::version().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test two-phase parsing produces same result as one-phase parsing
+    /// 测试两阶段解析与一阶段解析产生相同结果
+    #[test]
+    fn test_two_phase_equals_one_phase() {
+        let markdown = r#"---
+title: Test
+tags: [rust, markdown]
+---
+
+# Hello World
+
+This is **bold** and *italic*.
+
+#tag1 #tag2
+"#;
+
+        // One-phase: parse_with_options with default (full mode)
+        let options_full = WasmParserOptions {
+            parse_mode: ParseMode::Full,
+            ..Default::default()
+        };
+        let (opts_full, _) = build_parser_options(Some(options_full));
+        let parser_full = Parser::new_with_options(markdown, opts_full);
+        let doc_full = Document::from(parser_full.parse());
+        println!("full ast:\n{:?}", doc_full.inner.tree);
+        assert_eq!(doc_full.inner.tree.len(), 14);
+
+        // Two-phase: parse_with_options with frontmatter_only -> continue_parse
+        let options_two = WasmParserOptions {
+            parse_mode: ParseMode::FrontmatterOnly,
+            ..Default::default()
+        };
+        let (opts_two, _) = build_parser_options(Some(options_two));
+        let parser_two = Parser::new_with_options(markdown, opts_two);
+        let (doc_phase1, snapshot) = parser_two
+            .parse_frontmatter_phase()
+            .expect("phase 1 failed");
+
+        println!("ast_phase1:\n{:?}", doc_phase1);
+
+        let mut doc_phase2 =
+            Document::from_frontmatter_phase(markdown.to_string(), doc_phase1, snapshot);
+        doc_phase2.continue_parse().expect("phase 2 failed");
+
+        println!("ast_phase2:\n{:?}", doc_phase2.inner.tree);
+        // Compare: same nodes, same tags, same HTML
+        assert_eq!(
+            doc_full.inner.tree.len(),
+            doc_phase2.inner.tree.len(),
+            "node count mismatch"
+        );
+        assert_eq!(doc_full.inner.tags, doc_phase2.inner.tags, "tags mismatch");
+        assert_eq!(
+            doc_full.inner.tree.to_html(),
+            doc_phase2.inner.tree.to_html(),
+            "HTML mismatch"
+        );
+    }
 }

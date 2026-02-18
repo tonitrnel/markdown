@@ -64,6 +64,7 @@ impl Node {
     }
 }
 
+#[derive(Default)]
 pub struct Document {
     pub tree: Tree<Node>,
     pub tags: FxHashSet<String>,
