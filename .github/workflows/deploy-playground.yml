@@ -1,0 +1,86 @@
+name: Deploy Playground
+
+on:
+  workflow_run:
+    workflows: ["Publish WASM Packages"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-playground-gh-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "25.6.1"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: playground/package-lock.json
+
+      - name: Ensure npm version
+        run: |
+          npm i -g npm@11.9.0
+          node --version
+          npm --version
+
+      - name: Read wasm version from Cargo.toml
+        id: wasm_version
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' wasm-binding/Cargo.toml | head -n 1)"
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Detected wasm version: $VERSION"
+
+      - name: Wait for npm package availability
+        env:
+          WASM_VERSION: ${{ steps.wasm_version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if npm view "@ptdgrp/markdown-wasm@${WASM_VERSION}" version >/dev/null 2>&1; then
+              echo "Found @ptdgrp/markdown-wasm@${WASM_VERSION}"
+              exit 0
+            fi
+            echo "Waiting for npm propagation (${i}/30)..."
+            sleep 10
+          done
+          echo "::error::@ptdgrp/markdown-wasm@${WASM_VERSION} not visible on npm yet."
+          exit 1
+
+      - name: Set playground binding dependency to npm alias
+        working-directory: playground
+        env:
+          WASM_VERSION: ${{ steps.wasm_version.outputs.version }}
+        run: |
+          set -euo pipefail
+          npm pkg set "dependencies.binding=npm:@ptdgrp/markdown-wasm@${WASM_VERSION}"
+          cat package.json
+
+      - name: Install and build playground
+        working-directory: playground
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: playground/dist
+          commit_message: "deploy(playground): wasm ${{ steps.wasm_version.outputs.version }} @ ${{ github.event.workflow_run.head_sha }}"

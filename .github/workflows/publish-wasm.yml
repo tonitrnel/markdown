@@ -67,14 +67,31 @@ jobs:
 
       - name: Ensure npm version for trusted publishing
         run: |
-          npm i -g npm@11.5.1
+          npm i -g npm@11.9.0
           node --version
           npm --version
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Ensure Rust 1.93.1 and wasm target
+        run: |
+          set -euo pipefail
+          RUST_VERSION="1.93.1"
+          if ! command -v rustup >/dev/null 2>&1; then
+            echo "::error::rustup is missing on runner."
+            exit 1
+          fi
+          if ! rustup toolchain list | grep -q "^${RUST_VERSION}"; then
+            rustup toolchain install "${RUST_VERSION}" --profile minimal --no-self-update
+          fi
+          rustup default "${RUST_VERSION}"
+          rustup target add wasm32-unknown-unknown --toolchain "${RUST_VERSION}"
+          rustc --version
+          cargo --version
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          targets: wasm32-unknown-unknown
+          shared-key: publish-wasm-${{ matrix.package_dir }}
+          cache-on-failure: true
 
       - name: Cache wasm-pack and cargo install artifacts
         uses: actions/cache@v4
@@ -84,7 +101,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: ${{ runner.os }}-wasm-pack-v0.14.0
+          key: ${{ runner.os }}-wasm-pack-v0.14.0-${{ matrix.package_dir }}
           restore-keys: |
             ${{ runner.os }}-wasm-pack-
 
