@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.3] - 2026-02-18
+
+### Changed
+- Expanded inline emoji-name parsing to accept multilingual Unicode letters/digits (non-symbol text), while keeping `_`, `+`, and `-` compatibility.
+- Optimized emoji-name scanning to a linear UTF-8 pass to avoid repeated decoding checks on each step.
+- Bumped crate/package versions to `1.0.3` for `markdown` and `markdown-binding`.
+
 ## [1.0.2] - 2026-02-18
 
 ### Added

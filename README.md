@@ -5,6 +5,7 @@
 ## Motivation
 
 `Painted Markdown` 是一个 **AST-first** 的 Markdown 解析器：
+
 - 输入 Markdown，输出结构化 AST（包含节点类型、层级与位置信息）。
 - 目标兼容 CommonMark / GFM / OFM，供上层渲染系统（Web/Node）消费。
 - 内置 HTML 渲染主要用于测试与调试，不是主接口。
@@ -66,7 +67,7 @@ import { parse_with_options } from "@ptdgrp/markdown-wasm";
 const doc = parse_with_options("# Hello", {
   github_flavored: true,
   obsidian_flavored: true,
-  cjk_autocorrect: true
+  cjk_autocorrect: true,
 });
 
 const tree = doc.tree;
@@ -90,6 +91,7 @@ if (deferred.frontmatter?.draft) {
 ```
 
 `parse_mode` supports:
+
 - `"full"` (default): one-shot full parse
 - `"frontmatter_only"`: run phase 1 only, then call `continue_parse()` to enter phase 2
 
@@ -188,6 +190,41 @@ Input(&str)
    V
 Output(AST Tree)
 ```
+
+## Release Flow
+
+以下流程用于发布 `1.0.x`（Rust crate + wasm binding）：
+
+1. 确保工作区干净，避免把无关改动带入发版。
+2. 修改版本号：
+   - `Cargo.toml` 的 `markdown` 版本
+   - `wasm-binding/Cargo.toml` 的 `markdown-binding` 版本
+3. 更新 `CHANGELOG.md`，新增对应版本与日期条目。
+4. 同步锁文件并做基础检查：
+
+```bash
+cargo check
+cargo test
+```
+
+5. 提交发版改动：
+
+```bash
+git add Cargo.toml wasm-binding/Cargo.toml CHANGELOG.md Cargo.lock
+git commit -m "release: v1.0.x"
+```
+
+6. 打 tag 并推送：
+
+```bash
+git tag v1.0.x
+git push origin master
+git push origin v1.0.x
+```
+
+7. `publish-wasm.yml` 会在 `v*` tag push 后自动触发，发布：
+   - `@ptdgrp/markdown-wasm`
+   - `@ptdgrp/markdown-wasm-node`
 
 ## License
 

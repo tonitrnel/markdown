@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "binding": "file:../wasm-binding/pkg",
+    "binding": "file:../wasm-binding/pkg-web",
     "react-json-view-lite": "^2.5.0",
     "shiki": "^1.23.1",
     "solid-js": "^1.9.5"
