@@ -14,6 +14,8 @@ mod types;
 extern "C" {
     #[wasm_bindgen(typescript_type = "Frontmatter")]
     pub type Frontmatter;
+    #[wasm_bindgen(typescript_type = "FrontmatterOrNull")]
+    pub type FrontmatterOrNull;
     // #[wasm_bindgen(typescript_type = "Location")]
     // pub type Location;
     #[wasm_bindgen(typescript_type = "Tags")]
@@ -281,16 +283,16 @@ impl Document {
     /// Get the frontmatter metadata if present
     /// 获取 frontmatter 元数据（如果存在）
     #[wasm_bindgen(getter)]
-    pub fn frontmatter(&self) -> Frontmatter {
+    pub fn frontmatter(&self) -> FrontmatterOrNull {
         // Find frontmatter node in AST
         if let Some(first_child_idx) = self.inner.tree.get_first_child(0) {
             if let MarkdownNode::FrontMatter(fm) = &self.inner.tree[first_child_idx].body {
                 return serde_wasm_bindgen::to_value(fm.as_ref())
                     .unwrap_or(JsValue::NULL)
-                    .unchecked_into::<Frontmatter>();
+                    .unchecked_into::<FrontmatterOrNull>();
             }
         }
-        JsValue::NULL.unchecked_into::<Frontmatter>()
+        JsValue::NULL.unchecked_into::<FrontmatterOrNull>()
     }
 
     /// Completes phase 2 parse when `parse_mode = "frontmatter_only"`.

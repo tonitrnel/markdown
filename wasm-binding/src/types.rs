@@ -12,7 +12,13 @@ export type YamlValue = string | number | boolean | null | readonly YamlValue[];
  * Frontmatter 对象，键值对映射
  * Frontmatter object, key-value mapping
  */
-export type Frontmatter = Record<string, YamlValue>;
+export type Frontmatter = Map<string, YamlValue>;
+
+/**
+ * Frontmatter value returned from document getter, nullable when absent.
+ * 文档 getter 返回的 Frontmatter 值；不存在时为 null
+ */
+export type FrontmatterOrNull = Frontmatter | null;
 
 /**
  * 文档中的位置信息
