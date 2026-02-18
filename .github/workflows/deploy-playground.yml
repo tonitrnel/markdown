@@ -21,7 +21,7 @@ jobs:
       - name: Checkout release commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -74,7 +74,7 @@ jobs:
       - name: Install and build playground
         working-directory: playground
         run: |
-          npm ci
+          npm install
           npm run build
 
       - name: Deploy to gh-pages

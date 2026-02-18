@@ -152,7 +152,6 @@ function App() {
     inputTextarea.setSelectionRange(startPos, endPos);
 
     // Calculate scroll position to center the selection
-    const textareaRect = inputTextarea.getBoundingClientRect();
     const lineHeight =
       parseInt(getComputedStyle(inputTextarea).lineHeight) || 20;
     const targetScrollTop = (start.line - 1) * lineHeight;
