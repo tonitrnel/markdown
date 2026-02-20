@@ -13,7 +13,7 @@ fn parse(text: &str) {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let text = fs::read_to_string("./benches/_data.md").unwrap();
+    let text = fs::read_to_string("./bench/benches/_data.md").unwrap();
     c.bench_function("markdown", |b| b.iter(|| parse(&text)));
 }
 

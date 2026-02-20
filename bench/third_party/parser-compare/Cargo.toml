@@ -1,0 +1,17 @@
+[package]
+name = "parser-compare-bench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+markdown_local = { package = "markdown", path = "../../.." }
+markdown_rs = { package = "markdown", version = "1.0.0" }
+pulldown-cmark = "0.13"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "parser_compare"
+harness = false

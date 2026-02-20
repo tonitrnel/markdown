@@ -22,18 +22,22 @@ proptest = "1.10.0"
 [[bench]]
 name = "benchmark"
 harness = false
+path = "bench/benches/benchmark.rs"
 
 [[bench]]
 name = "phase_bench"
 harness = false
+path = "bench/benches/phase_bench.rs"
 
 [[bench]]
 name = "utils_bench"
 harness = false
+path = "bench/benches/utils_bench.rs"
 
 [[bench]]
 name = "timing_test"
 harness = false
+path = "bench/benches/timing_test.rs"
 
 [features]
 default = ["html", "frontmatter"]
@@ -41,7 +45,12 @@ html = []
 frontmatter = []
 
 [workspace]
-members = ["examples/*", "wasm-binding"]
+members = [
+    "examples/*",
+    "wasm-binding",
+    "bench/third_party/parser-compare",
+    "bench/third_party/polyglot",
+]
 
 [profile.release]
 strip = true

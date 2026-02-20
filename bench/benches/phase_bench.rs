@@ -3,7 +3,7 @@ use markdown::{Parser, ParserOptions};
 use std::fs;
 
 fn bench_parse_only(c: &mut Criterion) {
-    let text = fs::read_to_string("./benches/_data.md").unwrap();
+    let text = fs::read_to_string("./bench/benches/_data.md").unwrap();
     c.bench_function("parse_ast_only", |b| {
         b.iter(|| {
             let parser = Parser::new_with_options(&text, ParserOptions::default().enabled_ofm());
@@ -13,7 +13,7 @@ fn bench_parse_only(c: &mut Criterion) {
 }
 
 fn bench_html_only(c: &mut Criterion) {
-    let text = fs::read_to_string("./benches/_data.md").unwrap();
+    let text = fs::read_to_string("./bench/benches/_data.md").unwrap();
     // 预先解析一次
     let parser = Parser::new_with_options(&text, ParserOptions::default().enabled_ofm());
     let ast = parser.parse();
@@ -25,7 +25,7 @@ fn bench_html_only(c: &mut Criterion) {
 }
 
 fn bench_full(c: &mut Criterion) {
-    let text = fs::read_to_string("./benches/_data.md").unwrap();
+    let text = fs::read_to_string("./bench/benches/_data.md").unwrap();
     c.bench_function("full_parse_and_html", |b| {
         b.iter(|| {
             let parser = Parser::new_with_options(&text, ParserOptions::default().enabled_ofm());
