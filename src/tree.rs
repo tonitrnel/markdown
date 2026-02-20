@@ -347,9 +347,14 @@ impl<T: Debug> Tree<T> {
             idx
         );
         self.unlink(idx);
-        let node = std::mem::take(&mut self.nodes[idx]);
+        let item = self.nodes[idx].item.take();
+        self.nodes[idx].parent = 0;
+        self.nodes[idx].first_child = None;
+        self.nodes[idx].last_child = None;
+        self.nodes[idx].next = None;
+        self.nodes[idx].prev = None;
         self.frees.remove(&idx);
-        match node.item {
+        match item {
             Some(item) => item,
             None => panic!("Node #{idx} has been released or has an invalid node index"),
         }

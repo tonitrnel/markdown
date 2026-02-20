@@ -4,6 +4,7 @@ use crate::inlines::bracket::BracketChain;
 use crate::span::{MergedSpan, Span};
 use crate::utils;
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
 /// 处理反斜杠转义：将 `\X` 替换为 `X`（X 为 ASCII 标点字符）
 pub(super) fn backslash_unescape(s: &str) -> String {
@@ -412,10 +413,9 @@ pub(super) fn process_wikilink(
     let content_start = line.cursor();
     let bytes = line.source_slice();
     // 找到 ']]' 的位置
-    let mut _parts = Vec::<(usize, usize)>::new(); // 收集各部分的字节范围
     let mut state = WikilinkState::Initial;
     let mut pr = (0usize, 0usize); // path range (relative to content_start)
-    let mut rrs: (bool, Vec<(usize, usize)>) = (false, Vec::new());
+    let mut rrs: (bool, SmallVec<[(usize, usize); 4]>) = (false, SmallVec::new());
     let mut tr = (0usize, 0usize); // text range
 
     let mut i = content_start;
@@ -582,7 +582,7 @@ fn extract_range_str(source: &[u8], base: usize, range: (usize, usize)) -> Strin
 fn extract_ref_from_bytes(
     source: &[u8],
     base: usize,
-    range: &(bool, Vec<(usize, usize)>),
+    range: &(bool, SmallVec<[(usize, usize); 4]>),
 ) -> Option<Reference> {
     if !range.1.is_empty() {
         Some(if range.0 {
@@ -649,8 +649,8 @@ pub(super) fn process_embed(
     let mut state = EmbedState::Initial;
     let mut pr = (0usize, 0usize);
     let mut sr = (0usize, 0usize);
-    let mut rrs: (bool, Vec<(usize, usize)>) = (false, Vec::new());
-    let mut ars: Vec<(usize, usize)> = Vec::new();
+    let mut rrs: (bool, SmallVec<[(usize, usize); 4]>) = (false, SmallVec::new());
+    let mut ars: SmallVec<[(usize, usize); 4]> = SmallVec::new();
 
     let mut i = content_start;
     let mut rel = 0;
@@ -780,25 +780,21 @@ pub(super) fn process_embed(
     let path = extract_range_str(bytes, content_start, pr);
     let reference = extract_ref_from_bytes(bytes, content_start, &rrs);
     let attrs = if !ars.is_empty() {
-        Some(
-            ars.iter()
-                .map(|r| {
-                    if r.0 == r.1 {
-                        String::new()
-                    } else {
-                        extract_range_str(bytes, content_start, *r)
-                    }
-                })
-                .filter_map(|it| {
-                    let mut parts = it.split('=');
-                    match (parts.next(), parts.next()) {
-                        (Some(a), Some(b)) => Some((a.to_string(), b.to_string())),
-                        (Some(a), None) => Some((a.to_string(), String::new())),
-                        _ => None,
-                    }
-                })
-                .collect::<Vec<_>>(),
-        )
+        let mut out = Vec::with_capacity(ars.len());
+        for r in &ars {
+            let it = if r.0 == r.1 {
+                String::new()
+            } else {
+                extract_range_str(bytes, content_start, *r)
+            };
+            let mut parts = it.split('=');
+            match (parts.next(), parts.next()) {
+                (Some(a), Some(b)) => out.push((a.to_string(), b.to_string())),
+                (Some(a), None) => out.push((a.to_string(), String::new())),
+                _ => {}
+            }
+        }
+        Some(out)
     } else {
         None
     };
