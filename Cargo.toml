@@ -12,6 +12,7 @@ license = "MIT"
 serde = { version = "1.0.200", features = ["derive"] }
 rustc-hash = "2"
 memchr = "2"
+smallvec = "1.13"
 
 [dev-dependencies]
 regex = "1.10.4"
@@ -53,8 +54,8 @@ members = [
 ]
 
 [profile.release]
-strip = true
-lto = true
+#strip = true
+#lto = true
 opt-level = 3
 panic = "abort"
-#debug = "line-tables-only"
+debug = "line-tables-only"

@@ -82,8 +82,8 @@ mod tests {
 
     #[test]
     fn rejects_symbol_inside_emoji_name() {
-        let ast = Parser::new_with_options(":dog!: ok", ParserOptions::default().enabled_gfm())
-            .parse();
+        let ast =
+            Parser::new_with_options(":dog!: ok", ParserOptions::default().enabled_gfm()).parse();
         assert_eq!(ast.to_html(), "<p>:dog!: ok</p>");
     }
 

@@ -1,5 +1,6 @@
 use crate::ast::{MarkdownNode, code};
 use crate::inlines::ProcessCtx;
+use memchr::memchr;
 
 pub(super) fn process(
     ProcessCtx {
@@ -23,18 +24,25 @@ pub(super) fn process(
             }
             _ => {
                 marker_count = 0;
-                let char_len = if byte < 0x80 {
-                    1
-                } else if byte < 0xE0 {
-                    2
-                } else if byte < 0xF0 {
-                    3
-                } else {
-                    4
-                };
-                for _ in 0..char_len {
-                    line.next_byte();
+                // 快速路径：在当前 Span 内直接跳到下一个 backtick，避免逐字符推进
+                if let Some(span) = line.current_span() {
+                    let start = span.cursor();
+                    let end = span.end();
+                    if start < end {
+                        let source = span.source_slice();
+                        let skipped = if let Some(off) = memchr(b'`', &source[start..end]) {
+                            off
+                        } else {
+                            end - start
+                        };
+                        if skipped > 0 {
+                            line.skip(skipped);
+                            continue;
+                        }
+                    }
                 }
+                // 慢速路径：处理跨 Span 虚拟换行等边界字节
+                line.next_byte();
             }
         }
     }

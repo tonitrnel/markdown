@@ -1,7 +1,7 @@
 use crate::ast::{MarkdownNode, link};
 use crate::parser::Parser;
 
-pub(crate) fn process_footnote_list(parser: &mut Parser, node_refcounts: Vec<(usize, usize)>) {
+pub(crate) fn process_footnote_list(parser: &mut Parser, node_refcounts: &[(usize, usize)]) {
     let locations = {
         let mut start = 0;
         let mut end = 0;
@@ -15,7 +15,7 @@ pub(crate) fn process_footnote_list(parser: &mut Parser, node_refcounts: Vec<(us
     };
     let parent = parser.append_free_node(MarkdownNode::FootnoteList, locations.0);
     parser.tree[parent].end = locations.1;
-    for (idx, ref_count) in node_refcounts {
+    for &(idx, ref_count) in node_refcounts {
         let node = &mut parser.tree[idx];
         let ref_label = if let MarkdownNode::Footnote(footnote) = &mut node.body {
             footnote.ref_count = ref_count;

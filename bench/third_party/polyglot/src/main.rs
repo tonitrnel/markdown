@@ -31,16 +31,24 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(800);
 
-    bench(&format!("rust_markdown_parse_only__{label}"), iterations, || {
-        let parser = Parser::new_with_options(&text, ParserOptions::default().enabled_ofm());
-        let ast = parser.parse();
-        black_box(ast);
-    });
+    bench(
+        &format!("rust_markdown_parse_only__{label}"),
+        iterations,
+        || {
+            let parser = Parser::new_with_options(&text, ParserOptions::default().enabled_ofm());
+            let ast = parser.parse();
+            black_box(ast);
+        },
+    );
 
-    bench(&format!("rust_markdown_parse_and_html__{label}"), iterations, || {
-        let parser = Parser::new_with_options(&text, ParserOptions::default().enabled_ofm());
-        let ast = parser.parse();
-        let html = ast.to_html();
-        black_box(html);
-    });
+    bench(
+        &format!("rust_markdown_parse_and_html__{label}"),
+        iterations,
+        || {
+            let parser = Parser::new_with_options(&text, ParserOptions::default().enabled_ofm());
+            let ast = parser.parse();
+            let html = ast.to_html();
+            black_box(html);
+        },
+    );
 }

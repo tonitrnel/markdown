@@ -24,12 +24,16 @@ fn bench_parse_only(c: &mut Criterion) {
             })
         });
 
-        group.bench_with_input(BenchmarkId::new("pulldown_cmark", case), &text, |b, input| {
-            b.iter(|| {
-                let parser = PdParser::new_ext(input, Options::all());
-                for _ in parser {}
-            })
-        });
+        group.bench_with_input(
+            BenchmarkId::new("pulldown_cmark", case),
+            &text,
+            |b, input| {
+                b.iter(|| {
+                    let parser = PdParser::new_ext(input, Options::all());
+                    for _ in parser {}
+                })
+            },
+        );
 
         group.bench_with_input(BenchmarkId::new("markdown_rs", case), &text, |b, input| {
             b.iter(|| {
@@ -52,13 +56,17 @@ fn bench_parse_and_html(c: &mut Criterion) {
             })
         });
 
-        group.bench_with_input(BenchmarkId::new("pulldown_cmark", case), &text, |b, input| {
-            b.iter(|| {
-                let parser = PdParser::new_ext(input, Options::all());
-                let mut output = String::new();
-                html::push_html(&mut output, parser);
-            })
-        });
+        group.bench_with_input(
+            BenchmarkId::new("pulldown_cmark", case),
+            &text,
+            |b, input| {
+                b.iter(|| {
+                    let parser = PdParser::new_ext(input, Options::all());
+                    let mut output = String::new();
+                    html::push_html(&mut output, parser);
+                })
+            },
+        );
 
         group.bench_with_input(BenchmarkId::new("markdown_rs", case), &text, |b, input| {
             b.iter(|| {

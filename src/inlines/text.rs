@@ -1,34 +1,39 @@
 use crate::ast::MarkdownNode;
 use crate::parser::Parser;
+use smallvec::SmallVec;
 
 /// 合并相邻的 Text Node，同时对合并后的文本执行 CJK 校正（如果启用）。
 /// 单次遍历完成合并 + 校正，不需要额外的 text_ids 收集步骤。
 fn merge_and_correct_text(
     parser: &mut Parser,
     idx: usize,
+    merge_adjacent: bool,
     cjk_rich: bool,
     normalize_chi_punct: bool,
 ) {
-    let mut stack = vec![(idx, None::<usize>)];
+    let mut stack: SmallVec<[(usize, Option<usize>); 16]> = SmallVec::new();
+    stack.push((idx, None));
     while let Some((idx, into_idx)) = stack.pop() {
         if matches!(parser.tree[idx].body, MarkdownNode::Text(..)) {
             let next = parser.tree.get_next(idx);
             let merged_id = if let Some(into_idx) = into_idx {
-                let node = parser.tree.remove(idx);
-                match (&mut parser.tree[into_idx].body, &node.body) {
-                    (MarkdownNode::Text(into_str), MarkdownNode::Text(str)) => {
-                        into_str.push_str(str);
+                if merge_adjacent {
+                    let node = parser.tree.remove(idx);
+                    match (&mut parser.tree[into_idx].body, &node.body) {
+                        (MarkdownNode::Text(into_str), MarkdownNode::Text(str)) => {
+                            into_str.push_str(str);
+                        }
+                        _ => panic!("unexpected error"),
                     }
-                    _ => panic!("unexpected error"),
+                    parser.tree[into_idx].end = node.end;
                 }
-                parser.tree[into_idx].end = node.end;
                 into_idx
             } else {
                 idx
             };
             // 如果下一个兄弟也是 Text，继续合并
             if let Some(next_idx) = next {
-                if matches!(parser.tree[next_idx].body, MarkdownNode::Text(..)) {
+                if merge_adjacent && matches!(parser.tree[next_idx].body, MarkdownNode::Text(..)) {
                     stack.push((next_idx, Some(merged_id)));
                     continue;
                 }
@@ -62,21 +67,21 @@ fn merge_and_correct_text(
 
 /// 最终处理文本节点（合并相邻文本、CJK 校正），在所有 Span 处理完毕后调用
 pub(super) fn process_final(id: usize, parser: &mut Parser) {
+    let is_para_or_heading = matches!(
+        &parser.tree[id].body,
+        MarkdownNode::Paragraph | MarkdownNode::Heading(..)
+    );
     let next = match parser.tree.get_first_child(id) {
         Some(idx) => idx,
         _ => return,
     };
-    let cjk_rich = parser.options.cjk_autocorrect
-        && matches!(
-            &parser.tree[id].body,
-            MarkdownNode::Paragraph | MarkdownNode::Heading(..)
-        );
-    let normalize_chi_punct = parser.options.normalize_chinese_punctuation
-        && matches!(
-            &parser.tree[id].body,
-            MarkdownNode::Paragraph | MarkdownNode::Heading(..)
-        );
-    merge_and_correct_text(parser, next, cjk_rich, normalize_chi_punct);
+    let merge_adjacent = parser.take_text_postprocess_flag(id);
+    let cjk_rich = parser.options.cjk_autocorrect && is_para_or_heading;
+    let normalize_chi_punct = parser.options.normalize_chinese_punctuation && is_para_or_heading;
+    if !merge_adjacent && !cjk_rich && !normalize_chi_punct {
+        return;
+    }
+    merge_and_correct_text(parser, next, merge_adjacent, cjk_rich, normalize_chi_punct);
 }
 
 fn correct_cjk_text<I, S>(text: &mut String, normalize_chi_punct: bool, cjk_nouns: I)

@@ -41,16 +41,13 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec
     }
 
     // 规范化每个 Span：将 start 调整为 cursor 位置（去掉已跳过的缩进）
-    let normalized: Vec<Span<'input>> = spans
-        .into_iter()
-        .map(|mut s| {
-            s.normalize_start();
-            s
-        })
-        .collect();
+    let mut spans = spans;
+    for span in &mut spans {
+        span.normalize_start();
+    }
 
     // 使用 MergedSpan 提供统一的字节视图，避免把中间行前缀（如 blockquote 的 `>`）混入 inline 内容
-    let mut line = MergedSpan::new(normalized);
+    let mut line = MergedSpan::new(spans);
 
     let mut ctx = ProcessCtx {
         id,
@@ -60,16 +57,23 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec
         delimiters: None,
     };
 
-    // 选择查找表
-    let special_table: &[bool; 256] = if ctx.parser.options.obsidian_flavored {
-        &SPECIAL_BYTES_OFM
+    // 选择查找表：按启用特性精确构建，避免无意义 special 命中导致 flush/snapshot
+    let mut special_table = if ctx.parser.options.obsidian_flavored {
+        SPECIAL_BYTES_OFM_BASE
     } else if ctx.parser.options.github_flavored && ctx.parser.options.gfm_extended_autolink {
-        &SPECIAL_BYTES_GFM_EXTENDED_AUTOLINK
+        SPECIAL_BYTES_GFM_EXTENDED_AUTOLINK_BASE
     } else if ctx.parser.options.github_flavored {
-        &SPECIAL_BYTES_GFM
+        SPECIAL_BYTES_GFM_BASE
     } else {
-        &SPECIAL_BYTES_DEFAULT
+        SPECIAL_BYTES_DEFAULT_BASE
     };
+    if ctx.parser.options.smart_punctuation {
+        special_table[b'\'' as usize] = true;
+        special_table[b'"' as usize] = true;
+    }
+    if ctx.parser.options.mdx_component {
+        special_table[b'{' as usize] = true;
+    }
 
     // 累积连续文本的字节偏移范围，避免逐字符 to_string() 堆分配
     let mut text_acc: Option<TextAccumulator> = None;
@@ -77,7 +81,12 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec
     while let Some(byte) = ctx.line.peek() {
         if !special_table[byte as usize] {
             // 非特殊字节：直接批量累积，不需要 snapshot/resume
-            accumulate_run(&mut text_acc, &mut ctx, special_table);
+            accumulate_run(&mut text_acc, &mut ctx, &special_table);
+            continue;
+        }
+        // 对明显不可能命中的特殊字节做快速剪枝，避免无效 flush + snapshot/resume
+        if !should_try_special(&ctx, byte) {
+            accumulate_run(&mut text_acc, &mut ctx, &special_table);
             continue;
         }
 
@@ -192,7 +201,7 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec
         if !handled {
             // 未匹配，恢复快照并累积当前字符
             ctx.line.resume(&snapshot);
-            accumulate_run(&mut text_acc, &mut ctx, special_table);
+            accumulate_run(&mut text_acc, &mut ctx, &special_table);
         }
     }
     // 处理结束，刷新剩余累积文本
@@ -201,6 +210,33 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec
     // 最终处理 delimiter 和 text
     delimiter::process_final(id, ctx.parser, &mut ctx.brackets, &mut ctx.delimiters);
     text::process_final(id, ctx.parser);
+}
+
+#[inline]
+fn should_try_special(ctx: &ProcessCtx, byte: u8) -> bool {
+    match byte {
+        // Image / embed 必须以 ![ 开始
+        b'!' => ctx
+            .line
+            .current_span()
+            .is_some_and(|span| span.get(1) == Some(b'[')),
+        // Comment(OFM) 必须是 %%
+        b'%' if ctx.parser.options.obsidian_flavored => ctx
+            .line
+            .current_span()
+            .is_some_and(|span| span.get(1) == Some(b'%')),
+        // Entity 必须是 &[A-Za-z#]...
+        b'&' => ctx
+            .line
+            .current_span()
+            .is_some_and(|span| matches!(span.get(1), Some(b'#' | b'A'..=b'Z' | b'a'..=b'z'))),
+        // < 后面如果直接是空白，不可能是 autolink/raw html 的合法起点
+        b'<' => ctx
+            .line
+            .current_span()
+            .is_some_and(|span| !matches!(span.get(1), None | Some(b' ' | b'\t' | b'\n' | b'\r'))),
+        _ => true,
+    }
 }
 
 /// 文本累积器：零分配快速路径 + 回退 String 路径
@@ -225,7 +261,7 @@ enum TextAccumulator<'a> {
 }
 
 /// 256 字节查找表：OFM 模式下的特殊字节（编译期常量）
-static SPECIAL_BYTES_OFM: [bool; 256] = {
+static SPECIAL_BYTES_OFM_BASE: [bool; 256] = {
     let mut table = [false; 256];
     // 基础特殊字符
     table[b'\n' as usize] = true;
@@ -239,7 +275,6 @@ static SPECIAL_BYTES_OFM: [bool; 256] = {
     table[b']' as usize] = true;
     table[b'&' as usize] = true;
     table[b'<' as usize] = true;
-    table[b'{' as usize] = true;
     // GFM + OFM
     table[b'~' as usize] = true;
     // OFM
@@ -250,14 +285,11 @@ static SPECIAL_BYTES_OFM: [bool; 256] = {
     // non-default: math, emoji
     table[0x24] = true; // $
     table[b':' as usize] = true;
-    // Smart punctuation quotes
-    table[b'\'' as usize] = true;
-    table[b'"' as usize] = true;
     table
 };
 
 /// 256 字节查找表：默认模式下的特殊字节
-static SPECIAL_BYTES_DEFAULT: [bool; 256] = {
+static SPECIAL_BYTES_DEFAULT_BASE: [bool; 256] = {
     let mut table = [false; 256];
     table[b'\n' as usize] = true;
     table[b'\r' as usize] = true;
@@ -270,15 +302,11 @@ static SPECIAL_BYTES_DEFAULT: [bool; 256] = {
     table[b']' as usize] = true;
     table[b'&' as usize] = true;
     table[b'<' as usize] = true;
-    table[b'{' as usize] = true;
-    // Smart punctuation quotes
-    table[b'\'' as usize] = true;
-    table[b'"' as usize] = true;
     table
 };
 
 /// 256 字节查找表：GFM 模式下的特殊字节
-static SPECIAL_BYTES_GFM: [bool; 256] = {
+static SPECIAL_BYTES_GFM_BASE: [bool; 256] = {
     let mut table = [false; 256];
     table[b'\n' as usize] = true;
     table[b'\r' as usize] = true;
@@ -291,20 +319,16 @@ static SPECIAL_BYTES_GFM: [bool; 256] = {
     table[b']' as usize] = true;
     table[b'&' as usize] = true;
     table[b'<' as usize] = true;
-    table[b'{' as usize] = true;
     table[b'~' as usize] = true;
     // non-default
     table[0x24] = true;
     table[b':' as usize] = true;
-    // Smart punctuation quotes
-    table[b'\'' as usize] = true;
-    table[b'"' as usize] = true;
     table
 };
 
 /// 256 字节查找表：GFM + extended autolink
-static SPECIAL_BYTES_GFM_EXTENDED_AUTOLINK: [bool; 256] = {
-    let mut table = SPECIAL_BYTES_GFM;
+static SPECIAL_BYTES_GFM_EXTENDED_AUTOLINK_BASE: [bool; 256] = {
+    let mut table = SPECIAL_BYTES_GFM_BASE;
     table[b'h' as usize] = true;
     table[b'H' as usize] = true;
     table[b'w' as usize] = true;
@@ -493,17 +517,33 @@ fn flush_text_acc(text_acc: &mut Option<TextAccumulator>, ctx: &mut ProcessCtx) 
             ..
         } if !slice.is_empty() => {
             let end_loc = ctx.line.start_location();
-            ctx.parser
-                .append_text_to(ctx.id, slice, (start_location, end_loc));
+            if ctx.parser.options.smart_punctuation && may_need_smart_transform(slice) {
+                ctx.parser
+                    .append_text_to(ctx.id, slice, (start_location, end_loc));
+            } else {
+                ctx.parser
+                    .append_text_to_no_smart(ctx.id, slice, (start_location, end_loc));
+            }
         }
         TextAccumulator::Owned {
             text,
             start_location,
         } if !text.is_empty() => {
             let end_loc = ctx.line.start_location();
-            ctx.parser
-                .append_text_to_owned(ctx.id, text, (start_location, end_loc));
+            if ctx.parser.options.smart_punctuation && may_need_smart_transform(&text) {
+                ctx.parser
+                    .append_text_to_owned(ctx.id, text, (start_location, end_loc));
+            } else {
+                ctx.parser
+                    .append_text_to_owned_no_smart(ctx.id, text, (start_location, end_loc));
+            }
         }
         _ => {}
     }
+}
+
+#[inline]
+fn may_need_smart_transform(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.contains(&b'-') || bytes.contains(&b'.')
 }

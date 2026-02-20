@@ -7,6 +7,7 @@ use crate::tree::Tree;
 use crate::{blocks, inlines};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Serialize;
+use smallvec::SmallVec;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
@@ -211,6 +212,14 @@ pub struct Parser<'input> {
     pub(crate) all_closed: bool,
     pub(crate) tags: FxHashSet<String>,
     pub(crate) html_stacks: VecDeque<(String, usize)>, // tag name, node idx
+    /// 需要在 inline 结束后执行文本后处理（相邻 Text 合并/校正）的父节点集合
+    pub(crate) text_postprocess_parents: FxHashSet<usize>,
+    /// 复用的临时容器：reference link 候选节点
+    ref_link_candidates_scratch: Vec<usize>,
+    /// 复用的临时容器：footnote refs 的 drain 缓冲
+    footnote_values_scratch: Vec<(String, (usize, usize))>,
+    /// 复用的临时容器：resolved footnote 列表
+    footnote_resolved_scratch: Vec<(usize, usize)>,
     pub(crate) parse_error: Option<ParseError>,
 }
 
@@ -248,6 +257,10 @@ impl<'input> Parser<'input> {
             last_matched_node: doc,
             last_location: Location::default(),
             html_stacks: VecDeque::new(),
+            text_postprocess_parents: FxHashSet::default(),
+            ref_link_candidates_scratch: Vec::with_capacity(64),
+            footnote_values_scratch: Vec::with_capacity(32),
+            footnote_resolved_scratch: Vec::with_capacity(32),
             parse_error: None,
         }
     }
@@ -474,9 +487,11 @@ impl<'input> Parser<'input> {
         true
     }
     fn parse_reference_link(&mut self) {
-        let mut nodes = Vec::new();
+        let mut nodes = std::mem::take(&mut self.ref_link_candidates_scratch);
+        nodes.clear();
+        nodes.reserve(self.inlines.len().max(16).saturating_sub(nodes.capacity()));
         self.collect_ref_link_candidates(self.doc, &mut nodes);
-        for idx in nodes {
+        for idx in nodes.iter().copied() {
             match self.tree[idx].body {
                 MarkdownNode::Paragraph => inlines::process_link_reference(self, idx),
                 MarkdownNode::Heading(crate::ast::heading::Heading::SETEXT(_)) => {
@@ -485,6 +500,8 @@ impl<'input> Parser<'input> {
                 _ => {}
             }
         }
+        nodes.clear();
+        self.ref_link_candidates_scratch = nodes;
     }
     /// 只收集 Paragraph 和 SETEXT Heading 节点（用于 reference link 解析）
     fn collect_ref_link_candidates(&self, parent: usize, out: &mut Vec<usize>) {
@@ -506,18 +523,27 @@ impl<'input> Parser<'input> {
         if self.footnote_refs.is_empty() {
             return;
         }
-        let mut values = self.footnote_refs.drain().collect::<Vec<_>>();
+
+        let mut values = std::mem::take(&mut self.footnote_values_scratch);
+        values.clear();
+        values.extend(self.footnote_refs.drain());
         values.sort_by(|a, b| a.1.0.cmp(&b.1.0));
-        let values = values
-            .into_iter()
-            .filter_map(|(label, (_, ref_count))| {
-                self.footnotes
-                    .remove(&label)
-                    .map(|node_id| (node_id, ref_count))
-            })
-            .collect::<Vec<_>>();
-        inlines::process_footnote_list(self, values);
+
+        let mut resolved = std::mem::take(&mut self.footnote_resolved_scratch);
+        resolved.clear();
+        resolved.reserve(values.len().saturating_sub(resolved.capacity()));
+        for (label, (_, ref_count)) in values.drain(..) {
+            if let Some(node_id) = self.footnotes.remove(&label) {
+                resolved.push((node_id, ref_count));
+            }
+        }
+        inlines::process_footnote_list(self, &resolved);
         self.footnotes.clear();
+
+        values.clear();
+        resolved.clear();
+        self.footnote_values_scratch = values;
+        self.footnote_resolved_scratch = resolved;
     }
     fn incorporate_line(&mut self, mut line: Span<'input>) {
         let mut container = self.doc;
@@ -729,8 +755,16 @@ impl<'input> Parser<'input> {
         node: MarkdownNode,
         location: (Location, Location),
     ) -> usize {
+        let needs_text_postprocess = matches!(&node, MarkdownNode::Text(_))
+            && self
+                .tree
+                .get_last_child(id)
+                .is_some_and(|last| matches!(self.tree[last].body, MarkdownNode::Text(..)));
         let idx = self.tree.append_child(id, Node::new(node, location.0));
         self.tree[idx].end = location.1;
+        if needs_text_postprocess {
+            self.text_postprocess_parents.insert(id);
+        }
         // println!("创建节点 #{idx} {:?}", self.tree[idx].body)
         idx
     }
@@ -795,16 +829,37 @@ impl<'input> Parser<'input> {
             self.tree[idx].end = location.1;
             return idx;
         }
+        match transformed {
+            Some(std::borrow::Cow::Owned(s)) => {
+                self.append_text_to_owned_no_smart(parent, s, location)
+            }
+            Some(std::borrow::Cow::Borrowed(s)) => {
+                self.append_text_to_no_smart(parent, s, location)
+            }
+            None => self.append_text_to_no_smart(parent, content, location),
+        }
+    }
 
-        let text = match transformed {
-            Some(std::borrow::Cow::Owned(s)) => s,
-            Some(std::borrow::Cow::Borrowed(s)) => s.to_string(),
-            None => content.to_owned(),
-        };
+    #[inline]
+    pub(crate) fn append_text_to_no_smart(
+        &mut self,
+        parent: usize,
+        content: &str,
+        location: (Location, Location),
+    ) -> usize {
+        let has_left_text = self
+            .tree
+            .get_last_child(parent)
+            .is_some_and(|id| matches!(self.tree[id].body, MarkdownNode::Text(..)));
+
+        let text = content.to_owned();
         let idx = self
             .tree
             .append_child(parent, Node::new(MarkdownNode::Text(text), location.0));
         self.tree[idx].end = location.1;
+        if has_left_text {
+            self.text_postprocess_parents.insert(parent);
+        }
         idx
     }
     /// 与 append_text_to 相同，但直接接受 String 避免重复分配
@@ -834,12 +889,38 @@ impl<'input> Parser<'input> {
             self.tree[idx].end = location.1;
             idx
         } else {
-            let idx = self
-                .tree
-                .append_child(parent, Node::new(MarkdownNode::Text(content), location.0));
-            self.tree[idx].end = location.1;
-            idx
+            self.append_text_to_owned_no_smart(parent, content, location)
         }
+    }
+    #[inline]
+    pub(crate) fn append_text_to_owned_no_smart(
+        &mut self,
+        parent: usize,
+        content: String,
+        location: (Location, Location),
+    ) -> usize {
+        if let Some((idx, MarkdownNode::Text(text))) = self
+            .tree
+            .get_last_child(parent)
+            .filter(|id| self.tree[*id].processing)
+            .map(|id| (id, &mut self.tree[id].body))
+        {
+            text.push_str(&content);
+            self.tree[idx].end = location.1;
+            return idx;
+        }
+        let has_left_text = self
+            .tree
+            .get_last_child(parent)
+            .is_some_and(|id| matches!(self.tree[id].body, MarkdownNode::Text(..)));
+        let idx = self
+            .tree
+            .append_child(parent, Node::new(MarkdownNode::Text(content), location.0));
+        self.tree[idx].end = location.1;
+        if has_left_text {
+            self.text_postprocess_parents.insert(parent);
+        }
+        idx
     }
     #[inline]
     pub(crate) fn append_text_char_to(
@@ -858,13 +939,24 @@ impl<'input> Parser<'input> {
             self.tree[idx].end = location.1;
             return idx;
         }
+        let has_left_text = self
+            .tree
+            .get_last_child(parent)
+            .is_some_and(|id| matches!(self.tree[id].body, MarkdownNode::Text(..)));
         let mut text = String::new();
         text.push(ch);
         let idx = self
             .tree
             .append_child(parent, Node::new(MarkdownNode::Text(text), location.0));
         self.tree[idx].end = location.1;
+        if has_left_text {
+            self.text_postprocess_parents.insert(parent);
+        }
         idx
+    }
+    #[inline]
+    pub(crate) fn take_text_postprocess_flag(&mut self, parent: usize) -> bool {
+        self.text_postprocess_parents.remove(&parent)
     }
     pub(crate) fn mark_as_processed(&mut self, idx: usize) {
         self.tree[idx].processing = false;
@@ -976,7 +1068,7 @@ impl<'input> Parser<'input> {
         }
         self.remove_whitespace_text_children(parent);
 
-        let mut stack: Vec<(String, usize)> = Vec::new();
+        let mut stack: SmallVec<[(String, usize); 8]> = SmallVec::new();
         let mut current = self.tree.get_first_child(parent);
         while let Some(idx) = current {
             let next = self.tree.get_next(idx);
