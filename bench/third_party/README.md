@@ -75,12 +75,12 @@ Dataset: `default_data`
 
 | Benchmark | local `markdown` (Rust) | `goldmark` (Go) | `cmark` (C) |
 | --- | ---: | ---: | ---: |
-| parse only | 1.935 ms | 1.976 ms | 2.923 ms |
-| parse + html | 2.484 ms | 2.831 ms | 2.393 ms |
+| parse only | 1.629 ms | 1.807 ms | 1.610 ms |
+| parse + html | 2.354 ms | 2.447 ms | 2.125 ms |
 
 Dataset: `markdown_it_corpus`
 
 | Benchmark | local `markdown` (Rust) | `goldmark` (Go) | `cmark` (C) |
 | --- | ---: | ---: | ---: |
-| parse only | 9.354 ms | 8.506 ms | 7.121 ms |
-| parse + html | 12.255 ms | 12.760 ms | 8.003 ms |
+| parse only | 7.769 ms | 7.887 ms | 5.863 ms |
+| parse + html | 10.020 ms | 11.280 ms | 7.053 ms |

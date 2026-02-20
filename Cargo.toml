@@ -54,8 +54,8 @@ members = [
 ]
 
 [profile.release]
-#strip = true
-#lto = true
+strip = true
+lto = true
 opt-level = 3
 panic = "abort"
-debug = "line-tables-only"
+#debug = "line-tables-only"

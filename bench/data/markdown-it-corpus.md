@@ -11318,6 +11318,78 @@ import html from "solid-js/html";
 - Updated binding syntax. Dynamic expressions are now bound with an inner parenthesis `{( )}`js
 - Removed Immutable State object. May attempt something similar in the future but at this time it wasn't worth the effort trying to attempt both. There are better approaches to Proxy Immutable data structures.
 
+在 macOS (Apple) 系统上安装 CMake，主要有三种最常用的方法。对于大多数开发者来说，**推荐使用 Homebrew**，因为它最简单且易于管理更新。
+
+---
+
+### 方法 1：使用 Homebrew 安装（推荐）
+
+如果你已经安装了 [Homebrew](https://brew.sh/)（macOS 的包管理器），这是最快的方法。
+
+1. 打开**终端 (Terminal)**。
+2. 输入以下命令并回车：
+```bash
+brew install cmake
+
+```
+
+
+3. 等待安装完成后，验证是否成功：
+```bash
+cmake --version
+
+```
+
+
+
+---
+
+### 方法 2：通过官网下载安装包 (GUI)
+
+如果你更喜欢传统的安装方式，或者不需要经常通过命令行更新，可以去官网下载。
+
+1. 访问 [CMake 官网下载页面](https://cmake.org/download/)。
+2. 在 **Binary distributions** 下找到 macOS 栏目，下载 `.dmg` 文件（例如 `cmake-3.x.x-macos-universal.dmg`）。
+3. 打开下载的 `.dmg` 文件，将 **CMake.app** 拖入 **Applications (应用程序)** 文件夹。
+4. **配置命令行工具（重要）：**
+安装好后，为了能在终端直接使用 `cmake` 命令，你需要运行 CMake 应用程序，然后在菜单栏选择：
+`Tools` -> `How to Install For Command Line Use`
+通常最简单的方法是在终端运行以下命令来创建软连接：
+```bash
+sudo "/Applications/CMake.app/Contents/bin/cmake-gui" --install
+
+```
+
+
+
+---
+
+### 方法 3：使用 MacPorts 安装
+
+如果你使用的是 MacPorts 而不是 Homebrew：
+
+1. 打开终端。
+2. 输入以下命令：
+```bash
+sudo port install cmake
+
+```
+
+
+
+---
+
+### 为什么需要安装 CMake？
+
+CMake 是一个开源、跨平台的编译配置工具，它并不直接编译代码，而是通过 `CMakeLists.txt` 文件生成对应平台的工程文件（如 macOS 上的 Xcode 项目或 Unix 的 Makefiles）。
+
+### 常见问题排查
+
+* **权限问题：** 如果在执行 `brew` 或 `sudo` 命令时提示权限不足，请确保你拥有管理员权限，并按提示输入系统密码（输入时不会显示字符）。
+* **路径未找到：** 如果安装后终端提示 `command not found: cmake`，请尝试重启终端，或者检查你的 `PATH` 环境变量。对于 Homebrew 用户，通常路径是自动配置好的。
+
+**你需要我帮你编写一个基础的 `CMakeLists.txt` 模板来测试安装是否成功吗？**
+
 <!-- SOURCE: /Users/ashen/Projects/markdown/bench/data/markdown-it/lorem1.txt -->
 
 Lorem ipsum dolor sit amet, __consectetur__ adipiscing elit. Cras imperdiet nec erat ac condimentum. Nulla vel rutrum ligula. Sed hendrerit interdum orci a posuere. Vivamus ut velit aliquet, mollis purus eget, iaculis nisl. Proin posuere malesuada ante. Proin auctor orci eros, ac molestie lorem dictum nec. Vestibulum sit amet erat est. Morbi luctus sed elit ac luctus. Proin blandit, enim vitae egestas posuere, neque elit ultricies dui, vel mattis nibh enim ac lorem. Maecenas molestie nisl sit amet velit dictum lobortis. Aliquam erat volutpat.
