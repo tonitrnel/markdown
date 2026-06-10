@@ -494,7 +494,7 @@ const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/angular-html-Lf
             i
         ];
     }
-    const yi = "/assets/markdown_binding_bg-BUSdgnPA.wasm", bi = async (t = {}, e)=>{
+    const yi = "/markdown/assets/markdown_binding_bg-BUSdgnPA.wasm", bi = async (t = {}, e)=>{
         let n;
         if (e.startsWith("data:")) {
             const r = e.replace(/^data:.*?base64,/, "");
@@ -1149,7 +1149,7 @@ ${t.stack}` : r;
         "click"
     ]);
     const Zo = "modulepreload", es = function(t) {
-        return "/" + t;
+        return "/markdown/" + t;
     }, Pn = {}, u = function(e, n, r) {
         let i = Promise.resolve();
         if (n && n.length > 0) {
