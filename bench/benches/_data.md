@@ -9700,3 +9700,1484 @@ closers:
 After we're done, we remove all delimiters above `stack_bottom` from the
 delimiter stack.
 
+# Research Report: Obsidian-Compatible Markdown Export
+
+## 1. Obsidian Markdown Spec — What "Obsidian-Compatible" Actually Means
+
+### 1.1 Core Format: YAML Frontmatter (Properties)
+
+Obsidian uses YAML frontmatter at the top of every `.md` file, called **Properties**. This is the single most important distinguishing feature.
+
+```yaml
+---
+title: "Article Title"
+tags:
+  - web-clip
+  - technology
+aliases:
+  - "Alternative Title"
+created: 2026-04-03T17:00:00
+modified: 2026-04-03T17:00:00
+source: "https://example.com/article"
+author: "John Doe"
+description: "Page excerpt or meta description"
+image: "https://example.com/og-image.jpg"
+language: en
+---
+```
+
+**Property types Obsidian supports natively:**
+| Type | YAML Format | Example |
+|------|------------|---------|
+| Text | `key: value` | `source: "https://..."` |
+| List | `key: [a, b]` or multi-line | `tags: [web, tech]` |
+| Number | `key: 42` | `word_count: 1234` |
+| Checkbox | `key: true` | `archived: false` |
+| Date | `key: 2026-04-03` | `published: 2026-01-15` |
+| Date & time | `key: 2026-04-03T17:00:00` | `created: 2026-04-03T17:00:00` |
+| Tags | `key: [#tag1, #tag2]` | `tags: [#web-clip, #tech]` |
+
+**Standard frontmatter fields for web clippings:**
+- `title` — Page title (string)
+- `tags` — Array of tags for categorization
+- `aliases` — Alternative titles for linking
+- `created` — When the clip was made (date+time)
+- `source` / `url` — Original URL (string)
+- `author` — Article author (string)
+- `description` — Excerpt/meta description (string)
+- `image` — Social share / OG image URL (string)
+- `published` — Original publication date (date)
+- `domain` — Source domain (string)
+
+### 1.2 Wikilinks: `[[Like This]]`
+
+Obsidian supports **wikilinks** as an alternative to standard markdown links:
+
+```markdown
+[[Note Title]]                    # Link to note
+[[Note Title|Display Text]]       # Link with alias
+[[Note Title#Heading]]            # Link to specific heading
+[[Note Title#^block-id]]          # Link to specific block
+![[image.png]]                    # Embed/transclude image
+![[document.pdf]]                 # Embed PDF (renders inline)
+```
+
+For a web scraper, wikilinks are useful for:
+- Cross-referencing clips from the same domain
+- Linking to author notes: `[[John Doe]]`
+- Tagging via links: `[[technology]]`
+
+### 1.3 Callouts (Admonitions)
+
+Obsidian supports a special blockquote syntax for callouts:
+
+```markdown
+> [!note]
+> This is a note callout.
+
+> [!warning]
+> This is a warning.
+
+> [!tip]
+> This is a tip.
+
+> [!info]
+> This is informational.
+
+> [!quote]
+> This is a quote callout.
+
+> [!important]
+> This is important.
+
+> [!caution]
+> This is a caution.
+
+> [!bug]
+> This is a bug report.
+
+> [!example]
+> This is an example.
+
+> [!question]
+> This is a question.
+
+> [!failure] / > [!fail]
+> This is a failure.
+
+> [!success]
+> This is a success.
+
+> [!abstract] / > [!summary] / > [!tldr]
+> This is an abstract.
+```
+
+**Foldable callouts:**
+```markdown
+> [!note]- This is a foldable callout
+> Content is hidden until expanded.
+```
+
+**For a web scraper:** WAF/CAPTCHA detection results, rate-limit warnings, or content quality notes could be expressed as callouts.
+
+### 1.4 Obsidian Flavored Markdown Extensions
+
+Beyond standard CommonMark + GFM, Obsidian supports:
+- **Wikilinks** (`[[...]]`)
+- **Callouts** (`> [!type]`)
+- **Embeds** (`![[...]]`)
+- **Tags** (`#tag-name`, `#nested/tag`)
+- **MathJax/LaTeX** (`$inline$`, `$$display$$`)
+- **Footnotes** (`[^1]`)
+- **Highlight** (`==highlighted text==`)
+- **Strikethrough** (`~~deleted~~`)
+- **Comments** (`%% hidden comment %%`)
+- **Code block with language** (```` ```rust ````)
+- **Tables** (GFM)
+- **Task lists** (`- [ ]`, `- [x]`)
+
+### 1.5 Attachment Handling
+
+- Images are typically stored in an **attachments folder** (configurable in Obsidian settings)
+- Convention: `_attachments/`, `assets/`, or `{{title}}/` per-note folders
+- Obsidian Web Clipper roadmap includes "Save images locally" (added in Obsidian 1.8.0)
+- Wikilink embed syntax: `![[filename.png]]`
+- Standard markdown also works: `![alt](path/to/image.png)`
+
+### 1.6 Folder Structure Conventions
+
+Common Obsidian vault structures for web clippings:
+
+```
+Vault/
+├── webclips/
+│   ├── 2026-04-03-article-title.md
+│   ├── 2026-04-03-another-article.md
+│   └── _attachments/
+│       ├── article-title-hero.png
+│       └── another-article-diagram.jpg
+├── sources/
+│   ├── example-com/
+│   │   └── article-title.md
+│   └── another-site/
+│       └── page.md
+└── _templates/
+    └── web-clip.md
+```
+
+Naming conventions:
+- `YYYY-MM-DD-title.md` — Date-prefixed for chronological sorting
+- `title-slugified.md` — Simple slugified titles
+- `domain/title.md` — Organized by source domain
+
+---
+
+## 2. Competitor Matrix
+
+### Browser Extensions
+
+| Feature | MarkDownload | Obsidian Web Clipper (Official) | SingleFile |
+|---------|-------------|--------------------------------|------------|
+| **Stars** | 3.7K+ | 3.4K+ | 10K+ |
+| **Output** | `.md` file download | `.md` file in vault | `.html` (single file) |
+| **Frontmatter** | ✅ Custom templates (front/back matter) | ✅ YAML Properties | ❌ N/A (HTML) |
+| **Wikilinks** | ❌ | ❌ | ❌ |
+| **Callouts** | ❌ | ❌ | ❌ |
+| **Image handling** | Download locally or keep URLs | Download locally (Obsidian 1.8+) | Embedded as base64 |
+| **Content extraction** | Readability.js + Turndown | Defuddle (custom) | Full page HTML |
+| **Templates** | ✅ Front/back matter with variables | ✅ Rich templates with variables | ❌ |
+| **Math/LaTeX** | ✅ MathJax → LaTeX | ✅ | ✅ (in HTML) |
+| **Tables** | ✅ GFM plugin | ✅ | ✅ (in HTML) |
+| **Obsidian direct** | ✅ Via Advanced URI + clipboard | ✅ Native integration | ❌ |
+| **Batch mode** | ✅ Download all tabs | ❌ | ✅ |
+| **Highlight mode** | ❌ | ✅ Highlight before clipping | ❌ |
+| **License** | Apache 2.0 | MIT | MPL 2.0 |
+
+### Read-it-Later Services
+
+| Feature | Readwise Reader | Omnivore |
+|---------|----------------|----------|
+| **Obsidian export** | ✅ Via official integration | ✅ Via community plugin (obsidian-omnivore) |
+| **Frontmatter** | ✅ Customizable | ✅ Customizable via template |
+| **Highlights** | ✅ With block references | ✅ With highlights section |
+| **Full content** | ✅ | ✅ Via `{{{content}}}` variable |
+| **Tags/Labels** | ✅ As Obsidian tags | ✅ As wikilinks in frontmatter |
+| **Sync** | ✅ Scheduled sync | ✅ API-based sync |
+| **Template vars** | Rich templating | Handlebars-style `{{{var}}}` |
+| **Status** | Paid ($7.99/mo, 50% students) | **Shut down** (acquired by ElevenLabs) |
+
+### API-Based Scrapers
+
+| Feature | Firecrawl | Jina Reader | Crawlee/Apify |
+|---------|-----------|-------------|---------------|
+| **Markdown output** | ✅ Primary format | ✅ Primary format | ❌ Raw HTML/JSON |
+| **Format options** | Markdown, HTML, JSON, Screenshot | Markdown, Text, HTML | JSON, CSV, HTML |
+| **Content extraction** | Yes (clean markdown) | Yes (LLM-powered) | No (raw scrape) |
+| **Frontmatter** | ❌ | ❌ | ❌ |
+| **Metadata** | ✅ URL, title, description | ✅ URL, title | ✅ Full page data |
+| **Image handling** | Keep URLs | Keep URLs | Downloadable |
+| **Pricing** | Paid (free tier) | Free tier + paid | Paid (Apify platform) |
+| **Use case** | LLM/RAG pipelines | LLM/RAG pipelines | General scraping |
+
+### Notion → Obsidian Exporters
+
+| Tool | Approach | Frontmatter | Wikilinks | Images |
+|------|----------|-------------|-----------|--------|
+| notion2obsidian | Notion API → MD | ✅ | ✅ (converts @mentions) | ✅ Downloads locally |
+| notion-to-obsidian | CLI tool | ✅ | ✅ | ✅ |
+| Obsidian Notion Importer | Built-in | ❌ (basic) | ❌ | ❌ (broken links) |
+
+### Key Insight: Defuddle
+
+**Defuddle** (by Kepano, Obsidian co-founder) is the content extraction engine behind the official Obsidian Web Clipper. It was recently open-sourced (March 2026).
+
+- **What it does:** Extracts main content from any URL and returns clean Markdown with YAML frontmatter
+- **API:** `curl defuddle.md/stephango.com` → Returns Markdown with frontmatter
+- **npm:** `defuddle` package (21.4K weekly downloads, v0.15.0)
+- **License:** MIT
+- **Relevance:** This is the gold standard for Obsidian-compatible markdown extraction. It handles tables, code blocks, footnotes, and math equations.
+
+---
+
+## 3. Feature Recommendations (Ranked by Priority)
+
+### P0 — Must Have (Launch)
+
+1. **YAML Frontmatter Generation**
+   - Fields: `title`, `source`/`url`, `created`, `author`, `description`, `tags`, `domain`
+   - Maps directly from existing `ScrapedContent` fields
+   - **Why:** This is the #1 thing that makes markdown "Obsidian-compatible"
+
+2. **One File Per URL**
+   - Each scraped page → one `.md` file
+   - Filename: slugified from title or URL path
+   - **Why:** Matches Obsidian's note-per-file model; all competitors do this
+
+3. **Clean Markdown Content**
+   - Convert HTML → Markdown (tables, code blocks, lists, links)
+   - Strip nav, ads, footers, scripts
+   - **Why:** Core value proposition; Readability.js + Turndown is the proven stack
+
+4. **Relative Link Resolution**
+   - Convert absolute internal links to relative paths
+   - Keep external links as standard markdown `[text](url)`
+   - **Why:** Broken links are the #1 complaint with web clippers
+
+### P1 — Should Have (First Iteration)
+
+5. **Image Download with Local Paths**
+   - Download images to `_attachments/` or `assets/` folder
+   - Update markdown image refs to local paths
+   - **Why:** Offline readability; Obsidian Web Clipper just added this in 1.8.0
+
+6. **Date-Prefixed Filenames**
+   - `YYYY-MM-DD-title-slug.md` format
+   - Configurable naming strategy
+   - **Why:** Chronological sorting in Obsidian file explorer
+
+7. **Tags from Content**
+   - Extract tags from page meta keywords
+   - Map to Obsidian `tags` property
+   - **Why:** Enables Obsidian's tag-based navigation
+
+8. **Domain-Based Folder Structure**
+   - `output/domain.com/page-title.md`
+   - **Why:** Organizes clips by source; matches common vault patterns
+
+### P2 — Nice to Have (Future)
+
+9. **Wikilink Generation**
+   - Convert internal links to `[[wikilink]]` format
+   - Cross-reference clips from same domain
+   - **Why:** Enables Obsidian's graph view and internal linking
+
+10. **Callout Integration**
+    - WAF detection → `> [!warning]` callout
+    - Content quality notes → `> [!info]` callout
+    - **Why:** Leverages Obsidian-specific features
+
+11. **Incremental Updates / Deduplication**
+    - Use existing `StateStore` to track processed URLs
+    - Skip or update existing files
+    - **Why:** Already have StateStore infrastructure; just needs file-level tracking
+
+12. **Math/LaTeX Preservation**
+    - Detect MathJax/KaTeX and preserve as `$...$` or `$$...$$`
+    - **Why:** Academic content scraping
+
+---
+
+## 4. Technical Design Suggestions
+
+### 4.1 Architecture
+
+Following the existing Clean Architecture pattern:
+
+```
+src/
+├── domain/
+│   ├── entities.rs          # Add OutputFormat::Markdown variant
+│   ├── exporter.rs          # Exporter trait (already exists)
+│   └── markdown.rs          # NEW: MarkdownDocument entity
+├── infrastructure/
+│   └── export/
+│       ├── markdown_exporter.rs   # NEW: MarkdownExporter impl
+│       ├── html_to_md.rs          # NEW: HTML → Markdown converter
+│       └── ...
+└── export_factory.rs        # Add Markdown case to create_exporter()
+```
+
+### 4.2 Proposed `OutputFormat` Enum (separate from `ExportFormat`)
+
+The existing `ExportFormat` is designed for RAG pipelines (JSONL, Vector). A new `OutputFormat` enum should handle file-per-URL output modes:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OutputFormat {
+    /// One JSONL file (RAG pipeline)
+    Jsonl,
+    /// One markdown file per URL (Obsidian-compatible)
+    Markdown,
+}
+```
+
+### 4.3 MarkdownExporter Design
+
+```rust
+pub struct MarkdownExporter {
+    config: MarkdownExporterConfig,
+}
+
+pub struct MarkdownExporterConfig {
+    pub output_dir: PathBuf,
+    pub attachments_dir: String,        // e.g., "_attachments"
+    pub filename_strategy: FilenameStrategy,
+    pub download_images: bool,
+    pub use_wikilinks: bool,
+}
+
+pub enum FilenameStrategy {
+    SlugifiedTitle,          // "article-title.md"
+    DatePrefixed,            // "2026-04-03-article-title.md"
+    DomainPath,              // "domain.com/path/to/page.md"
+}
+```
+
+### 4.4 HTML → Markdown Conversion
+
+**Recommended stack:**
+- **Content extraction:** `readability` crate (Rust port of Mozilla Readability) OR `defuddle` (if a Rust port becomes available)
+- **HTML → Markdown:** `html2md` or `mdka` crate, OR integrate `turndown` via WASM
+- **Alternative:** Use the existing scraper HTML parsing + manual markdown generation
+
+**Given the Rust ecosystem, the most practical approach:**
+1. Use `readability` crate for content extraction
+2. Use `html2md` crate for HTML → Markdown conversion
+3. Post-process: fix links, handle images, add frontmatter
+
+### 4.5 Proposed Markdown Output Structure
+
+```markdown
+---
+title: "Article Title"
+source: "https://example.com/article"
+created: 2026-04-03T17:00:00+00:00
+author: "John Doe"
+description: "Page excerpt or meta description"
+tags:
+  - web-clip
+  - technology
+domain: "example.com"
+---
+
+# Article Title
+
+Main content converted to clean markdown...
+
+## Section Heading
+
+More content with proper formatting.
+
+![Image description](_attachments/article-title-hero.png)
+
+> [!warning] WAF Detected
+> This page had Cloudflare protection. Content may be incomplete.
+
+---
+*Clipped from [example.com](https://example.com/article) on 2026-04-03*
+```
+
+### 4.6 Image Handling Strategy
+
+```
+output/
+├── domain.com/
+│   ├── article-title.md
+│   └── _attachments/
+│       ├── hero-image.png
+│       └── diagram.jpg
+```
+
+- Download images asynchronously with bounded concurrency
+- Generate deterministic filenames from URL hash or title slug
+- Update all `![alt](url)` references to local paths
+- Fall back to keeping remote URLs if download fails
+
+### 4.7 Integration with Existing Code
+
+The existing `ScrapedContent` struct already has all needed fields:
+- `title`, `content`, `url`, `excerpt`, `author`, `date`, `assets`
+
+The `MarkdownExporter` would:
+1. Take `ScrapedContent` as input
+2. Generate YAML frontmatter from metadata
+3. Convert `content` (HTML) → Markdown
+4. Download images → `_attachments/`
+5. Write `.md` file to output directory
+6. Update `StateStore` for incremental support
+
+---
+
+## 5. Proposed GitHub Issue
+
+```markdown
+## Feature: Obsidian-Compatible Markdown Export
+
+### Problem
+
+The scraper currently exports to JSONL and Vector formats, which are designed for RAG/embedding pipelines. There is no way to export scraped content as clean, Obsidian-compatible Markdown files — a format increasingly demanded by knowledge workers, researchers, and PKM (Personal Knowledge Management) users.
+
+### Context
+
+Research into the competitive landscape reveals:
+
+- **Obsidian Web Clipper** (official, 3.4K stars) uses Defuddle for content extraction → clean Markdown with YAML frontmatter
+- **MarkDownload** (3.7K stars) uses Readability.js + Turndown, supports custom frontmatter templates
+- **Firecrawl** and **Jina Reader** provide markdown output but without Obsidian-specific features (no frontmatter, no wikilinks)
+- **Omnivore** (now defunct) had a robust Obsidian plugin with Handlebars-style templates
+
+The gap: No Rust-based web scraper offers Obsidian-compatible markdown export with proper frontmatter, image handling, and vault-friendly file structure.
+
+### Proposed Solution
+
+Add a `Markdown` output format that produces one `.md` file per URL, with:
+
+#### P0 (Launch)
+- [ ] YAML frontmatter with: `title`, `source`, `created`, `author`, `description`, `tags`, `domain`
+- [ ] One file per URL, named from slugified title
+- [ ] Clean markdown content (HTML → Markdown conversion)
+- [ ] Relative link resolution for internal links
+
+#### P1 (First Iteration)
+- [ ] Image download to `_attachments/` folder with local path refs
+- [ ] Date-prefixed filename option (`YYYY-MM-DD-title.md`)
+- [ ] Tags extraction from page meta keywords
+- [ ] Domain-based folder structure (`output/domain.com/page.md`)
+
+#### P2 (Future)
+- [ ] Wikilink generation (`[[like this]]`)
+- [ ] Callout integration for WAF/quality notes
+- [ ] Incremental updates via existing StateStore
+- [ ] Math/LaTeX preservation
+
+### Technical Approach
+
+1. Add `OutputFormat::Markdown` variant (separate from RAG-focused `ExportFormat`)
+2. Create `MarkdownExporter` implementing the existing `Exporter` trait
+3. Use `readability` crate for content extraction + `html2md` for conversion
+4. Generate YAML frontmatter from `ScrapedContent` metadata
+5. Download images asynchronously with bounded concurrency
+6. Write files following Obsidian vault conventions
+
+### Architecture
+
+```
+src/
+├── domain/
+│   ├── markdown.rs          # NEW: MarkdownDocument entity
+│   └── entities.rs          # Add OutputFormat enum
+├── infrastructure/
+│   └── export/
+│       ├── markdown_exporter.rs   # NEW: Exporter impl
+│       └── html_to_md.rs          # NEW: HTML → Markdown
+└── export_factory.rs        # Add Markdown case
+```
+
+### Acceptance Criteria
+
+- [ ] `--output-format markdown` CLI flag produces `.md` files
+- [ ] Each file has valid YAML frontmatter with standard fields
+- [ ] Content is clean markdown (no nav, ads, scripts)
+- [ ] Images are downloaded to local folder with correct refs
+- [ ] Files are organized in vault-friendly structure
+- [ ] Existing JSONL/Vector export paths remain unchanged
+- [ ] All tests pass with `cargo nextest run --test-threads 2`
+- [ ] Clippy clean: `cargo clippy -- -D warnings`
+
+### Dependencies
+
+- `readability` (crate) — Content extraction
+- `html2md` or `mdka` (crate) — HTML to Markdown conversion
+- `slug` (crate) — Filename slugification
+- Existing: `chrono`, `serde_yaml` (for frontmatter)
+```
+
+---
+
+## Appendix: Key Libraries & Tools Reference
+
+| Tool | Language | Purpose | License |
+|------|----------|---------|---------|
+| **Defuddle** | TypeScript | Content extraction → Markdown (Obsidian official) | MIT |
+| **Readability.js** | JavaScript | Content extraction (Mozilla) | Apache 2.0 |
+| **Turndown** | JavaScript | HTML → Markdown | MIT |
+| **readability** | Rust | Content extraction (Rust port) | MIT |
+| **html2md** | Rust | HTML → Markdown | MIT |
+| **mdka** | Rust | HTML → Markdown (alternative) | MIT |
+| **slug** | Rust | URL/filename slugification | MPL 2.0 |
+| **serde_yaml** | Rust | YAML serialization | MIT/Apache |
+
+# Obsidian Web Scraping/Clipping — User Research Report
+
+> **Date:** 2026-04-03
+> **Purpose:** Inform P2/future roadmap for Rust-based scraper exporting to Obsidian-compatible markdown
+> **Sources:** Obsidian Forum, GitHub issues (obsidian-clipper, MarkDownload, obsidian-omnivore), r/ObsidianMD, competitor repos
+
+---
+
+## 1. Top 15 Most Requested Features (Ranked by Actual User Demand)
+
+### 1. Duplicate Detection / "Already Clipped" Warning
+**Demand:** 🔥🔥🔥🔥🔥 (10+ reactions on GitHub #112, repeated across all tools)
+- **Source:** [obsidian-clipper #112](https://github.com/obsidianmd/obsidian-clipper/issues/112) — "Indicate if the current URL is referenced in Obsidian"
+- **Source:** [obsidian-clipper #323](https://github.com/obsidianmd/obsidian-clipper/issues/323) — "Hint for already added pages, prevent duplicates"
+- **Source:** [obsidian-clipper #433](https://github.com/obsidianmd/obsidian-clipper/issues/433) — "Based on the source in the properties, prompt the user on the plugin icon that the current URL has been bookmarked"
+- **What users want:** Before clipping, show if URL already exists in vault. Cache clipped URLs locally. Prevent creating duplicate notes.
+- **Current status:** Obsidian team marked as "intentional" (no two-way integration), then reversed to "enhancement" after community pushback. Still open.
+
+### 2. PDF Clipping / Extraction
+**Demand:** 🔥🔥🔥🔥🔥 (Multiple comments, arxiv use case)
+- **Source:** [obsidian-clipper #646](https://github.com/obsidianmd/obsidian-clipper/issues/646) — "Support clipping PDFs"
+- **What users want:** Clip academic papers from arxiv, extract text/metadata from PDFs, save PDF file + create markdown with metadata link
+- **Workaround mentioned:** Users use Docling + Hazel as workaround — complex setup
+- **Key insight:** Users want metadata (title, author, abstract) even if full text extraction is hard
+
+### 3. Save Images Locally (Not Just URLs)
+**Demand:** 🔥🔥🔥🔥 (On official roadmap, highly requested)
+- **Source:** [obsidian-clipper Roadmap](https://github.com/obsidianmd/obsidian-clipper) — "Save images locally, added in Obsidian 1.8.0"
+- **Source:** [MarkDownload #22](https://github.com/deathau/markdownload/issues/22) — "Save images offline"
+- **What users want:** Download images to vault assets folder, use `![[image.png]]` wiki links instead of external URLs
+- **Why it matters:** Offline reading, link rot prevention, vault portability
+
+### 4. Incremental Clipping (Append to Existing Notes)
+**Demand:** 🔥🔥🔥🔥 (Forum thread, multiple use cases)
+- **Source:** [Obsidian Forum](https://forum.obsidian.md/t/web-clipper-append-new-highlights-to-existing-notes-incremental-clipping/109677) — "Append new highlights to existing notes (incremental clipping)"
+- **What users want:** Clip multiple highlights from same page over time, append to single note instead of creating new notes each time
+- **Use case:** Research pages visited multiple times, adding notes incrementally
+
+### 5. Quick Save / One-Click to Default Location
+**Demand:** 🔥🔥🔥🔥 (MarkDownload #21, #41, Reddit complaints)
+- **Source:** [MarkDownload #21](https://github.com/deathau/markdownload/issues/21) — "Quick save button - save file in default location"
+- **Source:** [MarkDownload #41](https://github.com/deathau/markdownload/issues/41) — "Download files in Downloads/MarkDownload/ folder"
+- **Source:** Reddit r/ObsidianMD — "It's so laborious to have to either type the folder path, or save to obsidian and then move the file"
+- **What users want:** One-click save to pre-configured vault folder. No dialogs, no typing paths.
+- **SEEDBOX pattern:** Users want an "inbox" folder for unprocessed clips
+
+### 6. Better Mobile/iOS Clipping Workflow
+**Demand:** 🔥🔥🔥🔥 (Reddit, multiple complaints)
+- **Source:** [Reddit r/ObsidianMD](https://www.reddit.com/r/ObsidianMD/comments/1r3la2x/how_do_you_guys_use_webclipper_on_ios/) — "How do you guys use WebClipper on iOS?"
+- **Current workflow:** Share → Copy link → Open Safari → Paste → Open clipper → Select template → Run (6+ steps)
+- **What users want:** Share sheet integration, one-tap clipping from any app, Shortcuts support
+- **Key pain point:** "hell that's so much friction"
+
+### 7. Template Logic (Conditionals, Loops)
+**Demand:** 🔥🔥🔥 (Now in v1.0, was #1 requested feature for months)
+- **Source:** [obsidian-clipper v1.0 release](https://www.reddit.com/r/ObsidianMD/comments/1r7a96k/obsidian_web_clipper_10_now_with_logic/)
+- **Source:** [obsidian-clipper Roadmap](https://github.com/obsidianmd/obsidian-clipper) — "Template logic (if/for)"
+- **What users want:** `{% if %}` conditionals, `{% for %}` loops, variable assignment in templates
+- **Status:** ✅ Implemented in v1.0 (March 2026). Shows this was THE most requested feature.
+
+### 8. Auto-Detect Content Type / Smart Templates
+**Demand:** 🔥🔥🔥 (Forum, Reddit)
+- **Source:** [Obsidian Forum](https://forum.obsidian.md/t/web-clipper-add-meta-variable-based-template-matching/91950) — "Add meta variable-based template matching"
+- **Source:** Reddit — Users want different templates for articles, recipes, tweets, LinkedIn posts
+- **What users want:** Auto-apply templates based on URL patterns, meta tags, schema.org data, content type detection
+- **Current:** URL regex triggers only. Users want meta tag and content-type triggers too.
+
+### 9. Dataview-Compatible Properties (YAML Frontmatter)
+**Demand:** 🔥🔥🔥 (Multiple issues, forum posts)
+- **Source:** [obsidian-omnivore #15](https://github.com/mvavassori/obsidian-web-clipper/issues/15) — "Add URL and timestamp as note properties for Dataview compatibility"
+- **What users want:** Rich frontmatter with: `url`, `date`, `author`, `tags`, `source`, `readingTime`, `language`, `contentType`, `status`
+- **Example query users want:** `table date, url from "bookmarks" where url and date sort date asc`
+- **Key insight:** Power users build entire systems on top of clipped content metadata
+
+### 10. Background Processing / Async Clipping
+**Demand:** 🔥🔥🔥 (Recent, LLM-related)
+- **Source:** [obsidian-clipper #720](https://github.com/obsidianmd/obsidian-clipper/issues/720) — "Background processing for Interpreter LLM requests"
+- **What users want:** Don't keep popup open during LLM processing. Process in background, notify when done.
+- **Use case:** AI summarization, auto-tagging, content extraction via LLM
+
+### 11. Notification on Clip Success/Failure
+**Demand:** 🔥🔥🔥 (Forum, GitHub #576)
+- **Source:** [Obsidian Forum](https://forum.obsidian.md/t/obsidian-web-clipper-notification-support/96624) — "Obsidian web clipper notification support"
+- **Source:** [obsidian-clipper #576](https://github.com/obsidianmd/obsidian-clipper/issues/576) — "Notification when Interpreter is done"
+- **What users want:** Desktop notification: "Note 'test' was successfully saved at 'Clippings'"
+- **Why:** Users clip and move on; need confirmation without checking
+
+### 12. Batch Clip All Open Tabs
+**Demand:** 🔥🔥🔥 (MarkDownload #15, recurring request)
+- **Source:** [MarkDownload #15](https://github.com/deathau/markdownload/issues/15) — "Save all tabs in window"
+- **Source:** Obsidian Forum — "batch MarkDownload all open tabs in current Firefox window"
+- **What users want:** Open 10 research tabs → one click → all saved to vault
+- **Use case:** Research sessions, course material collection
+
+### 13. Code Block Preservation with Syntax Highlighting
+**Demand:** 🔥🔥🔥 (MarkDownload #371, #395)
+- **Source:** [MarkDownload #371](https://github.com/deathau/markdownload/issues/371) — "Extension struggles to extract code blocks to markdown format"
+- **Source:** [MarkDownload #395](https://github.com/deathau/markdownload/issues/395) — "MarkDownload leaves a lot of in extracted code samples"
+- **What users want:** Proper fenced code blocks with language detection, preserved indentation, no HTML artifacts
+
+### 14. LaTeX / Math Preservation
+**Demand:** 🔥🔥🔥 (MarkDownload #373, #377)
+- **Source:** [MarkDownload #373](https://github.com/deathau/markdownload/issues/373) — "need a way to extract latex already rendered by mathjax"
+- **Source:** [MarkDownload #377](https://github.com/deathau/markdownload/issues/377) — "Uncaught ReferenceError: MathJax is not defined"
+- **What users want:** Convert MathJax/KaTeX rendered math back to LaTeX syntax (`$...$`, `$$...$$`)
+- **Use case:** Academic papers, math blogs, StackExchange
+
+### 15. Social Media / Platform-Specific Extraction
+**Demand:** 🔥🔥🔥 (Multiple bugs, workarounds)
+- **Source:** [obsidian-clipper #676](https://github.com/obsidianmd/obsidian-clipper/issues/676) — "Issues/inconsistencies with X / Twitter Articles"
+- **Source:** [obsidian-clipper #332](https://github.com/obsidianmd/obsidian-clipper/issues/332) — "x.com fails to get relevant data for selected tweet"
+- **Source:** Reddit — "Do you have any solutions in mind for LinkedIn scraping?"
+- **What users want:** Clean extraction from Twitter/X, LinkedIn, Reddit, YouTube (with transcripts), ChatGPT conversations
+- **Current state:** Defuddle (content extractor) handles articles well but struggles with social platforms
+
+---
+
+## 2. Pain Points Analysis
+
+### Most Frustrating Issues (by frequency of complaints)
+
+| Pain Point | Frequency | Severity | Sources |
+|------------|-----------|----------|---------|
+| **Duplicate clips** | Very High | Critical | All tools, all platforms |
+| **Manual folder path typing** | Very High | High | Reddit, Forum, GitHub |
+| **Mobile clipping friction** | High | High | Reddit, Forum |
+| **Image handling (broken URLs)** | High | High | MarkDownload, Forum |
+| **No offline images** | High | Medium | Roadmap item |
+| **Social media extraction fails** | High | Medium | GitHub bugs |
+| **PDF content not extracted** | Medium | High | GitHub #646 |
+| **No notification on save** | Medium | Medium | Forum, GitHub |
+| **Template complexity** | Medium | Medium | Forum, Reddit |
+| **Math/LaTeX lost** | Medium | Medium | GitHub issues |
+| **Code blocks mangled** | Medium | Medium | GitHub issues |
+| **Sync conflicts (Omnivore)** | Medium | High | GitHub issues |
+| **No batch operations** | Low-Medium | Medium | Forum, GitHub |
+| **iOS Safari bugs** | Low-Medium | High | GitHub #588 |
+| **Regex double-escaping** | Low | Annoying | GitHub #717 |
+
+### User Quotes (Direct from sources)
+
+> "It's so laborious to have to either type the folder path, or save to obsidian and then move the file for every single web clipping."
+> — Reddit r/ObsidianMD
+
+> "I mean it works, but hell that's so much friction" (about iOS clipping workflow)
+> — Reddit r/ObsidianMD
+
+> "Is it that bad to ask for this feature? I just want to not end up with duplicate web clippings. That's all."
+> — GitHub #112 comment
+
+> "The highlighting lags and floats over the screen sometimes"
+> — Reddit r/ObsidianMD
+
+> "I'd love it if you could do simple sums and multiplications in markdown tables"
+> — MarkDownload user (shows desire for richer content)
+
+---
+
+## 3. Feature Categories
+
+### A. Workflow & UX
+| Feature | Demand | Complexity |
+|---------|--------|------------|
+| Duplicate detection | 🔥🔥🔥🔥🔥 | Medium |
+| Quick save to default location | 🔥🔥🔥🔥 | Low |
+| Batch clip all tabs | 🔥🔥🔥 | Medium |
+| Mobile share sheet integration | 🔥🔥🔥🔥 | High |
+| Notification on success/failure | 🔥🔥🔥 | Low |
+| Incremental clipping (append) | 🔥🔥🔥🔥 | Medium |
+| Background async processing | 🔥🔥🔥 | Medium |
+
+### B. Content Quality
+| Feature | Demand | Complexity |
+|---------|--------|------------|
+| Save images locally | 🔥🔥🔥🔥 | Medium |
+| PDF extraction | 🔥🔥🔥🔥🔥 | High |
+| Code block preservation | 🔥🔥🔥 | Medium |
+| LaTeX/Math preservation | 🔥🔥🔥 | High |
+| Social media extraction | 🔥🔥🔥 | High |
+| Footnote handling | 🔥🔥 | Medium |
+| Table preservation (GFM) | 🔥🔥 | Low-Medium |
+| Video embedding (YouTube) | 🔥🔥 | Low |
+| Tweet embedding | 🔥🔥 | Medium |
+
+### C. Obsidian Integration
+| Feature | Demand | Complexity |
+|---------|--------|------------|
+| Dataview-compatible frontmatter | 🔥🔥🔥 | Low |
+| Auto-detect vault path | 🔥🔥🔥 | Low |
+| Template triggers (URL, meta, content-type) | 🔥🔥🔥 | Medium |
+| Obsidian Local REST API integration | 🔥🔥 | Medium |
+| Obsidian URI protocol support | 🔥🔥 | Low |
+| Git integration awareness | 🔥🔥 | Low |
+| Canvas file generation | 🔥 | Medium |
+| MOC auto-generation | 🔥 | Medium |
+
+### D. AI/Smart Features
+| Feature | Demand | Complexity |
+|---------|--------|------------|
+| Auto-tagging | 🔥🔥🔥 | Medium |
+| Auto-summarization | 🔥🔥🔥 | Medium |
+| Duplicate detection (semantic) | 🔥🔥🔥 | High |
+| Key quotes extraction | 🔥🔥 | Medium |
+| Action items extraction | 🔥🔥 | Medium |
+| Reading time estimation | 🔥🔥 | Low |
+| Language detection | 🔥🔥 | Low |
+| Difficulty level detection | 🔥 | Medium |
+| Author/topic clustering | 🔥 | High |
+
+### E. Advanced Obsidian Features
+| Feature | Demand | Complexity |
+|---------|--------|------------|
+| Rich YAML properties | 🔥🔥🔥 | Low |
+| Templater-compatible output | 🔥🔥 | Low |
+| Dataview query-ready metadata | 🔥🔥🔥 | Low |
+| Backlink-friendly wiki links | 🔥🔥 | Medium |
+| Graph view optimization | 🔥🔥 | Medium |
+| Tags vs folder flexibility | 🔥🔥 | Low |
+| Excalidraw diagram conversion | 🔥 | High |
+
+---
+
+## 4. Quick Wins (Low Effort, High Value)
+
+### Tier 1 — Implement First
+| Feature | Why | Effort |
+|---------|-----|--------|
+| **Rich YAML frontmatter** | Power users demand it for Dataview. Easy to generate. | 1-2 days |
+| **Duplicate URL detection** | #1 complaint across all tools. Simple URL hash check. | 1-2 days |
+| **Auto-detect vault** | Scan for `.obsidian` folder, check `OBSIDIAN_VAULT` env var. | 1 day |
+| **Reading time estimation** | Simple word count / 200 WPM. Users love this metadata. | 2 hours |
+| **Language detection** | Use `whatlang` crate. One dependency, high value. | 2 hours |
+| **Notification on save** | Desktop notification. One system call. | 2 hours |
+| **Obsidian URI support** | Open saved note via `obsidian://open?vault=X&file=Y`. | 2 hours |
+
+### Tier 2 — Next Sprint
+| Feature | Why | Effort |
+|---------|-----|--------|
+| **Quick save mode** | Pre-configured vault + folder. One command. | 1 day |
+| **Image download to vault** | Download images, save to assets/, use wiki links. | 2-3 days |
+| **Template system** | Configurable output templates (like MarkDownload). | 3-5 days |
+| **GFM table support** | Proper markdown tables from HTML tables. | 1-2 days |
+| **Footnote handling** | Convert HTML footnotes to markdown footnotes. | 1-2 days |
+| **YouTube embed conversion** | Convert YouTube URLs to `![[youtube|url]]` or embed syntax. | 1 day |
+
+---
+
+## 5. Differentiators (Features NO Competitor Has)
+
+### 1. **CLI-First Architecture** (Unique)
+All competitors are browser extensions. A Rust CLI can:
+- Run headless on servers for batch processing
+- Integrate into CI/CD pipelines
+- Process sitemaps and entire sites
+- Run as a cron job for scheduled clipping
+- **No competitor offers this.**
+
+### 2. **WAF/CAPTCHA Bypass** (Unique for Obsidian tools)
+Your scraper already has WAF detection (19 signatures). Browser extensions can't bypass these.
+- **Competitors:** All fail on Cloudflare-protected pages
+- **Your advantage:** Can handle rate limiting, UA rotation, retry logic
+
+### 3. **Semantic Duplicate Detection** (Unique)
+Not just URL matching — use embeddings to detect semantically similar content.
+- **Competitors:** Only do exact URL matching (and even that is inconsistent)
+- **Your advantage:** Already has AI/ONNX infrastructure
+
+### 4. **Streaming + Constant RAM** (Unique)
+Target ~8KB constant RAM for large pages. Browser extensions load entire page in memory.
+- **Competitors:** All load full page DOM
+- **Your advantage:** Can handle massive pages without crashing
+
+### 5. **Sitemap-to-Vault Pipeline** (Unique)
+Process entire sitemaps → batch clip → organize in vault structure.
+- **Competitors:** One page at a time, manually triggered
+- **Your advantage:** Already has sitemap parsing
+
+### 6. **Auto-Generated MOCs** (Unique)
+After clipping multiple pages on a topic, auto-generate a Map of Content index page.
+- **Competitors:** None do this
+- **Your advantage:** Can analyze content relationships and create structure
+
+### 7. **Git-Aware Sync** (Unique)
+Detect if vault uses Git, create meaningful commits for each clip.
+- **Competitors:** None integrate with Git
+- **Your advantage:** Can track changes, enable collaboration
+
+### 8. **Content Type Auto-Detection** (Partially Unique)
+Detect articles, recipes, products, papers, tweets, and apply appropriate templates automatically.
+- **Competitors:** Only URL regex triggers
+- **Your advantage:** Can use schema.org, meta tags, content analysis
+
+---
+
+## 6. Recommended P2 Roadmap
+
+### Phase 1: Foundation (Weeks 1-3)
+**Goal:** Make it work well for basic Obsidian users
+
+| Priority | Feature | Justification |
+|----------|---------|---------------|
+| P2-1 | Rich YAML frontmatter | Most requested metadata feature. Enables Dataview queries. |
+| P2-2 | Duplicate URL detection | #1 user complaint. Simple to implement. |
+| P2-3 | Auto-detect vault | Removes friction. Check `.obsidian` + env var. |
+| P2-4 | Quick save mode | One-command save to pre-configured location. |
+| P2-5 | Image download to vault | On official Obsidian roadmap. High demand. |
+
+### Phase 2: Content Quality (Weeks 4-6)
+**Goal:** Make clipped content look great in Obsidian
+
+| Priority | Feature | Justification |
+|----------|---------|---------------|
+| P2-6 | GFM table support | Tables are common, current tools mangle them. |
+| P2-7 | Footnote handling | Academic users need this. |
+| P2-8 | Code block preservation | Developers clip docs constantly. |
+| P2-9 | YouTube/video embed conversion | Easy win, high perceived value. |
+| P2-10 | Reading time + language metadata | Easy metadata additions users love. |
+
+### Phase 3: Smart Features (Weeks 7-9)
+**Goal:** AI-powered features that competitors can't match
+
+| Priority | Feature | Justification |
+|----------|---------|---------------|
+| P2-11 | Auto-tagging based on content | Uses existing AI infrastructure. High value. |
+| P2-12 | Auto-summarization for long articles | Uses existing AI infrastructure. |
+| P2-13 | Semantic duplicate detection | Unique differentiator. Uses embeddings. |
+| P2-14 | Key quotes extraction | Researchers love this. |
+| P2-15 | Content type auto-detection | Better than URL regex triggers. |
+
+### Phase 4: Advanced Integration (Weeks 10-12)
+**Goal:** Deep Obsidian ecosystem integration
+
+| Priority | Feature | Justification |
+|----------|---------|---------------|
+| P2-16 | Obsidian URI support | Open notes directly in Obsidian. |
+| P2-17 | Auto-generated MOCs | Unique feature. Power users will love it. |
+| P2-18 | Git-aware vault support | Niche but passionate user base. |
+| P2-19 | Template system | Configurable output formats. |
+| P2-20 | Sitemap batch processing | Unique differentiator. |
+
+---
+
+## Appendix: Source Links
+
+### GitHub Issues
+- [obsidian-clipper #112](https://github.com Obsidianmd/obsidian-clipper/issues/112) — Duplicate detection (10 reactions)
+- [obsidian-clipper #646](https://github.com/obsidianmd/obsidian-clipper/issues/646) — PDF clipping
+- [obsidian-clipper #720](https://github.com/obsidianmd/obsidian-clipper/issues/720) — Background LLM processing
+- [obsidian-clipper #714](https://github.com/obsidianmd/obsidian-clipper/issues/714) — Multiline properties
+- [obsidian-clipper #717](https://github.com/obsidianmd/obsidian-clipper/issues/717) — Regex literal syntax
+- [obsidian-clipper #676](https://github.com/obsidianmd/obsidian-clipper/issues/676) — X/Twitter articles
+- [obsidian-clipper #332](https://github.com/obsidianmd/obsidian-clipper/issues/332) — X/Twitter replies
+- [obsidian-clipper #588](https://github.com/obsidianmd/obsidian-clipper/issues/588) — iOS Safari bugs
+- [obsidian-clipper Roadmap](https://github.com/obsidianmd/obsidian-clipper) — Official roadmap
+- [MarkDownload #21](https://github.com/deathau/markdownload/issues/21) — Quick save
+- [MarkDownload #41](https://github.com/deathau/markdownload/issues/41) — Default folder
+- [MarkDownload #371](https://github.com/deathau/markdownload/issues/371) — Code blocks
+- [MarkDownload #373](https://github.com/deathau/markdownload/issues/373) — LaTeX/MathJax
+- [MarkDownload #342](https://github.com/deathau/markdownload/discussions/342) — Future of MarkDownload
+- [obsidian-omnivore #15](https://github.com/mvavassori/obsidian-web-clipper/issues/15) — Dataview properties
+- [obsidian-omnivore #179](https://github.com/omnivore-app/obsidian-omnivore/issues/179) — Sync issues
+- [obsidian-omnivore #33](https://github.com/omnivore-app/obsidian-omnivore/issues/33) — Deduplication
+
+### Obsidian Forum
+- [Incremental clipping](https://forum.obsidian.md/t/web-clipper-append-new-highlights-to-existing-notes-incremental-clipping/109677)
+- [Meta variable template matching](https://forum.obsidian.md/t/web-clipper-add-meta-variable-based-template-matching/91950)
+- [Notification support](https://forum.obsidian.md/t/obsidian-web-clipper-notification-support/96624)
+- [Auto-add URL to web viewer](https://forum.obsidian.md/t/web-viewer-auto-add-original-url-of-the-saved-webpage/95759)
+- [MarkDownload thread](https://forum.obsidian.md/t/markdownload-markdown-web-clipper/173)
+
+### Reddit
+- [iOS workflow friction](https://www.reddit.com/r/ObsidianMD/comments/1r3la2x/how_do_you_guys_use_webclipper_on_ios/)
+- [Web Clipper 1.0 discussion](https://www.reddit.com/r/ObsidianMD/comments/1r7a96k/obsidian_web_clipper_10_now_with_logic/)
+- [Highlighting issues](https://www.reddit.com/r/ObsidianMD/comments/1k6g03y/issues_with_obsidian_web_clipper_edge/)
+
+# Markdown Formatting Guide for Obsidian
+
+Learn how to apply basic formatting to your Obsidian notes, using [Markdown](https://daringfireball.net/projects/markdown/). Import this as a note into your Obsidian Vault to view it and to test new themes. Certain community plugins are required for a few features.
+- - -
+# Basic Formatting Syntax
+- - - 
+## Paragraphs
+
+To create paragraphs, use a blank line to separate one or more lines of text.
+
+```
+This is a paragraph.
+
+This is another paragraph.
+```
+
+Multiple blank spaces
+
+Multiple adjacent blank spaces in and between paragraphs collapse to a single space when displaying a note in [Reading view](https://help.obsidian.md/Editing+and+formatting/Editing+and+previewing+Markdown#Editor%20views) and on [Obsidian Publish](https://help.obsidian.md/Obsidian+Publish/Introduction+to+Obsidian+Publish) sites.
+
+```md
+Multiple          adjacent          spaces
+
+
+
+and multiple newlines between paragraphs.
+```
+
+> Multiple          adjacent          spaces
+>
+>
+>
+> and multiple newlines between paragraphs.
+
+If you want to add multiple spaces, you can add `&nbsp;` (blank space) and `<br>` (newline) to your note.
+
+```md
+Multiple&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;adjacent&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;spaces
+<br>
+<br>
+<br>
+and multiple newlines between paragraphs.
+```
+
+>Multiple&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;adjacent&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;spaces
+> <br>
+> <br>
+> <br>
+> and multiple newlines between paragraphs.
+
+## Headings
+
+To create a heading, add up to six `#` symbols before your heading text. The number of `#` symbols determines the size of the heading.
+
+```md
+# This is a heading 1
+## This is a heading 2
+### This is a heading 3
+#### This is a heading 4
+##### This is a heading 5
+###### This is a heading 6
+```
+
+# This is a heading 1
+
+## This is a heading 2
+
+### This is a heading 3
+
+#### This is a heading 4
+
+##### This is a heading 5
+
+###### This is a heading 6
+
+## Styling text
+
+| Style                  | Syntax                   | Example                        | Output                      |
+|------------------------|--------------------------|--------------------------------|-----------------------------|
+| Bold                   | `** **` or `__ __`       | `**Bold text**`                | **Bold text**               |
+| Italic                 | `* *` or `_ _`           | `*Italic text*`                | _Italic text_               |
+| Strikethrough          | `~~ ~~`                  | `~~Striked out text~~`         | ~~Striked out text~~        |
+| Highlight              | `== ==`                  | `==Highlighted text==`         | ==Highlighted text==        |
+| Bold and nested italic | `** **` and `_ _`        | `**Bold text and _nested italic_ text**` | **Bold text and _nested italic_ text** |
+| Bold and italic        | `*** ***` or `___ ___`   | `***Bold and italic text***`   | ***Bold and italic text***  |
+
+## Quotes
+
+You can quote text by adding a `>` symbols before the text.
+
+```md
+> Human beings face ever more complex and urgent problems, and their effectiveness in dealing with these problems is a matter that is critical to the stability and continued progress of society.
+
+\- Doug Engelbart, 1961
+```
+
+> Human beings face ever more complex and urgent problems, and their effectiveness in dealing with these problems is a matter that is critical to the stability and continued progress of society.
+
+- Doug Engelbart, 1961
+
+>[!info]
+ You can turn your quote into a [callout](https://help.obsidian.md/Editing+and+formatting/Callouts) by adding `[!info]` as the first line in a quote.
+
+## Code
+
+You can format code both inline within a sentence, or in its own block.
+
+### Inline code
+
+You can format code within a sentence using single backticks.
+
+```md
+Text inside `backticks` on a line will be formatted like code.
+```
+
+Text inside `backticks` on a line will be formatted like code.
+
+If you want to put backticks in an inline code block, surround it with double backticks like so: inline ``code with a backtick ` inside``.
+
+### Code blocks
+
+To format a block of code, surround the code with triple backticks.
+
+````
+```
+cd ~/Desktop
+```
+````
+
+```md
+cd ~/Desktop
+```
+
+You can also create a code block by indenting the text using `Tab` or 4 blank spaces.
+
+```md
+    cd ~/Desktop
+```
+
+You can add syntax highlighting to a code block, by adding a language code after the first set of backticks.
+
+````md
+```js
+function fancyAlert(arg) {
+  if(arg) {
+    $.facebox({div:'#foo'})
+  }
+}
+```
+````
+
+```js
+function fancyAlert(arg) {
+  if(arg) {
+    $.facebox({div:'#foo'})
+  }
+}
+```
+
+Obsidian uses Prism for syntax highlighting. For more information, refer to [Supported languages](https://prismjs.com/#supported-languages).
+
+Note
+
+[Live Preview mode](https://help.obsidian.md/Live+preview+update) doesn't support PrismJS and may render syntax highlighting differently.
+
+## External links
+
+If you want to link to an external URL, you can create an inline link by surrounding the link text in brackets (`[ ]`), and then the URL in parentheses (`( )`).
+
+```md
+[Obsidian Help](https://help.obsidian.md)
+```
+
+[Obsidian Help](https://help.obsidian.md/)
+
+>[!tip]
+ If you want to link to a file inside your vault, consider using an [internal link](https://help.obsidian.md/Linking+notes+and+files/Internal+links) instead.
+
+You can also create external links to files in other vaults, by linking to an [Obsidian URI](https://help.obsidian.md/Concepts/Obsidian+URI).
+
+```md
+[Note](obsidian://open?vault=MainVault&file=Note.md)
+```
+
+### Escape blank spaces in links
+
+If your URL contains blank spaces, you need to escape them by replacing them with `%20`.
+
+```md
+[My Note](obsidian://open?vault=MainVault&file=My%20Note.md)
+```
+
+You can also escape the URL by wrapping it with angled brackets (`< >`).
+
+```md
+[My Note](<obsidian://open?vault=MainVault&file=My Note.md>)
+```
+
+## External images
+
+You can add images with external URLs, by adding a `!` symbol before an [external link](https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax#External%20links).
+
+```md
+![Engelbart](https://history-computer.com/ModernComputer/Basis/images/Engelbart.jpg)
+```
+
+![Engelbart](https://history-computer.com/ModernComputer/Basis/images/Engelbart.jpg)
+
+You can change the image dimensions, by adding `|120x160` to the link destination, where 120 is the width and 160 is the height.
+
+```md
+![Engelbart|100x145](https://history-computer.com/ModernComputer/Basis/images/Engelbart.jpg)
+```
+
+![Engelbart|120x160](https://history-computer.com/ModernComputer/Basis/images/Engelbart.jpg)
+
+If you only specify the width, the image scales according to its original aspect ratio by adding `|75]]` to the link destination, which scales the image to 70% of the original aspect ratio.
+
+```md
+![[Engelbart.jpg|75]](https://history-computer.com/ModernComputer/Basis/images/Engelbart.jpg)
+```
+
+![Engelbart|75](https://history-computer.com/ModernComputer/Basis/images/Engelbart.jpg)
+
+>[!tip]
+ If you want to add an image from inside your vault, you can also [embed an image in a note](https://help.obsidian.md/Linking+notes+and+files/Embedding+files#Embed%20an%20image%20in%20a%20note).
+
+## Lists
+
+You can create an unordered list by adding a `-`, `*`, or `+` before the text.
+
+```md
+- First list item
+* Second list item
++ Third list item
+```
+
+- First list item
+* Second list items 
++ Third list item
+
+To create an ordered list, start each line with a number followed by a `.` symbol.
+
+```md
+1. First list item
+2. Second list item
+3. Third list item
+```
+
+1. First list item
+2. Second list item
+3. Third list item
+
+You can create a nested list by indenting one or more list items.
+
+```md
+1. First list item
+   1. Ordered nested list item
+2. Second list item
+   - Unordered nested list item
+```
+
+1. First list item
+    1. Ordered nested list item
+2. Second list item
+    - Unordered nested list item
+
+You can press `Tab` or `Shift+Tab` to indent or unindent one or more selected list items.
+
+### Task lists
+
+To create a task list, start each list item with a hyphen and space followed by `[ ]`.
+
+```md
+- [x] This is a completed task.
+- [ ] This is an incomplete task.
+```
+
+- [x] This is a completed task.
+- [ ] This is an incomplete task.
+
+You can toggle a task in Reading view by selecting the checkbox.
+
+>[!tip]
+ You can use any character inside the brackets to mark it as complete.
+
+```md
+- [x] Milk
+- [?] Eggs
+- [-] Eggs
+- [>] Eggs
+```
+
+- [x] Milk
+- [?] Eggs
+- [-] Eggs
+- [>] Eggs
+
+## Horizontal bar
+
+You can use three or more stars `***`, hyphens `---`, or underscore `___` on its own line to add a horizontal bar. You can also separate symbols using spaces.
+
+```md
+***
+****
+* * *
+---
+----
+- - -
+___
+____
+_ _ _
+```
+
+- - -
+
+## Footnotes
+
+You can add footnotes[^1] to your notes using the following syntax: [^note]
+
+```md
+This is a simple footnote[^1].
+
+[^1]: This is the referenced text.
+[^2]: Add 2 spaces at the start of each new line.
+  This lets you write footnotes that span multiple lines.
+[^note]: Named footnotes still appear as numbers, but can make it easier to identify and link references.
+```
+
+[^1]: This is a footnote.
+[^note]:  This is a named footnote.
+  Written over multiple lines.
+
+You can also inline footnotes in a sentence. Note that the caret goes outside the brackets. ^[This is an inline footnote]
+
+```md
+You can also use inline footnotes. ^[This is an inline footnote.]
+```
+
+> [!note]
+ Inline footnotes only work in Reading View, not in Live Preview.
+
+## Comments
+
+You can add comments by wrapping text with `%%`. Comments are only visible in Editing view.
+
+```md
+This is an %%inline%% comment.
+
+%%
+This is a block comment.
+
+Block comments can span multiple lines.
+%%
+```
+
+___
+_ _ _
+# Advanced Formatting Syntax
+- - -
+
+## Tables
+
+You can create table using vertical bars (`|`) and hyphens (`-`). Vertical bars separate columns, and hyphens define the column header.
+
+```md
+| First name | Last name |
+| ---------- | --------- |
+| Max        | Planck    |
+| Marie      | Curie     |
+```
+
+|First name|Last name|
+|---|---|
+|Max|Planck|
+|Marie|Curie|
+
+The vertical bars or either side of the table are optional.
+
+Cells don't need to be perfectly aligned with the columns. Each header row must have at least two hyphens.
+
+```md
+First name | Last name
+-- | --
+Max | Planck
+Marie | Curie
+```
+
+### Format content within a table
+
+You can use [basic formatting syntax](https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax) to style content within a table.
+
+|First column|Second column|
+|---|---|
+|[Internal links](https://help.obsidian.md/Linking+notes+and+files/Internal+links)|Link to a file _within_ your **vault**.|
+|[Embedding files](https://help.obsidian.md/Linking+notes+and+files/Embedding+files)||
+
+Vertical bars in tables
+
+If you want to use [aliases](https://help.obsidian.md/Linking+notes+and+files/Aliases), or to [resize an image](https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax#External%20images) in your table, you need to add a `\` before the vertical bar.
+
+```md
+| First column | Second column |
+| -- | -- |
+|[[Markdown Formatting Guide#Basic Formatting Syntax\|Markdown Basics]]|![Engelbart\|75](https://history-computer.com/ModernComputer/Basis/images/Engelbart.jpg)|
+```
+
+|First column|Second column|
+|---|---|
+|[[Markdown Formatting Guide#Basic Formatting Syntax\|Markdown Basics]]|![Engelbart\|75](https://history-computer.com/ModernComputer/Basis/images/Engelbart.jpg)|
+
+You can align text to the left, right, or center of a column by adding colons (`:`) to the header row.
+
+```md
+Left-aligned text | Center-aligned text | Right-aligned text
+:-- | :--: | --:
+Content | Content | Content
+```
+
+|Left-aligned text|Center-aligned text|Right-aligned text|
+|:--|:-:|--:|
+|Content|Content|Content|
+
+## Diagram
+
+You can add diagrams and charts to your notes, using [Mermaid](https://mermaid-js.github.io/). Mermaid supports a range of diagrams, such as [flow charts](https://mermaid.js.org/syntax/flowchart.html), [sequence diagrams](https://mermaid.js.org/syntax/sequenceDiagram.html), and [timelines](https://mermaid.js.org/syntax/timeline.html).
+
+>[!tip]
+You can also try Mermaid's [Live Editor](https://mermaid-js.github.io/mermaid-live-editor) to help you build diagrams before you include them in your notes.
+
+To add a Mermaid diagram, create a `mermaid` [code block](https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax#Code%20blocks).
+
+````md
+```mermaid
+sequenceDiagram
+    Alice->>+John: Hello John, how are you?
+    Alice->>+John: John, can you hear me?
+    John-->>-Alice: Hi Alice, I can hear you!
+    John-->>-Alice: I feel great!
+```
+````
+
+```mermaid
+sequenceDiagram
+    Alice->>+John: Hello John, how are you?
+    Alice->>+John: John, can you hear me?
+    John-->>-Alice: Hi Alice, I can hear you!
+    John-->>-Alice: I feel great!
+```
+
+````md
+```mermaid
+graph TD
+
+Biology --> Chemistry
+```
+````
+
+```mermaid
+graph TD
+
+Biology --> Chemistry
+```
+
+### Linking files in a diagram
+
+You can create [internal links](https://help.obsidian.md/Linking+notes+and+files/Internal+links) in your diagrams by attaching the `internal-link` [class](https://mermaid.js.org/syntax/flowchart.html#classes) to your nodes.
+
+````md
+```mermaid
+graph TD
+
+Biology --> Chemistry
+
+class Biology,Chemistry internal-link;
+```
+````
+
+```mermaid
+graph TD
+
+Biology --> Chemistry
+
+class Biology,Chemistry internal-link;
+```
+
+>[!note]
+> 
+ Internal links from diagrams don't show up in the [Graph view](https://help.obsidian.md/Plugins/Graph+view).
+>
+ If you have many nodes in your diagrams, you can use the following snippet.
+>
+> ````md
+> ```mermaid
+> graph TD
+> 
+> A[Biology]
+>B[Chemistry]
+>
+ A --> B
+>
+ class A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z internal-link;
+> ```
+> ````
+
+```mermaid
+graph TD
+
+A[Biology]
+B[Chemistry]
+
+A --> B
+
+class A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z internal-link;
+```
+
+This way, each letter node becomes an internal link, with the [node text](https://mermaid.js.org/syntax/flowchart.html#a-node-with-text) as the link text.
+
+> [!note]
+> If you use special characters in your note names, you need to put the note name in double quotes.
+> ```
+> class "⨳ special character" internal-link
+> ```
+>
+> Or, `A["⨳ special character"]`. 
+
+For more information about creating diagrams, refer to the [official Mermaid docs](https://mermaid.js.org/intro/).
+
+## Math
+
+You can add math expressions to your notes using [MathJax](http://docs.mathjax.org/en/latest/basic/mathjax.html) and the LaTeX notation.
+
+To add a MathJax expression to your note, surround it with double dollar signs (`$$`).
+
+```md
+$$
+\begin{vmatrix}a & b\\
+c & d
+\end{vmatrix}=ad-bc
+$$
+```
+
+$$
+\begin{vmatrix}a & b\\
+c & d
+\end{vmatrix}=ad-bc
+$$
+
+You can also inline math expressions by wrapping it in `$` symbols.
+
+```md
+This is an inline math expression: $e^{2i\pi} = 1$.
+```
+
+This is an inline math expression: $e^{2i\pi} = 1$.
+
+For more information about the syntax, refer to [MathJax basic tutorial and quick reference](https://math.meta.stackexchange.com/questions/5020/mathjax-basic-tutorial-and-quick-reference).
+
+For a list of supported MathJax packages, refer to [The TeX/LaTeX Extension List](http://docs.mathjax.org/en/latest/input/tex/extensions/index.html).
+
+## Links
+
+This Guide was derived using:
+- [Basic formatting syntax](https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax)
+- [Advanced formatting syntax](https://help.obsidian.md/Editing+and+formatting/Advanced+formatting+syntax)
+- [Obsidian Flavored Markdown](https://help.obsidian.md/Editing+and+formatting/Obsidian+Flavored+Markdown)
+
+- - -
+- - -
