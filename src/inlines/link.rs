@@ -433,7 +433,13 @@ pub(super) fn process_wikilink(
                 continue;
             }
             (WikilinkState::InPath, b'|', _) => {
-                pr.1 = rel;
+                // 如果前一个字符是 \，说明是 \| 转义，需要去掉 \
+                // Obsidian 在 Wikilink 中对 \| 不敏感，将其视作分隔符
+                pr.1 = if rel > 0 && i > 0 && bytes[i - 1] == b'\\'{
+                    rel - 1
+                } else {
+                    rel
+                };
                 tr.0 = rel + 1;
                 state = WikilinkState::InText;
             }
@@ -483,13 +489,21 @@ pub(super) fn process_wikilink(
                 break;
             }
             (WikilinkState::InRef(InRef::RefBlock), b'|', _) => {
-                rrs.1[0].1 = rel;
+                 // 如果前一个字符是 \，说明是 \| 转义，需要去掉 \
+                rrs.1[0].1 = if rel > 0 && i > 0 && bytes[i - 1] == b'\\' {
+                    rel - 1
+                } else {
+                    rel
+                };
                 tr.0 = rel + 1;
                 state = WikilinkState::InText;
             }
             (WikilinkState::InRef(InRef::RefBlock), _, _)
-                if b.is_ascii_alphanumeric() || b == b'-' || b >= 0x80 =>
+                if b.is_ascii_alphanumeric() || b == b'-' || b == b'\\' || b >= 0x80 =>
             {
+                if b == b'\\' && (bytes.len() <= i || bytes[i + 1] != b'|') {
+                    return false;
+                }
                 i += utf8_char_len(b);
                 rel += 1;
                 continue;
@@ -501,7 +515,11 @@ pub(super) fn process_wikilink(
                 break;
             }
             (WikilinkState::InRef(InRef::RefHeading(index)), b'|', _) => {
-                rrs.1[*index].1 = rel;
+                rrs.1[*index].1 = if rel > 0 && i > 0 && bytes[i - 1] == b'\\' {
+                    rel - 1
+                } else {
+                    rel
+                };
                 tr.0 = rel + 1;
                 state = WikilinkState::InText;
             }
@@ -1468,5 +1486,44 @@ mod tests {
 > 时境变迁，思绪万千"#;
         let ast = Parser::new(text).parse();
         println!("{ast:?}");
+    }
+    #[test]
+    fn test_wikilink_escape_in_table(){
+        let text = r#"
+|  顺序 | 值        |
+| --: | ------------ |
+|   3 |  阅读 [[01-参考文件\|参考内容]] |        
+        "#;
+        let ast = Parser::new_with_options(
+            text,
+            ParserOptions::default()
+                .enabled_ofm()
+        )
+        .parse();
+        let ast_str = format!("{:#?}", ast);
+        println!("{}", ast_str);
+        assert!(ast_str.contains(r#"Link(Wikilink(Wikilink { path: "01-参考文件", text: Some("参考内容"), reference: None }))"#))
+    }
+    #[test]
+    fn test_wikilink_escape(){
+        let text = r#"
+[[link\|text]]
+
+[[note1#heading\|display]]
+
+[[note2#^block\|display]]
+        "#;
+        let ast = Parser::new_with_options(
+            text,
+            ParserOptions::default()
+                .enabled_ofm()
+        )
+        .parse();
+        let ast_str = format!("{:#?}", ast);
+        println!("{}", ast_str);
+        let lines = ast_str.lines().map(|it|it.trim().to_string()).collect::<Vec<String>>();
+        assert_eq!(lines[2],r#"Link(Wikilink(Wikilink { path: "link", text: Some("text"), reference: None }))"#);
+        assert_eq!(lines[4],r#"Link(Wikilink(Wikilink { path: "note1", text: Some("display"), reference: Some(Heading("heading")) }))"#);
+        assert_eq!(lines[6],r#"Link(Wikilink(Wikilink { path: "note2", text: Some("display"), reference: Some(BlockId("block")) }))"#);
     }
 }

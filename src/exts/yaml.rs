@@ -326,7 +326,7 @@ mod tests {
             // If it returns Some, it should be a valid map
             if let Some(map) = result {
                 // Just verify it's a valid BTreeMap - no panic
-                prop_assert!(map.len() >= 0);
+                prop_assert!(!map.is_empty());
             }
             // If it returns None, that's also fine
         }
