@@ -494,7 +494,7 @@ const __vite__mapDeps=(i,m=__vite__mapDeps,d=(m.f||(m.f=["assets/angular-html-Lf
             i
         ];
     }
-    const yi = "/markdown/assets/markdown_binding_bg-BUSdgnPA.wasm", bi = async (t = {}, e)=>{
+    const yi = "/markdown/assets/markdown_binding_bg-CIwazNok.wasm", bi = async (t = {}, e)=>{
         let n;
         if (e.startsWith("data:")) {
             const r = e.replace(/^data:.*?base64,/, "");
@@ -716,25 +716,25 @@ ${t.stack}` : r;
     function xi(t, e, n) {
         S(t)[de(e)] = de(n);
     }
-    function Di() {
-        const t = new Array;
+    function Di(t) {
         return C(t);
     }
     function Ni(t) {
-        return C(t);
-    }
-    function Vi(t, e, n) {
-        S(t)[e >>> 0] = de(n);
-    }
-    function Mi(t) {
         const e = BigInt.asUintN(64, t);
         return C(e);
     }
-    function $i() {
+    function Vi() {
         return Tt(function(t) {
             const e = String.fromCodePoint(t >>> 0);
             return C(e);
         }, arguments);
+    }
+    function Mi() {
+        const t = new Array;
+        return C(t);
+    }
+    function $i(t, e, n) {
+        S(t)[e >>> 0] = de(n);
     }
     function ji(t) {
         const e = S(t);
@@ -847,25 +847,25 @@ ${t.stack}` : r;
         const r = S(t).set(S(e), S(n));
         return C(r);
     }
-    function fo(t, e) {
-        const n = new Error(He(t, e));
-        return C(n);
-    }
-    function po(t) {
+    function fo(t) {
         return typeof S(t) == "bigint";
     }
-    function _o(t) {
+    function po(t) {
         return Number.isSafeInteger(S(t));
     }
-    function go(t) {
+    function _o(t) {
         return +S(t);
     }
-    function yo(t, e) {
+    function go(t, e) {
         const n = S(e), r = typeof n == "bigint" ? n : void 0;
         Ti()[t / 8 + 1] = Ve(r) ? BigInt(0) : r, Y()[t / 4 + 0] = !Ve(r);
     }
-    function bo(t, e) {
+    function yo(t, e) {
         return S(t) === S(e);
+    }
+    function bo(t, e) {
+        const n = new Error(He(t, e));
+        return C(n);
     }
     function Eo(t) {
         return C(t);
@@ -912,11 +912,11 @@ ${t.stack}` : r;
             __wbindgen_string_new: Ii,
             __wbg_new_72fb9a18b5ae2624: Oi,
             __wbg_set_f975102236d3c502: xi,
-            __wbg_new_16b304a2cfa7ff4a: Di,
-            __wbindgen_number_new: Ni,
-            __wbg_set_d4638f722068f043: Vi,
-            __wbindgen_bigint_from_u64: Mi,
-            __wbg_fromCodePoint_cedd7612a2ff688f: $i,
+            __wbindgen_number_new: Di,
+            __wbindgen_bigint_from_u64: Ni,
+            __wbg_fromCodePoint_cedd7612a2ff688f: Vi,
+            __wbg_new_16b304a2cfa7ff4a: Mi,
+            __wbg_set_d4638f722068f043: $i,
             __wbindgen_is_object: ji,
             __wbg_getwithrefkey_edc2c8960f0f1191: Bi,
             __wbindgen_is_undefined: Gi,
@@ -945,12 +945,12 @@ ${t.stack}` : r;
             __wbg_set_a47bac70306a19a7: uo,
             __wbg_new_d9bc3a0147634640: ho,
             __wbg_set_8417257aaedc936b: mo,
-            __wbindgen_error_new: fo,
-            __wbindgen_is_bigint: po,
-            __wbg_isSafeInteger_f7b04ef02296c4d2: _o,
-            __wbindgen_as_number: go,
-            __wbindgen_bigint_get_as_i64: yo,
-            __wbindgen_jsval_eq: bo,
+            __wbindgen_is_bigint: fo,
+            __wbg_isSafeInteger_f7b04ef02296c4d2: po,
+            __wbindgen_as_number: _o,
+            __wbindgen_bigint_get_as_i64: go,
+            __wbindgen_jsval_eq: yo,
+            __wbindgen_error_new: bo,
             __wbindgen_bigint_from_i64: Eo,
             __wbindgen_object_clone_ref: wo,
             __wbindgen_number_get: vo,
