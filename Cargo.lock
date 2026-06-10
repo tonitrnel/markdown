@@ -211,7 +211,7 @@ checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
 name = "data"
 version = "0.1.0"
 dependencies = [
- "markdown 1.0.4",
+ "markdown 1.0.5",
 ]
 
 [[package]]
@@ -349,7 +349,7 @@ dependencies = [
 
 [[package]]
 name = "markdown"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "colored",
  "criterion",
@@ -363,10 +363,10 @@ dependencies = [
 
 [[package]]
 name = "markdown-binding"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "console_error_panic_hook",
- "markdown 1.0.4",
+ "markdown 1.0.5",
  "rustc-hash",
  "serde",
  "serde-wasm-bindgen",
@@ -406,7 +406,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "markdown 1.0.0",
- "markdown 1.0.4",
+ "markdown 1.0.5",
  "pulldown-cmark",
 ]
 
@@ -442,7 +442,7 @@ dependencies = [
 name = "polyglot-bench"
 version = "0.1.0"
 dependencies = [
- "markdown 1.0.4",
+ "markdown 1.0.5",
 ]
 
 [[package]]
