@@ -89,15 +89,15 @@ test-passed: test-basics
 	cargo test --test block_quotes
 
 samply:
-	rm target/release/deps/timing_test-*
-	cargo build --release --bench timing_test
-	BIN=""
-	for f in target/release/deps/timing_test-*; do
-		if [ -f "$$f" ] && [ -x "$$f" ]; then
-			BIN="$$f"
-			break
-		fi
-	done
-	test -n "$$BIN"
+	rm -f target/profiling/deps/timing_test-*
+	cargo build --profile profiling --bench timing_test
+	BIN=""; \
+	for f in target/profiling/deps/timing_test-*; do \
+		if [ -f "$$f" ] && [ -x "$$f" ]; then \
+			BIN="$$f"; \
+			break; \
+		fi; \
+	done; \
+	test -n "$$BIN"; \
 	samply record --rate 10000 "$$BIN"
 	
