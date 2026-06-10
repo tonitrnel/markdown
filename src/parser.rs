@@ -847,6 +847,17 @@ impl<'input> Parser<'input> {
         content: &str,
         location: (Location, Location),
     ) -> usize {
+        if let Some((idx, MarkdownNode::Text(text))) = self
+            .tree
+            .get_last_child(parent)
+            .filter(|id| self.tree[*id].processing)
+            .map(|id| (id, &mut self.tree[id].body))
+        {
+            text.push_str(content);
+            self.tree[idx].end = location.1;
+            return idx;
+        }
+
         let has_left_text = self
             .tree
             .get_last_child(parent)

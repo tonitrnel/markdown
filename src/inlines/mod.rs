@@ -240,8 +240,69 @@ fn should_try_special(ctx: &ProcessCtx, byte: u8) -> bool {
             .line
             .current_span()
             .is_some_and(|span| !matches!(span.get(1), None | Some(b' ' | b'\t' | b'\n' | b'\r'))),
+        // GFM extended autolinks only start with http://, https://, or www.
+        b'h' | b'H' => {
+            ctx.parser.options.github_flavored
+                && ctx.parser.options.gfm_extended_autolink
+                && (starts_with_ci(ctx, b"http://") || starts_with_ci(ctx, b"https://"))
+        }
+        b'w' | b'W' => {
+            ctx.parser.options.github_flavored
+                && ctx.parser.options.gfm_extended_autolink
+                && starts_with_ci(ctx, b"www.")
+        }
+        // OFM highlight delimiter is exactly "==".
+        b'=' if ctx.parser.options.obsidian_flavored => ctx.line.get(1) == Some(b'='),
+        // Inline footnote starts with ^[, block id starts with ^[A-Za-z0-9-].
+        b'^' if ctx.parser.options.obsidian_flavored => {
+            matches!(
+                ctx.line.get(1),
+                Some(b'[' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-')
+            )
+        }
+        // OFM tags need a boundary before # and text-ish content after it.
+        b'#' if ctx.parser.options.obsidian_flavored => {
+            has_tag_boundary_before(ctx)
+                && matches!(
+                    ctx.line.get(1),
+                    Some(b'a'..=b'z' | b'A'..=b'Z' | 0xC0..=0xFF)
+                )
+        }
+        // Emoji names must start with an alphanumeric/combining-ish byte or one of _+-.
+        b':' if !ctx.parser.options.default_flavored => {
+            matches!(
+                ctx.line.get(1),
+                Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'+' | b'-' | 0x80..=0xFF)
+            )
+        }
+        // Inline math cannot open before whitespace; block math starts with $$.
+        b'$' if !ctx.parser.options.default_flavored => {
+            ctx.line.get(1) == Some(b'$')
+                || ctx.line.get(1).is_some_and(|b| !b.is_ascii_whitespace())
+        }
         _ => true,
     }
+}
+
+#[inline]
+fn starts_with_ci(ctx: &ProcessCtx, needle: &[u8]) -> bool {
+    needle.iter().enumerate().all(|(idx, expected)| {
+        ctx.line
+            .get(idx)
+            .is_some_and(|actual| actual.eq_ignore_ascii_case(expected))
+    })
+}
+
+#[inline]
+fn has_tag_boundary_before(ctx: &ProcessCtx) -> bool {
+    let Some(span) = ctx.line.current_span() else {
+        return false;
+    };
+    let cur = span.cursor();
+    if cur <= span.start() {
+        return true;
+    }
+    matches!(span.source_slice()[cur - 1], b'\n' | b'\r' | b' ' | b'\t')
 }
 
 /// 文本累积器：零分配快速路径 + 回退 String 路径
