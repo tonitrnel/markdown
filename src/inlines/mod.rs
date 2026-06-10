@@ -178,8 +178,10 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec
                     false
                 }
             }
-            // Block id(OFM) (^)
-            b'^' if ctx.parser.options.obsidian_flavored => link::process_block_id(&mut ctx),
+            // Inline footnote / block id (OFM) (^)
+            b'^' if ctx.parser.options.obsidian_flavored => {
+                footnote::process_inline(&mut ctx) || link::process_block_id(&mut ctx)
+            }
             // Emoji (:)
             b':' if !ctx.parser.options.default_flavored => emoji::process(&mut ctx),
             // Tag (#)

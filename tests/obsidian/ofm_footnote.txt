@@ -1,0 +1,33 @@
+// Obsidian Flavored Markdown - Footnotes
+// Reference: https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax
+
+## Footnotes (extension)
+
+OFM supports referenced footnotes, lazy continuation lines, and inline footnotes.
+
+Referenced and inline footnotes:
+
+```````````````````````````````` example
+Footnotes[^1] and named[^note]. Inline ^[inline *note*].
+
+[^1]: First footnote.
+[^note]: Named footnote.
+Continued line.
+.
+<p>Footnotes<a href="#cont-fn-1" id="cont-fn-ref-1">[1]</a> and named<a href="#cont-fn-note" id="cont-fn-ref-note">[2]</a>. Inline <a href="#cont-fn-inline-footnote-3" id="cont-fn-ref-inline-footnote-3">[3]</a>.</p>
+<section>
+<h2>Footnotes</h2>
+<ol>
+<li id="cont-fn-1">
+<p>First footnote.<a href="#cont-fn-ref-1">↩</a></p>
+</li>
+<li id="cont-fn-note">
+<p>Named footnote.
+Continued line.<a href="#cont-fn-ref-note">↩</a></p>
+</li>
+<li id="cont-fn-inline-footnote-3">
+<p>inline <em>note</em><a href="#cont-fn-ref-inline-footnote-3">↩</a></p>
+</li>
+</ol>
+</section>
+````````````````````````````````
