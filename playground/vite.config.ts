@@ -5,6 +5,7 @@ import topLevelAwait from 'vite-plugin-top-level-await';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+  base: '/markdown/',
   server: {
     port: 12245,
     fs: {
