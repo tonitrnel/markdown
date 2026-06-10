@@ -4,7 +4,10 @@ WASM_BINDING_DIR := wasm-binding
 WASM_WEB_PKG_DIR := $(WASM_BINDING_DIR)/pkg-web
 WASM_NODE_PKG_DIR := $(WASM_BINDING_DIR)/pkg-node
 NPM_CACHE_DIR := /tmp/npm-cache-codex
-WASM_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' $(WASM_BINDING_DIR)/Cargo.toml | head -n 1)
+WASM_VERSION := $(shell sed -n "s/^version = \"\(.*\)\"/\1/p" $(WASM_BINDING_DIR)/Cargo.toml | head -n 1)
+
+test:
+	echo "${WASM_VERSION}"
 
 build-release:
 	cargo build --release
