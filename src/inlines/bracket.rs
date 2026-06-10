@@ -131,11 +131,7 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         let node = if is_image {
             let size = opener.borrow_mut().image_size.take();
             parser.append_free_node(
-                MarkdownNode::Image(Box::new(ast::image::Image {
-                    url,
-                    title,
-                    size,
-                })),
+                MarkdownNode::Image(Box::new(ast::image::Image { url, title, size })),
                 start_location,
             )
         } else if is_footnote_link {

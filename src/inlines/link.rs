@@ -435,7 +435,7 @@ pub(super) fn process_wikilink(
             (WikilinkState::InPath, b'|', _) => {
                 // 如果前一个字符是 \，说明是 \| 转义，需要去掉 \
                 // Obsidian 在 Wikilink 中对 \| 不敏感，将其视作分隔符
-                pr.1 = if rel > 0 && i > 0 && bytes[i - 1] == b'\\'{
+                pr.1 = if rel > 0 && i > 0 && bytes[i - 1] == b'\\' {
                     rel - 1
                 } else {
                     rel
@@ -489,7 +489,7 @@ pub(super) fn process_wikilink(
                 break;
             }
             (WikilinkState::InRef(InRef::RefBlock), b'|', _) => {
-                 // 如果前一个字符是 \，说明是 \| 转义，需要去掉 \
+                // 如果前一个字符是 \，说明是 \| 转义，需要去掉 \
                 rrs.1[0].1 = if rel > 0 && i > 0 && bytes[i - 1] == b'\\' {
                     rel - 1
                 } else {
@@ -1488,24 +1488,19 @@ mod tests {
         println!("{ast:?}");
     }
     #[test]
-    fn test_wikilink_escape_in_table(){
+    fn test_wikilink_escape_in_table() {
         let text = r#"
 |  顺序 | 值        |
 | --: | ------------ |
 |   3 |  阅读 [[01-参考文件\|参考内容]] |        
         "#;
-        let ast = Parser::new_with_options(
-            text,
-            ParserOptions::default()
-                .enabled_ofm()
-        )
-        .parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         let ast_str = format!("{:#?}", ast);
         println!("{}", ast_str);
         assert!(ast_str.contains(r#"Link(Wikilink(Wikilink { path: "01-参考文件", text: Some("参考内容"), reference: None }))"#))
     }
     #[test]
-    fn test_wikilink_escape(){
+    fn test_wikilink_escape() {
         let text = r#"
 [[link\|text]]
 
@@ -1513,17 +1508,24 @@ mod tests {
 
 [[note2#^block\|display]]
         "#;
-        let ast = Parser::new_with_options(
-            text,
-            ParserOptions::default()
-                .enabled_ofm()
-        )
-        .parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
         let ast_str = format!("{:#?}", ast);
         println!("{}", ast_str);
-        let lines = ast_str.lines().map(|it|it.trim().to_string()).collect::<Vec<String>>();
-        assert_eq!(lines[2],r#"Link(Wikilink(Wikilink { path: "link", text: Some("text"), reference: None }))"#);
-        assert_eq!(lines[4],r#"Link(Wikilink(Wikilink { path: "note1", text: Some("display"), reference: Some(Heading("heading")) }))"#);
-        assert_eq!(lines[6],r#"Link(Wikilink(Wikilink { path: "note2", text: Some("display"), reference: Some(BlockId("block")) }))"#);
+        let lines = ast_str
+            .lines()
+            .map(|it| it.trim().to_string())
+            .collect::<Vec<String>>();
+        assert_eq!(
+            lines[2],
+            r#"Link(Wikilink(Wikilink { path: "link", text: Some("text"), reference: None }))"#
+        );
+        assert_eq!(
+            lines[4],
+            r#"Link(Wikilink(Wikilink { path: "note1", text: Some("display"), reference: Some(Heading("heading")) }))"#
+        );
+        assert_eq!(
+            lines[6],
+            r#"Link(Wikilink(Wikilink { path: "note2", text: Some("display"), reference: Some(BlockId("block")) }))"#
+        );
     }
 }

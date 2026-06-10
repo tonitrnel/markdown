@@ -28,7 +28,10 @@ impl BlockStrategy for footnote::Footnote {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         let location = line.start_location();
         if let Some(label_end) = scan_footnote_start(line) {
-            let label = line.slice(line.indent_len() + 2, label_end).as_str().to_string();
+            let label = line
+                .slice(line.indent_len() + 2, label_end)
+                .as_str()
+                .to_string();
             line.skip(label_end + 2);
             parser.close_unmatched_blocks();
             let idx = parser.append_block(
