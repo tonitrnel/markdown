@@ -18,6 +18,7 @@ impl BlockStrategy for block_quote::BlockQuote {
     }
     fn process(ctx: ProcessCtx) -> BlockProcessing {
         if !ctx.line.is_indented() && ctx.line.advance_next_nonspace().starts_with(b'>', 1) {
+            // Explicit blockquote marker keeps blank lines inside the callout.
             // skip '>' byte
             ctx.line.next_byte();
             // optional following space
@@ -25,7 +26,11 @@ impl BlockStrategy for block_quote::BlockQuote {
             ctx.line.re_find_indent();
             return BlockProcessing::Further;
         }
-        BlockProcessing::Unprocessed
+        if !ctx.line.is_blank() && ctx.parser.options.obsidian_flavored {
+            BlockProcessing::Further
+        } else {
+            BlockProcessing::Unprocessed
+        }
     }
 }
 
@@ -41,7 +46,7 @@ mod tests {
         let text = r#"
 > # Foo
 > bar
-> baz        
+> baz
         "#
         .trim();
         let ast = Parser::new(text).parse();

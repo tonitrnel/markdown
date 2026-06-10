@@ -249,3 +249,37 @@ Nested callout:
 </div>
 </div>
 ````````````````````````````````
+
+Callout lazy continuation does not require `>` on non-blank lines:
+
+```````````````````````````````` example
+> [!info]
+ You can turn your quote into a callout by adding `[!info]` as the first line in a quote.
+>
+ This is allowed
+.
+<div class="callout" data-callout="info">
+<div class="callout-title">Info</div>
+<div class="callout-content">
+<p>You can turn your quote into a callout by adding <code>[!info]</code> as the first line in a quote.</p>
+<p>This is allowed</p>
+</div>
+</div>
+````````````````````````````````
+
+Blank line without `>` ends a callout:
+
+```````````````````````````````` example
+> [!info]
+ Inside
+
+Outside
+.
+<div class="callout" data-callout="info">
+<div class="callout-title">Info</div>
+<div class="callout-content">
+<p>Inside</p>
+</div>
+</div>
+<p>Outside</p>
+````````````````````````````````

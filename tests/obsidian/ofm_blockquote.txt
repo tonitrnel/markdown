@@ -1,0 +1,33 @@
+// Obsidian Flavored Markdown - Block quotes
+// Reference: https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax
+
+## Block Quotes (extension)
+
+OFM block quotes support lazy continuation lines without `>` until a blank line.
+An explicit `>` blank line keeps following lazy continuation inside the same quote.
+
+Block quote lazy continuation after explicit blank quote line:
+
+```````````````````````````````` example
+> bar
+>
+baz
+.
+<blockquote>
+<p>bar</p>
+<p>baz</p>
+</blockquote>
+````````````````````````````````
+
+Blank line without `>` ends a block quote:
+
+```````````````````````````````` example
+> bar
+
+baz
+.
+<blockquote>
+<p>bar</p>
+</blockquote>
+<p>baz</p>
+````````````````````````````````
