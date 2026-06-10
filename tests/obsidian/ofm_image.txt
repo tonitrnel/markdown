@@ -1,0 +1,22 @@
+// Obsidian Flavored Markdown - Images
+// Reference: https://help.obsidian.md/Editing+and+formatting/Basic+formatting+syntax
+
+## Images (extension)
+
+OFM supports image dimensions in standard Markdown image alt text.
+
+Image with width and height:
+
+```````````````````````````````` example
+![Engelbart|120x160](https://history-computer.com/ModernComputer/Basis/images/Engelbart.jpg)
+.
+<p><img src="https://history-computer.com/ModernComputer/Basis/images/Engelbart.jpg" alt="Engelbart" width="120" height="160" /></p>
+````````````````````````````````
+
+Image with width:
+
+```````````````````````````````` example
+![grapefruit|100](https://interactive-examples.mdn.mozilla.net/media/cc0-images/grapefruit-slice-332-332.jpg)
+.
+<p><img src="https://interactive-examples.mdn.mozilla.net/media/cc0-images/grapefruit-slice-332-332.jpg" alt="grapefruit" width="100" /></p>
+````````````````````````````````

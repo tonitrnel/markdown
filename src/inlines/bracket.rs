@@ -18,6 +18,7 @@ pub(super) struct Bracket {
     pub(super) index: usize,
     pub(super) active: bool,
     pub(super) variant: BracketVariant,
+    pub(super) image_size: Option<(u32, Option<u32>)>,
 }
 #[derive(Clone)]
 pub(super) struct BracketChain(Rc<RefCell<Bracket>>);
@@ -35,6 +36,24 @@ impl BracketChain {
     pub(super) fn is_image(&self) -> bool {
         matches!(self.borrow().variant, BracketVariant::Image)
     }
+}
+
+pub(super) fn parse_image_size_suffix(text: &str) -> Option<(usize, (u32, Option<u32>))> {
+    let (alt, size) = text.rsplit_once('|')?;
+    if size.is_empty() {
+        return None;
+    }
+    let mut parts = size.split('x');
+    let width = parts.next()?.parse::<u32>().ok()?;
+    let height = match parts.next() {
+        Some(value) if !value.is_empty() => Some(value.parse::<u32>().ok()?),
+        Some(_) => return None,
+        None => None,
+    };
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((alt.len(), (width, height)))
 }
 
 pub(super) fn before(
@@ -78,6 +97,7 @@ pub(super) fn before(
         active: true,
         variant,
         bracket_after: false,
+        image_size: None,
     }));
     true
 }
@@ -109,8 +129,13 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         let opener_inl = opener.borrow().node;
         let start_location = parser.tree[opener_inl].start;
         let node = if is_image {
+            let size = opener.borrow_mut().image_size.take();
             parser.append_free_node(
-                MarkdownNode::Image(Box::new(ast::image::Image { url, title })),
+                MarkdownNode::Image(Box::new(ast::image::Image {
+                    url,
+                    title,
+                    size,
+                })),
                 start_location,
             )
         } else if is_footnote_link {

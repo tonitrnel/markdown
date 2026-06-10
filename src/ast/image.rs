@@ -4,4 +4,5 @@ use serde::Serialize;
 pub struct Image {
     pub url: String,
     pub title: Option<String>,
+    pub size: Option<(u32, Option<u32>)>,
 }

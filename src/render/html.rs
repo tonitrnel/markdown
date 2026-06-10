@@ -158,12 +158,26 @@ where
                 Borrowed("\n</ol>\n</section>"),
             )),
             MarkdownNode::Image(img) => {
-                let image::Image { url, title } = img.as_ref();
+                let image::Image { url, title, size } = img.as_ref();
                 write!(self.writer, "<img src={url:?} alt=\"")?;
                 if let Some(child_idx) = self.tree.get_first_child(idx) {
                     self.write_text(child_idx, true, true)?;
                 }
-                write!(self.writer, "\"{} />", Self::format_title_attr(title))?;
+                let size_attr = if let Some((w, h)) = size {
+                    if let Some(h) = h {
+                        format!(" width=\"{w}\" height=\"{h}\"")
+                    } else {
+                        format!(" width=\"{w}\"")
+                    }
+                } else {
+                    String::new()
+                };
+                write!(
+                    self.writer,
+                    "\"{}{} />",
+                    Self::format_title_attr(title),
+                    size_attr
+                )?;
                 None
             }
             MarkdownNode::Emoji(emoji) => {

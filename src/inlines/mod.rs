@@ -91,6 +91,9 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec
         }
 
         // 特殊字符：先 flush 累积的文本，然后尝试匹配
+        if byte == b']' {
+            strip_image_size_suffix_from_pending_text(&mut text_acc, &mut ctx);
+        }
         flush_text_acc(&mut text_acc, &mut ctx);
         let snapshot = ctx.line.snapshot();
 
@@ -503,6 +506,45 @@ fn fallback_accumulate<'input>(
             }
         }
     }
+}
+
+fn strip_image_size_suffix_from_pending_text(
+    text_acc: &mut Option<TextAccumulator>,
+    ctx: &mut ProcessCtx,
+) {
+    if !ctx.parser.options.obsidian_flavored {
+        return;
+    }
+    let Some(bracket) = ctx.brackets.clone() else {
+        return;
+    };
+    if !bracket.is_image() {
+        return;
+    }
+
+    let size = match text_acc {
+        Some(TextAccumulator::Slice {
+            slice, range_end, ..
+        }) => {
+            let current = *slice;
+            let Some((alt_len, size)) = bracket::parse_image_size_suffix(current) else {
+                return;
+            };
+            let removed = current.len() - alt_len;
+            *slice = &current[..alt_len];
+            *range_end = range_end.saturating_sub(removed);
+            size
+        }
+        Some(TextAccumulator::Owned { text, .. }) => {
+            let Some((alt_len, size)) = bracket::parse_image_size_suffix(text) else {
+                return;
+            };
+            text.truncate(alt_len);
+            size
+        }
+        None => return,
+    };
+    bracket.borrow_mut().image_size = Some(size);
 }
 
 /// 将累积的文本一次性创建为 Text 节点

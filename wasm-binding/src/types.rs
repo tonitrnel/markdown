@@ -252,6 +252,8 @@ export interface ImageNode extends Node{
         readonly url: string
         /** 图片标题 / Image title */
         readonly title: string | undefined
+        /** 尺寸 [宽度, 高度?] / Size [width, height?] */
+        readonly size: readonly [number, number | undefined] | undefined
     }
 }
 /**
