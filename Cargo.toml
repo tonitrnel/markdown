@@ -40,6 +40,16 @@ name = "timing_test"
 harness = false
 path = "bench/benches/timing_test.rs"
 
+[[bench]]
+name = "alloc_count"
+harness = false
+path = "bench/benches/alloc_count.rs"
+
+[[bench]]
+name = "hotspots"
+harness = false
+path = "bench/benches/hotspots.rs"
+
 [features]
 default = ["html", "frontmatter"]
 html = []
