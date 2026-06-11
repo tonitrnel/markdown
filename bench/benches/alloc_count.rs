@@ -10,6 +10,9 @@ static REALLOCS: AtomicU64 = AtomicU64::new(0);
 static DEALLOCS: AtomicU64 = AtomicU64::new(0);
 static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
 static REALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
+static MAX_ELAPSED: AtomicU64 = AtomicU64::new(0);
+static MIN_ELAPSED: AtomicU64 = AtomicU64::new(u64::MAX);
+static MID_ELAPSED: AtomicU64 = AtomicU64::new(u64::MAX);
 
 #[global_allocator]
 static GLOBAL: CountingAlloc = CountingAlloc;
@@ -39,12 +42,25 @@ fn reset() {
     DEALLOCS.store(0, Ordering::Relaxed);
     ALLOC_BYTES.store(0, Ordering::Relaxed);
     REALLOC_BYTES.store(0, Ordering::Relaxed);
+    MAX_ELAPSED.store(0, Ordering::Relaxed);
+    MIN_ELAPSED.store(u64::MAX, Ordering::Relaxed);
+    MID_ELAPSED.store(0, Ordering::Relaxed);
 }
 
 fn parse_once(text: &str) {
+    let start = std::time::Instant::now();
     let parser = Parser::new_with_options(text, ParserOptions::default().enabled_ofm());
-    let ast = parser.parse();
-    let _html = ast.to_html();
+    let _ast = parser.parse();
+    let elapsed = start.elapsed().as_micros() as u64;
+    let previous = MID_ELAPSED.load(Ordering::Relaxed);
+    MAX_ELAPSED.fetch_max(elapsed, Ordering::Relaxed);
+    MIN_ELAPSED.fetch_min(elapsed, Ordering::Relaxed);
+    if previous == 0 {
+        MID_ELAPSED.store(elapsed, Ordering::Relaxed);
+    } else {
+        MID_ELAPSED.store((elapsed + previous) / 2, Ordering::Relaxed);
+    }
+    // let _html = ast.to_html();
 }
 
 fn main() {
@@ -60,11 +76,14 @@ fn main() {
     }
 
     eprintln!(
-        "allocs={} reallocs={} deallocs={} alloc_bytes={} realloc_bytes={}",
+        "allocs={} reallocs={} deallocs={} alloc_bytes={} realloc_bytes={} elapsed={:3}ms<{:3}ms<{:3}ms",
         ALLOCS.load(Ordering::Relaxed),
         REALLOCS.load(Ordering::Relaxed),
         DEALLOCS.load(Ordering::Relaxed),
         ALLOC_BYTES.load(Ordering::Relaxed),
         REALLOC_BYTES.load(Ordering::Relaxed),
+        MIN_ELAPSED.load(Ordering::Relaxed) as f64 / 1000.0,
+        MID_ELAPSED.load(Ordering::Relaxed) as f64 / 1000.0,
+        MAX_ELAPSED.load(Ordering::Relaxed) as f64 / 1000.0,
     );
 }
