@@ -2,6 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+- Added a design specification for selective inline parsing and Rust-only block/semantic events, including filtered traversal, early-stop behavior, and inline selection semantics.
+
+### Changed
+- Extended the allocation-count benchmark to report minimum, midpoint, and maximum parse elapsed times alongside allocation metrics.
+
+## [1.0.5] - 2026-06-10
+
+### Added
+- Added benchmark data and comparison tooling for parser performance analysis.
+- Added support for Obsidian blockquote/callout lazy continuations and inline footnotes.
+
+### Changed
+- Optimized parser hot paths and updated the playground and profiling configuration.
+
+### Fixed
+- Added support for external image sizes.
+
+## [1.0.4] - 2026-06-10
+
+### Changed
+- Updated wikilink parsing so `\|` is treated as a separator and trailing `\` characters in paths are handled correctly.
+- Updated the playground dependency and release-related configuration.
+
 ## [1.0.3] - 2026-02-18
 
 ### Changed
