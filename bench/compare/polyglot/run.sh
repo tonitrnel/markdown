@@ -10,8 +10,8 @@ CMARK_SRC_DIR="$BENCH_DIR/.third_party/cmark-master"
 CMARK_BUILD_DIR="$CMARK_SRC_DIR/build"
 CMARK_BIN="$BENCH_DIR/c/cmark_bench"
 CMARK_URL="${CMARK_URL:-https://github.com/commonmark/cmark/archive/refs/heads/master.tar.gz}"
-MARKDOWN_IT_DIR="$ROOT_DIR/bench/data/markdown-it"
-MARKDOWN_IT_CORPUS="$ROOT_DIR/bench/data/markdown-it-corpus.md"
+MARKDOWN_IT_DIR="$ROOT_DIR/bench/fixures/corpora/markdown-it"
+MARKDOWN_IT_CORPUS="$ROOT_DIR/bench/fixures/corpora/markdown-it-corpus.md"
 
 mkdir -p "$GO_CACHE_DIR" "$GO_MOD_CACHE_DIR"
 
@@ -27,7 +27,7 @@ build_markdown_it_corpus() {
   return 0
 }
 
-DATASET_PATHS=("$BENCH_DIR/data/data.md")
+DATASET_PATHS=("$BENCH_DIR/fixures/data.md")
 DATASET_LABELS=("default_data")
 if build_markdown_it_corpus && [[ -s "$MARKDOWN_IT_CORPUS" ]]; then
   DATASET_PATHS+=("$MARKDOWN_IT_CORPUS")

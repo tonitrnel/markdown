@@ -59,8 +59,8 @@ frontmatter = []
 members = [
     "examples/*",
     "wasm-binding",
-    "bench/third_party/parser-compare",
-    "bench/third_party/polyglot",
+    "bench/compare/native",
+    "bench/compare/polyglot",
 ]
 
 [profile.release]

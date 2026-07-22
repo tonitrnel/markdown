@@ -48,7 +48,7 @@ int main(void) {
     label = "default_data";
   }
   if (!data_path || !*data_path) {
-    data_path = "../data/data.md";
+    data_path = "../fixures/data.md";
   }
   char *text = read_file(data_path, &len);
 

@@ -165,6 +165,20 @@ impl ParserOptions {
             ..self
         }
     }
+    pub fn enabled_all(self) -> Self {
+        Self {
+            default_flavored: true,
+            github_flavored: true,
+            gfm_extended_autolink: true,
+            obsidian_flavored: true,
+            mdx_component: true,
+            cjk_autocorrect: true,
+            smart_punctuation: true,
+            normalize_chinese_punctuation: true,
+            cjk_friendly_delimiters: true,
+            ..self
+        }
+    }
     pub fn with_max_input_bytes(self, max_input_bytes: usize) -> Self {
         Self {
             max_input_bytes: Some(max_input_bytes),
