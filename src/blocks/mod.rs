@@ -1,5 +1,4 @@
 use crate::ast::{self, MarkdownNode};
-use crate::parser::Location;
 use crate::parser::Parser;
 use crate::span::Span;
 
@@ -97,14 +96,14 @@ pub fn process<'input>(
     }
 }
 
-pub fn after(id: usize, parser: &mut Parser, location: Location) {
+pub fn after(id: usize, parser: &mut Parser, location: u32) {
     // For container blocks like List and ListItem, adjust end location
     // to not include the trailing newline of the last line
     let adjusted_location = match &parser.tree[id].body {
         MarkdownNode::List(..) | MarkdownNode::ListItem(..) => {
             // Use the end of the last child if available
             if let Some(last_child) = parser.tree.get_last_child(id) {
-                parser.tree[last_child].end
+                parser.tree[last_child].span.end
             } else {
                 location
             }
@@ -113,7 +112,7 @@ pub fn after(id: usize, parser: &mut Parser, location: Location) {
     };
 
     let node = &mut parser.tree[id];
-    node.end = adjusted_location;
+    node.span.end = adjusted_location;
 
     match node.body {
         MarkdownNode::Heading(ast::heading::Heading::ATX(..)) => {
@@ -137,37 +136,74 @@ pub fn after(id: usize, parser: &mut Parser, location: Location) {
         _ => (),
     }
 }
+/// LineHead（v2C C1）：行首（缩进后）字节 → 候选 matcher 位集。
+/// 位序 == `MATCHERS` 数组的既有优先级；省略的 matcher 对该首字节恒 Unmatched
+/// （各 `before()` 的首字节门逐一核对，见 ticket 26 Proposal）。
+/// 缩进行由调用方追加 IndentedCode（末位）。
+static LINE_HEAD: [u16; 256] = {
+    let mut t = [0u16; 256];
+    t[b'>' as usize] = (1 << 0) | (1 << 1); // Callout, BlockQuote
+    t[b'#' as usize] = 1 << 2; // ATXHeading
+    t[b'`' as usize] = 1 << 3; // FencedCode
+    t[b'~' as usize] = 1 << 3;
+    t[b'<' as usize] = 1 << 4; // Html
+    t[b'=' as usize] = 1 << 5; // SetextHeading
+    t[b'-' as usize] = (1 << 5) | (1 << 6) | (1 << 7) | (1 << 8);
+    t[b'*' as usize] = (1 << 6) | (1 << 7); // ThematicBreak, ListItem
+    t[b'_' as usize] = 1 << 6;
+    t[b'+' as usize] = 1 << 7; // ListItem
+    let mut d = b'0';
+    while d <= b'9' {
+        t[d as usize] = 1 << 7;
+        d += 1;
+    }
+    t[b'|' as usize] = 1 << 8; // Table
+    t[b':' as usize] = 1 << 8;
+    t[b'[' as usize] = 1 << 9; // Footnote
+    t
+};
+
 pub fn matcher<'input>(
     container: usize,
     parser: &mut Parser<'input>,
     line: &mut Span<'input>,
 ) -> BlockMatching {
-    let matchers = [
-        ast::callout::Callout::before,
-        ast::block_quote::BlockQuote::before,
-        ast::heading::ATXHeading::before,
-        ast::code::FencedCode::before,
-        ast::html::Html::before,
-        ast::heading::SetextHeading::before,
-        ast::thematic_break::ThematicBreak::before,
-        ast::list::ListItem::before,
-        ast::table::Table::before,
-        ast::footnote::Footnote::before,
-        ast::code::IndentedCode::before,
-    ];
     let snapshot = line.snapshot();
-    for matcher in matchers {
-        line.resume(&snapshot);
-        let ctx = BeforeCtx {
-            container,
-            parser,
-            line,
-        };
-        match matcher(ctx) {
-            BlockMatching::Unmatched => continue,
-            r => return r,
-        }
+    let mut mask = line
+        .get(line.indent_len())
+        .map(|b| LINE_HEAD[b as usize])
+        .unwrap_or(0);
+    if line.is_indented() {
+        mask |= 1 << 10; // IndentedCode（末位，保持原相对顺序）
     }
+    // 展开的位测试保持直接调用（可内联）；顺序 == 既有 11-matcher 优先级
+    macro_rules! try_matcher {
+        ($bit:literal, $before:path) => {
+            if mask & (1 << $bit) != 0 {
+                line.resume(&snapshot);
+                let ctx = BeforeCtx {
+                    container,
+                    parser,
+                    line,
+                };
+                match $before(ctx) {
+                    BlockMatching::Unmatched => {}
+                    r => return r,
+                }
+            }
+        };
+    }
+    try_matcher!(0, ast::callout::Callout::before);
+    try_matcher!(1, ast::block_quote::BlockQuote::before);
+    try_matcher!(2, ast::heading::ATXHeading::before);
+    try_matcher!(3, ast::code::FencedCode::before);
+    try_matcher!(4, ast::html::Html::before);
+    try_matcher!(5, ast::heading::SetextHeading::before);
+    try_matcher!(6, ast::thematic_break::ThematicBreak::before);
+    try_matcher!(7, ast::list::ListItem::before);
+    try_matcher!(8, ast::table::Table::before);
+    try_matcher!(9, ast::footnote::Footnote::before);
+    try_matcher!(10, ast::code::IndentedCode::before);
     line.resume(&snapshot);
     BlockMatching::Unmatched
 }

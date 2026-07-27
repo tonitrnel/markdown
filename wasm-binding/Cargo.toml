@@ -12,6 +12,8 @@ license = "MIT"
 wasm-bindgen = "0.2.92"
 markdown = { path = "../", version = "*", features = [] }
 serde = { version = "1.0.200", features = ["derive"] }
+serde_json = "1"
+itoa = "1"
 serde-wasm-bindgen = "0.6.5"
 console_error_panic_hook = "0.1.7"
 rustc-hash = "2"
@@ -21,4 +23,4 @@ rustc-hash = "2"
 crate-type = ["cdylib"]
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O", "--enable-bulk-memory", "--enable-mutable-globals", "--enable-nontrapping-float-to-int"]
+wasm-opt = ["-O", "--enable-simd", "--enable-bulk-memory", "--enable-mutable-globals", "--enable-nontrapping-float-to-int"]

@@ -11,6 +11,7 @@ fn merge_and_correct_text(
     cjk_rich: bool,
     normalize_chi_punct: bool,
 ) {
+    let source = parser.scanner.source_str();
     let mut stack: SmallVec<[(usize, Option<usize>); 16]> = SmallVec::new();
     stack.push((idx, None));
     while let Some((idx, into_idx)) = stack.pop() {
@@ -21,11 +22,11 @@ fn merge_and_correct_text(
                     let node = parser.tree.remove(idx);
                     match (&mut parser.tree[into_idx].body, &node.body) {
                         (MarkdownNode::Text(into_str), MarkdownNode::Text(str)) => {
-                            into_str.push_str(str);
+                            into_str.append_ref(str, source);
                         }
                         _ => panic!("unexpected error"),
                     }
-                    parser.tree[into_idx].end = node.end;
+                    parser.tree[into_idx].span.end = node.span.end;
                 }
                 into_idx
             } else {
@@ -41,7 +42,7 @@ fn merge_and_correct_text(
                 if cjk_rich {
                     if let MarkdownNode::Text(text) = &mut parser.tree[merged_id].body {
                         let cjk_nouns = parser.options.cjk_nouns.iter();
-                        correct_cjk_text(text, normalize_chi_punct, cjk_nouns);
+                        correct_cjk_text(text, source, normalize_chi_punct, cjk_nouns);
                     }
                 }
                 stack.push((next_idx, None));
@@ -50,7 +51,7 @@ fn merge_and_correct_text(
                 if cjk_rich {
                     if let MarkdownNode::Text(text) = &mut parser.tree[merged_id].body {
                         let cjk_nouns = parser.options.cjk_nouns.iter();
-                        correct_cjk_text(text, normalize_chi_punct, cjk_nouns);
+                        correct_cjk_text(text, source, normalize_chi_punct, cjk_nouns);
                     }
                 }
             }
@@ -84,24 +85,28 @@ pub(super) fn process_final(id: usize, parser: &mut Parser) {
     merge_and_correct_text(parser, next, merge_adjacent, cjk_rich, normalize_chi_punct);
 }
 
-fn correct_cjk_text<I, S>(text: &mut String, normalize_chi_punct: bool, cjk_nouns: I)
-where
+fn correct_cjk_text<I, S>(
+    text: &mut crate::ast::text::TextRef,
+    source: &str,
+    normalize_chi_punct: bool,
+    cjk_nouns: I,
+) where
     I: Iterator<Item = S>,
     S: AsRef<str>,
 {
-    // 1. CJK 空格插入
+    // 1. CJK 空格插入（未变化时保持 Source 表示不物化）
     let corrected =
-        crate::utils::cjk::correct_cjk_spacing_with_nouns::<I, S>(text.as_ref(), cjk_nouns);
+        crate::utils::cjk::correct_cjk_spacing_with_nouns::<I, S>(text.resolve(source), cjk_nouns);
     if let std::borrow::Cow::Owned(new_text) = corrected {
-        *text = new_text;
+        *text = crate::ast::text::TextRef::Owned(new_text);
     }
 
     // 2. 中文标点规范化（可选）
     if normalize_chi_punct {
         let normalized =
-            crate::utils::chinese_punctuation::normalize_chi_punctuation(text.as_ref());
+            crate::utils::chinese_punctuation::normalize_chi_punctuation(text.resolve(source));
         if let std::borrow::Cow::Owned(new_text) = normalized {
-            *text = new_text;
+            *text = crate::ast::text::TextRef::Owned(new_text);
         }
     }
 }

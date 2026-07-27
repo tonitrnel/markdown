@@ -1,12 +1,42 @@
 use crate::ast::{MarkdownNode, embed, link, reference::Reference};
 use crate::inlines::ProcessCtx;
-use crate::inlines::bracket::BracketChain;
+use crate::inlines::bracket::Bracket;
 use crate::span::{MergedSpan, Span};
 use crate::utils;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 /// 处理反斜杠转义：将 `\X` 替换为 `X`（X 为 ASCII 标点字符）
+/// `scan_link_or_image` 的判别结果：资源链接/图片，或脚注引用标签。
+pub(crate) enum ScannedLink {
+    Resource {
+        url: crate::ast::text::TextRef,
+        title: Option<crate::ast::text::TextRef>,
+    },
+    Footnote {
+        label: String,
+    },
+}
+
+/// 恒等快路径：不含「`\` + ASCII 标点」时零分配借用。
+pub(super) fn backslash_unescape_cow(s: &str) -> std::borrow::Cow<'_, str> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut needs = false;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'\\' && bytes[i + 1].is_ascii_punctuation() {
+            needs = true;
+            break;
+        }
+        i += 1;
+    }
+    if needs {
+        std::borrow::Cow::Owned(backslash_unescape(s))
+    } else {
+        std::borrow::Cow::Borrowed(s)
+    }
+}
+
 pub(super) fn backslash_unescape(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut result = String::with_capacity(s.len());
@@ -39,10 +69,10 @@ enum InString {
 
 pub(crate) fn scan_link_or_image(
     line: &mut Span,
-    opener: &BracketChain,
+    opener: &Bracket,
     ref_map: &FxHashMap<String, (String, Option<String>)>,
     footnotes: &FxHashMap<String, usize>,
-) -> Option<(String, Option<String>, bool)> {
+) -> Option<ScannedLink> {
     let snapshot = line.snapshot();
     let mut url = None;
     let mut title = None;
@@ -56,10 +86,27 @@ pub(crate) fn scan_link_or_image(
         url = match scan_link_url(line) {
             Some((size, url_span)) => {
                 line.skip(size);
-                Some(utils::percent_encode::encode(
-                    backslash_unescape(&utils::unescape_string(url_span.to_string())),
-                    true,
-                ))
+                // 恒等链零分配：entity → 反斜杠 → percent-encode 逐级 Cow；
+                // 全程恒等时直接保存源码区间（零分配）
+                let raw = url_span.as_str();
+                let unescaped = utils::entities::unescape_string_cow(raw);
+                let unescaped = match backslash_unescape_cow(&unescaped) {
+                    std::borrow::Cow::Borrowed(_) => unescaped,
+                    std::borrow::Cow::Owned(owned) => std::borrow::Cow::Owned(owned),
+                };
+                let encoded = match utils::percent_encode::encode_cow(&unescaped, true) {
+                    std::borrow::Cow::Borrowed(_) => unescaped,
+                    std::borrow::Cow::Owned(owned) => std::borrow::Cow::Owned(owned),
+                };
+                Some(match encoded {
+                    std::borrow::Cow::Borrowed(_) => {
+                        crate::ast::text::TextRef::Source(crate::ast::text::SourceSpan::new(
+                            url_span.start() as u32,
+                            url_span.end() as u32,
+                        ))
+                    }
+                    std::borrow::Cow::Owned(owned) => crate::ast::text::TextRef::Owned(owned),
+                })
             }
             _ => break 'scan_link_url,
         };
@@ -69,9 +116,23 @@ pub(crate) fn scan_link_or_image(
                 match scan_link_title(line) {
                     Some((size, title_span)) => {
                         line.skip(size);
-                        Some(backslash_unescape(&utils::entities::unescape_string(
-                            title_span.to_string(),
-                        )))
+                        let raw = title_span.as_str();
+                        let unescaped = utils::entities::unescape_string_cow(raw);
+                        let unescaped = match backslash_unescape_cow(&unescaped) {
+                            std::borrow::Cow::Borrowed(_) => unescaped,
+                            std::borrow::Cow::Owned(owned) => std::borrow::Cow::Owned(owned),
+                        };
+                        Some(match unescaped {
+                            std::borrow::Cow::Borrowed(_) => crate::ast::text::TextRef::Source(
+                                crate::ast::text::SourceSpan::new(
+                                    title_span.start() as u32,
+                                    title_span.end() as u32,
+                                ),
+                            ),
+                            std::borrow::Cow::Owned(owned) => {
+                                crate::ast::text::TextRef::Owned(owned)
+                            }
+                        })
                     }
                     _ => None,
                 }
@@ -86,6 +147,7 @@ pub(crate) fn scan_link_or_image(
         matched = true;
     };
     let mut is_footnote_link = false;
+    let mut footnote_label: Option<String> = None;
     // 如果上一个块未匹配，尝试解析 link label
     'scan_link_label: {
         if matched {
@@ -97,7 +159,7 @@ pub(crate) fn scan_link_or_image(
                 line.skip(size);
                 // If label is empty [], use the opener content as reference
                 if label == "[]" {
-                    let mut opener_idx = opener.borrow().index;
+                    let mut opener_idx = opener.index;
                     // For images, skip the '!' character
                     if opener.is_image() {
                         opener_idx += 1;
@@ -109,9 +171,9 @@ pub(crate) fn scan_link_or_image(
                     label
                 }
             }
-            None if !opener.borrow().bracket_after => {
+            None if !opener.bracket_after => {
                 // 从 opener 的 index 到当前 cursor 的内容
-                let mut opener_idx = opener.borrow().index;
+                let mut opener_idx = opener.index;
                 // For images, skip the '!' character
                 if opener.is_image() {
                     opener_idx += 1;
@@ -125,15 +187,15 @@ pub(crate) fn scan_link_or_image(
         if ref_label.starts_with("[^") {
             let ref_label = &ref_label[2..ref_label.len() - 1];
             if footnotes.contains_key(ref_label) {
-                url = Some(ref_label.to_string());
+                footnote_label = Some(ref_label.to_string());
                 matched = true;
                 is_footnote_link = true;
             }
         } else {
             let ref_label = normalize_reference(ref_label);
             if let Some((_link, _title)) = ref_map.get(&ref_label) {
-                url = Some(_link.clone());
-                title = _title.clone();
+                url = Some(crate::ast::text::TextRef::Owned(_link.clone()));
+                title = _title.clone().map(crate::ast::text::TextRef::Owned);
                 matched = true;
             }
         }
@@ -141,7 +203,10 @@ pub(crate) fn scan_link_or_image(
     if !matched {
         return None;
     }
-    url.map(|u| (u, title, is_footnote_link))
+    if is_footnote_link {
+        return footnote_label.map(|label| ScannedLink::Footnote { label });
+    }
+    url.map(|url| ScannedLink::Resource { url, title })
 }
 
 pub(super) fn scan_link_url<'input>(line: &Span<'input>) -> Option<(usize, Span<'input>)> {
@@ -317,6 +382,16 @@ pub(super) fn skip_spaces(line: &mut Span) -> usize {
 }
 
 pub(super) fn normalize_reference(str: String) -> String {
+    // 恒等快路径：纯 ASCII、无大写、无空白、非 `[` 包裹时无需任何归一
+    let bytes = str.as_bytes();
+    if !bytes.is_empty()
+        && bytes[0] != b'['
+        && bytes
+            .iter()
+            .all(|&b| b.is_ascii() && !b.is_ascii_uppercase() && !b.is_ascii_whitespace())
+    {
+        return str;
+    }
     // CommonMark requires Unicode case-folding
     // The German ẞ (U+1E9E) should fold to "ss", not "ß"
     // We also normalize all whitespace runs to a single space.
@@ -405,7 +480,7 @@ pub(super) fn process_wikilink(
         id, line, parser, ..
     }: &mut ProcessCtx,
 ) -> bool {
-    let start_location = line.start_location();
+    let start_location = line.cursor_or_end() as u32;
     // 跳过 '[['
     line.next_byte(); // 第一个 '['
     line.next_byte(); // 第二个 '['
@@ -561,7 +636,7 @@ pub(super) fn process_wikilink(
     } else {
         None
     };
-    let end_location = line.location_at_byte(i);
+    let end_location = (i) as u32;
     let skip_count = i - line.cursor();
     line.skip(skip_count);
     parser.append_to(
@@ -659,7 +734,7 @@ pub(super) fn process_embed(
         id, line, parser, ..
     }: &mut ProcessCtx,
 ) -> bool {
-    let start_location = line.start_location();
+    let start_location = line.cursor_or_end() as u32;
     // 跳过 '![[' 三个字节
     line.skip(3);
     let content_start = line.cursor();
@@ -829,7 +904,7 @@ pub(super) fn process_embed(
     } else {
         None
     };
-    let end_location = line.location_at_byte(i);
+    let end_location = (i) as u32;
     let skip_count = i - line.cursor();
     line.skip(skip_count);
     parser.append_to(
@@ -854,34 +929,31 @@ pub(super) fn process_autolink(
         Some(span) => span,
         None => return false,
     };
-    let start_location = current_span.start_location();
+    let start_location = current_span.cursor_or_end() as u32;
     current_span.next_byte(); // skip '<'
     if let Some(end) = scan_email(current_span) {
         let link_span = current_span.slice(0, end);
-        let end_location = current_span.location_at_byte(current_span.cursor() + end + 1);
+        let end_location = (current_span.cursor() + end + 1) as u32;
         current_span.skip(end + 1); // skip content + '>'
         let link_str = link_span.to_string();
         let node = parser.append_to(
             *id,
             MarkdownNode::Link(Box::new(
                 link::DefaultLink {
-                    url: format!("mailto:{}", link_str),
+                    url: format!("mailto:{}", link_str).into(),
                     title: None,
                 }
                 .into(),
             )),
             (start_location, end_location),
         );
-        let locations = (
-            link_span.start_location(),
-            link_span.last_token_end_location(),
-        );
+        let locations = (link_span.cursor_or_end() as u32, link_span.end() as u32);
         parser.append_text_to_owned(node, link_str, locations);
         true
     } else if let Some((end, escaped_esc)) = scan_url(current_span) {
         let link_span = current_span.slice(0, end);
         let skip_amount = if escaped_esc { end + 2 } else { end + 1 }; // escaped_esc: skip '\' + '>'
-        let end_location = current_span.location_at_byte(current_span.cursor() + skip_amount);
+        let end_location = (current_span.cursor() + skip_amount) as u32;
         let mut unescaped_string = link_span.to_unescape_string();
         if escaped_esc {
             unescaped_string.push('\\')
@@ -891,19 +963,19 @@ pub(super) fn process_autolink(
             *id,
             MarkdownNode::Link(Box::new(
                 link::DefaultLink {
-                    url: utils::percent_encode::encode(&unescaped_string, true),
+                    url: match utils::percent_encode::encode_cow(&unescaped_string, true) {
+                        std::borrow::Cow::Borrowed(_) => unescaped_string.clone().into(),
+                        std::borrow::Cow::Owned(encoded) => encoded.into(),
+                    },
                     title: None,
                 }
                 .into(),
             )),
             (start_location, end_location),
         );
-        let mut locations = (
-            link_span.start_location(),
-            link_span.last_token_end_location(),
-        );
+        let mut locations = (link_span.cursor_or_end() as u32, link_span.end() as u32);
         if escaped_esc {
-            locations.1.column += 1;
+            locations.1 += 1;
         }
         parser.append_text_to_owned(node, unescaped_string, locations);
         true
@@ -917,11 +989,11 @@ pub(super) fn process_gfm_autolink(
         id, line, parser, ..
     }: &mut ProcessCtx,
 ) -> bool {
-    let start_location = line.start_location();
+    let start_location = line.cursor_or_end() as u32;
     let Some((end, needs_http_prefix)) = scan_gfm_url(line) else {
         return false;
     };
-    let end_location = line.location_at_byte(line.cursor() + end);
+    let end_location = (line.cursor() + end) as u32;
     let text = extract_bytes_from_merged(line, end);
     line.skip(end);
     let mut url = String::new();
@@ -933,7 +1005,10 @@ pub(super) fn process_gfm_autolink(
         *id,
         MarkdownNode::Link(Box::new(
             link::DefaultLink {
-                url: utils::percent_encode::encode(&url, true),
+                url: match utils::percent_encode::encode_cow(&url, true) {
+                    std::borrow::Cow::Borrowed(_) => url.into(),
+                    std::borrow::Cow::Owned(encoded) => encoded.into(),
+                },
                 title: None,
             }
             .into(),

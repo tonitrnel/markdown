@@ -59,7 +59,7 @@ fn backslash_unescape(s: &str) -> String {
 
 impl BlockStrategy for code::FencedCode {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
-        let location = line.start_location();
+        let location = line.cursor_or_end() as u32;
         if line.is_indented() {
             return BlockMatching::Unmatched;
         }
@@ -120,7 +120,7 @@ impl BlockStrategy for code::FencedCode {
         let length = line.skip_indent().starts_count(marker_byte);
         if length >= container.length && line.skip(length).only_space_to_end() {
             // Use end location of the closing fence line
-            let end_location = line.end_location();
+            let end_location = line.char_end_offset() as u32;
             parser.finalize(parser.curr_proc_node, end_location);
             return BlockProcessing::Processed;
         }
@@ -128,15 +128,18 @@ impl BlockStrategy for code::FencedCode {
         BlockProcessing::Further
     }
     fn after(id: usize, parser: &mut Parser) {
-        if let Some(spans) = parser.inlines.remove(&id) {
+        if let Some(spans) = parser.inlines.remove(id) {
             if spans.is_empty() {
                 return;
             }
-            let start = spans[0].start_location();
-            let end = spans
-                .last()
-                .map(|it| it.last_token_end_location())
-                .unwrap_or(start);
+            let start = spans[0].cursor_or_end() as u32;
+            let end = spans.last().map(|it| it.end() as u32).unwrap_or(start);
+            // 恒等快路径（M3）：相邻行间隙恰为 1 字节 `\n` 且无缩进/前缀剥离时，
+            // literal 就是含各行结尾换行的连续源码区间（CRLF/容器前缀/围栏缩进自动落回）。
+            if let Some((s, e)) = contiguous_lf_range(parser.scanner.source(), &spans) {
+                parser.append_text_span_to(id, s, e, (start, end));
+                return;
+            }
             let estimated = spans.iter().map(|it| it.len() + 1).sum();
             let mut literal = String::with_capacity(estimated);
             for span in spans {
@@ -151,6 +154,25 @@ impl BlockStrategy for code::FencedCode {
     }
 }
 
+/// 各行 `cursor == start`、行间恰隔 1 字节 `\n`、末行后跟 `\n` 时，
+/// 返回等于「每行内容 + `\n`」拼接结果的源码区间。
+fn contiguous_lf_range(source: &[u8], spans: &[crate::span::Span<'_>]) -> Option<(u32, u32)> {
+    let first = spans.first()?;
+    let last = spans.last()?;
+    if spans.iter().any(|s| s.cursor() != s.start()) {
+        return None;
+    }
+    for pair in spans.windows(2) {
+        if pair[1].start() != pair[0].end() + 1 || source.get(pair[0].end()) != Some(&b'\n') {
+            return None;
+        }
+    }
+    if source.get(last.end()) != Some(&b'\n') {
+        return None;
+    }
+    Some((first.start() as u32, (last.end() + 1) as u32))
+}
+
 impl BlockStrategy for code::IndentedCode {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
         if !line.is_indented()
@@ -159,7 +181,7 @@ impl BlockStrategy for code::IndentedCode {
         {
             return BlockMatching::Unmatched;
         };
-        let location = line.start_location();
+        let location = line.cursor_or_end() as u32;
         line.skip_spaces(4);
         parser.close_unmatched_blocks();
         parser.append_block(
@@ -178,18 +200,15 @@ impl BlockStrategy for code::IndentedCode {
         }
     }
     fn after(id: usize, parser: &mut Parser) {
-        if let Some(mut spans) = parser.inlines.remove(&id) {
+        if let Some(mut spans) = parser.inlines.remove(id) {
             while let Some(true) = spans.last().map(|it| it.is_blank()) {
                 spans.pop();
             }
             if spans.is_empty() {
                 return;
             }
-            let start = spans[0].start_location();
-            let end = spans
-                .last()
-                .map(|it| it.last_token_end_location())
-                .unwrap_or(start);
+            let start = spans[0].cursor_or_end() as u32;
+            let end = spans.last().map(|it| it.end() as u32).unwrap_or(start);
             let container_prefix_cols = container_prefix_cols(id, parser);
             let mut literal = spans.into_iter().fold(String::new(), |mut str, it| {
                 let _ = write_recovered_indented_line(&mut str, &it, container_prefix_cols);
@@ -307,6 +326,7 @@ aaa
             MarkdownNode::Code(Box::new(code::Code::Indented(code::IndentedCode {})))
         );
         if let MarkdownNode::Text(text) = &ast[2].body {
+            let text = text.resolve(ast.source());
             assert!(text.starts_with("a simple"));
             assert!(text.ends_with("chunk3\n"));
         } else {

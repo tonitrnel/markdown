@@ -6,7 +6,7 @@ pub(super) fn process(
         id, line, parser, ..
     }: &mut ProcessCtx,
 ) -> bool {
-    let start_location = line.start_location();
+    let start_location = line.cursor_or_end() as u32;
     // 跳过 '&'
     line.next_byte();
 
@@ -47,7 +47,7 @@ pub(super) fn process(
                     }
                     let num_str =
                         unsafe { std::str::from_utf8_unchecked(&bytes[num_start..num_end]) };
-                    let end_location = line.location_at_byte(line.cursor() + 1);
+                    let end_location = (line.cursor() + 1) as u32;
                     line.next_byte(); // skip ';'
 
                     let result = if hex {
@@ -85,7 +85,7 @@ pub(super) fn process(
                         return false;
                     }
                     let name = &bytes[name_start..name_end];
-                    let end_location = line.location_at_byte(line.cursor() + 1);
+                    let end_location = (line.cursor() + 1) as u32;
                     line.next_byte(); // skip ';'
 
                     if let Some(val) = utils::lookup_entity(name) {

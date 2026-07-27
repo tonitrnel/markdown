@@ -209,9 +209,9 @@ fn scan_js_expression(ctx: &ProcessCtx) -> Option<(usize, String)> {
 pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
     if ctx.parser.options.mdx_component {
         if let Some((len, value)) = scan_js_comment(ctx) {
-            let start_location = ctx.line.start_location();
+            let start_location = ctx.line.cursor_or_end() as u32;
             ctx.line.skip(len);
-            let end_location = ctx.line.end_location();
+            let end_location = ctx.line.char_end_offset() as u32;
             ctx.parser.append_to(
                 ctx.id,
                 MarkdownNode::Html(Box::new(html::Html::Inline(html::HtmlType::JSComment(
@@ -222,9 +222,9 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
             return true;
         }
         if let Some((len, value)) = scan_js_expression(ctx) {
-            let start_location = ctx.line.start_location();
+            let start_location = ctx.line.cursor_or_end() as u32;
             ctx.line.skip(len);
-            let end_location = ctx.line.end_location();
+            let end_location = ctx.line.char_end_offset() as u32;
             ctx.parser.append_to(
                 ctx.id,
                 MarkdownNode::Html(Box::new(html::Html::Inline(html::HtmlType::JSExpression(
@@ -240,9 +240,9 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         let Some(raw) = collect_merged_text(ctx, len) else {
             return false;
         };
-        let start_location = ctx.line.start_location();
+        let start_location = ctx.line.cursor_or_end() as u32;
         ctx.line.skip(len);
-        let end_location = ctx.line.end_location();
+        let end_location = ctx.line.char_end_offset() as u32;
         let idx = ctx.parser.append_to(
             ctx.id,
             MarkdownNode::Html(Box::new(html::Html::Inline(html::HtmlType::HtmlComment))),
@@ -258,9 +258,9 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         let Some(raw) = collect_merged_text(ctx, len) else {
             return false;
         };
-        let start_location = ctx.line.start_location();
+        let start_location = ctx.line.cursor_or_end() as u32;
         ctx.line.skip(len);
-        let end_location = ctx.line.end_location();
+        let end_location = ctx.line.char_end_offset() as u32;
         let idx = ctx.parser.append_to(
             ctx.id,
             MarkdownNode::Html(Box::new(html::Html::Inline(
@@ -276,9 +276,9 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         let Some(raw) = collect_merged_text(ctx, len) else {
             return false;
         };
-        let start_location = ctx.line.start_location();
+        let start_location = ctx.line.cursor_or_end() as u32;
         ctx.line.skip(len);
-        let end_location = ctx.line.end_location();
+        let end_location = ctx.line.char_end_offset() as u32;
         let idx = ctx.parser.append_to(
             ctx.id,
             MarkdownNode::Html(Box::new(html::Html::Inline(html::HtmlType::CDataSection))),
@@ -330,9 +330,9 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
                             scan_html_type(&mut probe_span, true, ctx.parser.options.mdx_component)
                         {
                             if len == probe_raw.len() {
-                                let start_location = ctx.line.start_location();
+                                let start_location = ctx.line.cursor_or_end() as u32;
                                 ctx.line.skip(probe_len);
-                                let end_location = ctx.line.end_location();
+                                let end_location = ctx.line.char_end_offset() as u32;
                                 let idx = ctx.parser.append_to(
                                     ctx.id,
                                     MarkdownNode::Html(Box::new(html::Html::Inline(
@@ -362,7 +362,7 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         Some(span) => span,
         None => return false,
     };
-    let start_location = current_span.start_location();
+    let start_location = current_span.cursor_or_end() as u32;
     let (_, len, html_type) =
         if let Some(html_type) = scan_html_type(current_span, true, parser.options.mdx_component) {
             html_type
@@ -378,9 +378,9 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         return false;
     }
     let end_location = if len == 0 {
-        current_span.last_token_end_location()
+        current_span.end() as u32
     } else {
-        current_span.location_at_byte(current_span.cursor() + len)
+        (current_span.cursor() + len) as u32
     };
     let raw_tag_text = current_span.slice(0, len).to_string();
     let end_tag_with_space_before_gt = matches!(
@@ -472,12 +472,15 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
                     )
                 )
         ) {
-            super::process(idx, parser, vec![text_line]);
+            super::process(idx, parser, smallvec::smallvec![text_line]);
         } else {
             parser.append_text_to_owned(
                 idx,
                 text_line.to_string(),
-                (text_line.start_location(), text_line.end_location()),
+                (
+                    text_line.cursor_or_end() as u32,
+                    text_line.char_end_offset() as u32,
+                ),
             );
         }
     }

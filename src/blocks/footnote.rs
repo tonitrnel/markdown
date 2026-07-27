@@ -26,7 +26,7 @@ fn scan_footnote_start(line: &Span) -> Option<usize> {
 
 impl BlockStrategy for footnote::Footnote {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
-        let location = line.start_location();
+        let location = line.cursor_or_end() as u32;
         if let Some(label_end) = scan_footnote_start(line) {
             let label = line
                 .slice(line.indent_len() + 2, label_end)

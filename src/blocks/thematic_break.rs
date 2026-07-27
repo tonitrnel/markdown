@@ -6,7 +6,7 @@ impl BlockStrategy for thematic_break::ThematicBreak {
         if line.is_indented() {
             return BlockMatching::Unmatched;
         }
-        let location = line.start_location();
+        let location = line.cursor_or_end() as u32;
         let marker = match line.skip_indent().next_byte() {
             Some(b'-') => b'-',
             Some(b'_') => b'_',

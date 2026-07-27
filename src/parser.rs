@@ -1,7 +1,9 @@
 use crate::ast::MarkdownNode;
+use crate::ast::text::TextRef;
 use crate::blocks::{BlockMatching, BlockProcessing};
 use crate::exts;
 use crate::scanner::{Scanner, ScannerSnapshot};
+use crate::selective::{BlockPhase, BlockScanStatus, TopLevelBlockEvent, VisitControl};
 use crate::span::Span;
 use crate::tree::Tree;
 use crate::{blocks, inlines};
@@ -42,41 +44,116 @@ impl Location {
 #[derive(Serialize)]
 pub struct Node {
     pub body: MarkdownNode,
-    pub start: Location,
-    pub end: Location,
+    /// 源码字节区间（主表示，M2）；行列 `Location` 经 `Document::location_at` 按需换算。
+    pub span: crate::ast::text::SourceSpan,
     pub(crate) processing: bool,
     pub id: Option<Box<String>>,
 }
 impl Debug for Node {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        // write!(f, "[{:?},{:?}]{:?}", self.start, self.end, self.body)
         write!(f, "{:?}", self.body)
     }
 }
 impl Node {
-    pub(crate) fn new(body: MarkdownNode, location: Location) -> Self {
+    pub(crate) fn new(body: MarkdownNode, offset: u32) -> Self {
         Self {
             body,
-            start: location,
-            end: location,
+            span: crate::ast::text::SourceSpan {
+                start: offset,
+                end: offset,
+            },
             processing: true,
             id: None,
         }
     }
 }
 
+/// Document 持有或借用唯一一份源码（ADR 0001 / map ticket 07）。
+pub enum SourceText<'source> {
+    Borrowed(&'source str),
+    Owned(String),
+}
+
+impl SourceText<'_> {
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        match self {
+            SourceText::Borrowed(source) => source,
+            SourceText::Owned(source) => source.as_str(),
+        }
+    }
+}
+
+impl Default for SourceText<'_> {
+    fn default() -> Self {
+        SourceText::Borrowed("")
+    }
+}
+
+impl Debug for SourceText<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SourceText::Borrowed(source) => write!(f, "Borrowed({} bytes)", source.len()),
+            SourceText::Owned(source) => write!(f, "Owned({} bytes)", source.len()),
+        }
+    }
+}
+
+/// 构建行起点索引：`line_starts[i]` = 第 `i+1` 行首字节偏移（首行恒为 0）。
+///
+/// 与 Scanner 行号语义构造性一致：行号仅在 `\n` 之后递增（孤立 `\r` 不增行）。
+fn build_line_starts(source: &str) -> Vec<u32> {
+    let bytes = source.as_bytes();
+    let mut starts = Vec::with_capacity(bytes.len() / 32 + 2);
+    starts.push(0u32);
+    for i in memchr::memchr_iter(b'\n', bytes) {
+        starts.push((i + 1) as u32);
+    }
+    starts
+}
+
 #[derive(Default)]
-pub struct Document {
+pub struct Document<'source> {
+    source: SourceText<'source>,
     pub tree: Tree<Node>,
     pub tags: FxHashSet<String>,
+    line_starts: std::sync::OnceLock<Vec<u32>>,
 }
-impl Deref for Document {
+impl<'source> Document<'source> {
+    /// 原始源码。`TextRef::Source` 区间对其解析。
+    #[inline]
+    pub fn source(&self) -> &str {
+        self.source.as_str()
+    }
+    /// 位置读取缝：按需把字节偏移换算为 1 基 `Location`。
+    ///
+    /// 列按 Unicode 标量计数（tab = 1）；`offset` 超出源码长度时按末尾处理，
+    /// 落在多字节字符中间时按该字符起点计列。行索引在首次调用时惰性构建
+    /// （parse-only 路径零成本）。
+    pub fn location_at(&self, offset: usize) -> Location {
+        let src = self.source.as_str();
+        let starts = self.line_starts.get_or_init(|| build_line_starts(src));
+        let offset = offset.min(src.len());
+        let line_idx = starts
+            .partition_point(|&s| (s as usize) <= offset)
+            .saturating_sub(1);
+        let line_start = starts.get(line_idx).copied().unwrap_or(0) as usize;
+        let column = 1 + crate::span::count_chars(src.as_bytes(), line_start, offset) as u64;
+        Location::new(line_idx as u64 + 1, column)
+    }
+    /// 唯一文本读取缝：解析 Text 载荷为显示文本。
+    #[inline]
+    pub fn text<'doc>(&'doc self, text: &'doc crate::ast::text::TextRef) -> &'doc str {
+        text.resolve(self.source.as_str())
+    }
+}
+impl Deref for Document<'_> {
     type Target = Tree<Node>;
     fn deref(&self) -> &Self::Target {
         &self.tree
     }
 }
-impl Debug for Document {
+impl Debug for Document<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.tree.fmt(f)
     }
@@ -90,9 +167,22 @@ pub struct ParserPhaseSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
-    InputTooLarge { limit: usize, actual: usize },
-    NodeLimitExceeded { limit: usize, actual: usize },
-    SnapshotInputLengthMismatch { expected: usize, actual: usize },
+    InputTooLarge {
+        limit: usize,
+        actual: usize,
+    },
+    NodeLimitExceeded {
+        limit: usize,
+        actual: usize,
+    },
+    SnapshotInputLengthMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    /// 选择性解析的 `InlineSelection` 含无效或未知的节点 ID
+    InvalidSelectionNode {
+        node_id: usize,
+    },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -213,7 +303,8 @@ pub struct Parser<'input> {
     pub(crate) tree: Tree<Node>,
     pub(crate) options: ParserOptions,
     /// 存储在解析 Block 时能接收 inlines 的 block 的 ID 和剩余未处理的 Span
-    pub(crate) inlines: FxHashMap<usize, Vec<Span<'input>>>,
+    /// （文档顺序条目 + 稠密索引 + 单/双段内联，见 `crate::pending`）
+    pub(crate) inlines: crate::pending::PendingInlines<'input>,
     pub(crate) link_refs: FxHashMap<String, (String, Option<String>)>, // HRefLabel, (Url, Option<Title>)
     pub(crate) footnotes: FxHashMap<String, usize>,                    // label, node_id
     pub(crate) footnote_refs: FxHashMap<String, (usize, usize)>,       // label, index, ref count
@@ -222,7 +313,7 @@ pub struct Parser<'input> {
     pub(crate) curr_proc_node: usize,
     pub(crate) prev_proc_node: usize,
     pub(crate) last_matched_node: usize,
-    pub(crate) last_location: Location,
+    pub(crate) last_offset: u32,
     pub(crate) all_closed: bool,
     pub(crate) tags: FxHashSet<String>,
     pub(crate) html_stacks: VecDeque<(String, usize)>, // tag name, node idx
@@ -230,8 +321,26 @@ pub struct Parser<'input> {
     pub(crate) text_postprocess_parents: FxHashSet<usize>,
     /// 复用的临时容器：reference link 候选节点
     ref_link_candidates_scratch: Vec<usize>,
-    /// 复用的临时容器：footnote refs 的 drain 缓冲
-    footnote_values_scratch: Vec<(String, (usize, usize))>,
+    /// 全部 FootnoteLink 引用节点 `(node_id, 原始 label)`；最终编号/标签在
+    /// `parse_footnote_list` 按源码位置统一确定，与 inline 处理调度无关
+    pub(crate) footnote_ref_nodes: Vec<(usize, String)>,
+    /// 内联脚注（`^[..]`）创建时的临时自动标签，最终化时按位置序重生成
+    pub(crate) inline_footnote_defs: Vec<String>,
+    /// 引用定义是否已提取（完整解析与语义准备共用，幂等）
+    pub(crate) reference_definitions_extracted: bool,
+    /// BlockId 是否已发现（完整解析与语义准备共用，幂等）
+    pub(crate) block_ids_discovered: bool,
+    /// Heading 块创建即记录（文档序），语义目标增量收集用（v2C C3）
+    pub(crate) heading_nodes: Vec<usize>,
+    /// `discover_block_ids` 命中的 id 节点（文档序）
+    pub(crate) semantic_id_nodes: Vec<usize>,
+    /// 顶层（Document 直接子级）节点完成计数：观察者派发的触发信号（v2C C5）
+    pub(crate) top_level_finalized: u32,
+    /// 全部 Heading 是否已物化（语义准备阶段置位；完整解析路径无需）
+    /// P2 delimiter 工作区：索引成链的临时 delimiter，容量跨容器复用
+    pub(crate) delimiter_store: Vec<crate::inlines::delimiter::Delimiter>,
+    /// P3 bracket 工作区：索引成链（prev 单向）的临时 bracket
+    pub(crate) bracket_store: Vec<crate::inlines::bracket::Bracket>,
     /// 复用的临时容器：resolved footnote 列表
     footnote_resolved_scratch: Vec<(usize, usize)>,
     pub(crate) parse_error: Option<ParseError>,
@@ -246,17 +355,20 @@ impl<'input> Parser<'input> {
     }
     pub fn new_with_options(text: &'input str, options: ParserOptions) -> Self {
         // 预估节点数量：大约每 10 字节一个节点
+        // C4：构造期只按 Block 相位预估（选择性会话不为整棵 Inline 树买单）；
+        // inline 相位入口按 pending 规模一次 reserve 补齐。
         let estimated_nodes = text.len() / 10;
-        let mut tree = Tree::<Node>::with_capacity(estimated_nodes.min(8192));
-        let doc = tree.append(Node::new(MarkdownNode::Document, Location::default()));
+        let mut tree = Tree::<Node>::with_capacity(estimated_nodes.min(4096));
+        let doc = tree.append(Node::new(MarkdownNode::Document, 0));
         let scanner = Scanner::new(text);
-        // 预估 inline 容器数量
+        // 预估 inline 容器与总行段数量（C4：条目 + 共享 span arena 双容量）
         let estimated_inlines = text.len() / 80;
+        let estimated_spans = text.len() / 32;
         Self {
             scanner,
-            inlines: FxHashMap::with_capacity_and_hasher(
+            inlines: crate::pending::PendingInlines::with_capacity(
                 estimated_inlines.min(1024),
-                Default::default(),
+                estimated_spans.min(8192),
             ),
             options,
             link_refs: FxHashMap::default(),
@@ -269,35 +381,194 @@ impl<'input> Parser<'input> {
             prev_proc_node: doc,
             all_closed: true,
             last_matched_node: doc,
-            last_location: Location::default(),
+            last_offset: u32::default(),
             html_stacks: VecDeque::new(),
             text_postprocess_parents: FxHashSet::default(),
             ref_link_candidates_scratch: Vec::with_capacity(64),
-            footnote_values_scratch: Vec::with_capacity(32),
+            footnote_ref_nodes: Vec::new(),
+            inline_footnote_defs: Vec::new(),
+            reference_definitions_extracted: false,
+            block_ids_discovered: false,
+            heading_nodes: Vec::new(),
+            semantic_id_nodes: Vec::new(),
+            top_level_finalized: 0,
+            delimiter_store: Vec::new(),
+            bracket_store: Vec::new(),
             footnote_resolved_scratch: Vec::with_capacity(32),
             parse_error: None,
         }
     }
-    pub fn parse(self) -> Document {
+    pub fn parse(self) -> Document<'input> {
         self.parse_checked()
             .expect("parse failed: input exceeds parser limits")
     }
-    pub fn parse_checked(mut self) -> Result<Document, ParseError> {
+    pub fn parse_checked(mut self) -> Result<Document<'input>, ParseError> {
         self.ensure_limits()?;
         self.parse_frontmatter()?;
         self.continue_parse_checked()
     }
-    pub fn continue_parse(self) -> Document {
+    /// owned-source 构造：解析完成后源码移交给返回的 `Document`（服务 WASM
+    /// 与需要文档独立于输入缓冲的调用者，map ticket 07 / ADR 0001）。
+    ///
+    /// 内部经临时借用解析，scanner 与 pending 状态在借用结束前全部释放；
+    /// `TextRef::Source` 保存 byte range 而非 `&str`，因此移动 `String`
+    /// 不产生自引用，无 unsafe。
+    pub fn parse_string(source: String, options: ParserOptions) -> Document<'static> {
+        Self::parse_string_checked(source, options)
+            .expect("parse failed: input exceeds parser limits")
+    }
+    pub fn parse_string_checked(
+        source: String,
+        options: ParserOptions,
+    ) -> Result<Document<'static>, ParseError> {
+        let (tree, tags, line_starts) = {
+            let document = Parser::new_with_options(&source, options).parse_checked()?;
+            let Document {
+                tree,
+                tags,
+                line_starts,
+                ..
+            } = document;
+            (tree, tags, line_starts)
+        };
+        Ok(Document {
+            source: SourceText::Owned(source),
+            tree,
+            tags,
+            line_starts,
+        })
+    }
+    /// owned-source 选择性解析（W2，ticket 28）：块相位 + 语义准备后按
+    /// `node_ids` 选择并物化（含后代展开与 footnote 依赖，F3 语义），
+    /// 未选节点保留 Block 结构。`node_id` 契约：与同选项下对逐字节相同
+    /// 源码的其它解析调用一致。无效 id 返回 `InvalidSelectionNode`。
+    pub fn parse_selected_string_checked(
+        source: String,
+        options: ParserOptions,
+        node_ids: &[usize],
+    ) -> Result<Document<'static>, ParseError> {
+        let (tree, tags, line_starts) = {
+            let phase = Parser::new_with_options(&source, options)
+                .run_block_phase_checked(None)?
+                .prepare_semantic_targets_checked()?;
+            let mut selection = crate::selective::InlineSelection::default();
+            for &id in node_ids {
+                selection.select(id);
+            }
+            let output = phase.parse_selected_inlines_checked(selection)?;
+            let Document {
+                tree,
+                tags,
+                line_starts,
+                ..
+            } = output.document;
+            (tree, tags, line_starts)
+        };
+        Ok(Document {
+            source: SourceText::Owned(source),
+            tree,
+            tags,
+            line_starts,
+        })
+    }
+    /// owned-source 两阶段：第一阶段仅解析 frontmatter（WASM 延迟解析用）。
+    pub fn parse_frontmatter_phase_string(
+        source: String,
+        options: ParserOptions,
+    ) -> Result<(Document<'static>, ParserPhaseSnapshot), ParseError> {
+        let (tree, tags, line_starts, snapshot) = {
+            let (document, snapshot) =
+                Parser::new_with_options(&source, options).parse_frontmatter_phase()?;
+            let Document {
+                tree,
+                tags,
+                line_starts,
+                ..
+            } = document;
+            (tree, tags, line_starts, snapshot)
+        };
+        Ok((
+            Document {
+                source: SourceText::Owned(source),
+                tree,
+                tags,
+                line_starts,
+            },
+            snapshot,
+        ))
+    }
+    /// owned-source 两阶段：从快照继续第二阶段，源码在文档内部往返。
+    pub fn continue_parse_from_snapshot_string(
+        document: Document<'static>,
+        snapshot: ParserPhaseSnapshot,
+    ) -> Result<Document<'static>, ParseError> {
+        let Document {
+            source,
+            tree,
+            tags,
+            line_starts: _,
+        } = document;
+        match source {
+            SourceText::Owned(source) => {
+                let (tree, tags, line_starts) = {
+                    let parser = Parser::from_phase_snapshot(&source, snapshot, tree, tags)?;
+                    let document = parser.continue_parse_checked()?;
+                    let Document {
+                        tree,
+                        tags,
+                        line_starts,
+                        ..
+                    } = document;
+                    (tree, tags, line_starts)
+                };
+                Ok(Document {
+                    source: SourceText::Owned(source),
+                    tree,
+                    tags,
+                    line_starts,
+                })
+            }
+            SourceText::Borrowed(source) => {
+                let parser = Parser::from_phase_snapshot(source, snapshot, tree, tags)?;
+                parser.continue_parse_checked()
+            }
+        }
+    }
+    pub fn continue_parse(self) -> Document<'input> {
         self.continue_parse_checked()
             .expect("parse failed: input exceeds parser limits")
     }
-    pub fn continue_parse_checked(mut self) -> Result<Document, ParseError> {
+    pub fn continue_parse_checked(mut self) -> Result<Document<'input>, ParseError> {
         self.tree.push();
         self.parse_blocks();
         if let Some(err) = self.parse_error.take() {
             self.tree.pop();
             return Err(err);
         }
+        self.finish_inline_phase_checked()
+    }
+    /// Block 阶段入口（F1）：`ensure_limits` + frontmatter 后运行带观察者的
+    /// Block 扫描，返回持有全部解析器状态的 [`BlockPhase`]。
+    pub(crate) fn run_block_phase_checked(
+        mut self,
+        observer: Option<&mut dyn FnMut(&TopLevelBlockEvent<'_>) -> VisitControl>,
+    ) -> Result<BlockPhase<'input>, ParseError> {
+        self.ensure_limits()?;
+        self.parse_frontmatter()?;
+        self.tree.push();
+        let status = self.parse_blocks_observed(observer);
+        if let Some(err) = self.parse_error.take() {
+            self.tree.pop();
+            return Err(err);
+        }
+        Ok(BlockPhase {
+            parser: self,
+            status,
+        })
+    }
+    /// Inline 阶段与收尾（`continue_parse_checked` 的后半段；
+    /// `BlockPhase::finish_checked` 复用同一实现）。
+    pub(crate) fn finish_inline_phase_checked(mut self) -> Result<Document<'input>, ParseError> {
         self.parse_inlines();
         if let Some(err) = self.parse_error.take() {
             self.tree.pop();
@@ -308,25 +579,29 @@ impl<'input> Parser<'input> {
     }
     pub fn parse_frontmatter_phase(
         mut self,
-    ) -> Result<(Document, ParserPhaseSnapshot), ParseError> {
+    ) -> Result<(Document<'input>, ParserPhaseSnapshot), ParseError> {
         self.ensure_limits()?;
         self.parse_frontmatter()?;
+        let snapshot = ParserPhaseSnapshot {
+            scanner_snapshot: self.scanner.snapshot(),
+            options: self.options,
+            text_len: self.scanner.source().len(),
+        };
         Ok((
             Document {
+                source: SourceText::Borrowed(self.scanner.source_str()),
                 tree: self.tree,
                 tags: self.tags,
+                line_starts: std::sync::OnceLock::new(),
             },
-            ParserPhaseSnapshot {
-                scanner_snapshot: self.scanner.snapshot(),
-                options: self.options,
-                text_len: self.scanner.source().len(),
-            },
+            snapshot,
         ))
     }
     pub fn from_phase_snapshot(
         text: &'input str,
         snapshot: ParserPhaseSnapshot,
-        document: Document,
+        tree: Tree<Node>,
+        tags: FxHashSet<String>,
     ) -> Result<Self, ParseError> {
         let actual = text.len();
         if actual != snapshot.text_len {
@@ -337,12 +612,12 @@ impl<'input> Parser<'input> {
         }
         let mut parser = Self::new_with_options(text, snapshot.options);
         parser.scanner.resume(&snapshot.scanner_snapshot);
-        parser.tree = document.tree;
-        parser.tags = document.tags;
+        parser.tree = tree;
+        parser.tags = tags;
         parser.curr_proc_node = parser.doc;
         parser.prev_proc_node = parser.doc;
         parser.last_matched_node = parser.doc;
-        parser.last_location = Location::default();
+        parser.last_offset = 0;
         parser.all_closed = true;
         parser.parse_error = None;
         Ok(parser)
@@ -384,13 +659,10 @@ impl<'input> Parser<'input> {
             self.merge_cjk_nouns_from_frontmatter(&frontmatter);
             let idx = self.tree.append_child(
                 self.doc,
-                Node::new(
-                    MarkdownNode::FrontMatter(Box::new(frontmatter)),
-                    Location::default(),
-                ),
+                Node::new(MarkdownNode::FrontMatter(Box::new(frontmatter)), 0),
             );
             self.tree[idx].processing = false;
-            self.tree[idx].end = self.scanner.location();
+            self.tree[idx].span.end = self.scanner.pos() as u32;
             if self.reach_node_limit() {
                 if let Some(err) = self.parse_error.take() {
                     return Err(err);
@@ -409,29 +681,140 @@ impl<'input> Parser<'input> {
     //     incorporate_line +4.4858ms
     //     ...              +1ms
     fn parse_blocks(&mut self) {
+        self.parse_blocks_observed(None);
+    }
+    /// Block 扫描主循环。`observer` 存在时，在每个稳定行边界对新近
+    /// finalized 的顶层子节点派发事件；无观察者时与原路径逐行为一致。
+    fn parse_blocks_observed(
+        &mut self,
+        mut observer: Option<&mut dyn FnMut(&TopLevelBlockEvent<'_>) -> VisitControl>,
+    ) -> BlockScanStatus {
+        // 已派发（或按 predicate 消费）的最后一个顶层子节点
+        let mut cursor: Option<usize> = None;
+        let mut stopped = false;
+        let mut dispatched_mark = self.top_level_finalized;
         while let Some(line) = Span::extract(&mut self.scanner) {
             if self.reach_node_limit() {
                 break;
             }
-            let last_location = if line.is_blank() {
-                self.last_location
+            // 若本行内容随 Stop 被丢弃，doc.end 需要还原到上一行的位置语义
+            let prev_last_offset = self.last_offset;
+            let last_offset = if line.is_blank() {
+                self.last_offset
             } else {
-                line.last_token_end_location()
+                line.end() as u32
             };
             self.incorporate_line(line);
-            self.last_location = last_location;
+            self.last_offset = last_offset;
             if self.reach_node_limit() {
                 break;
             }
+            if let Some(obs) = observer.as_deref_mut() {
+                // C5：仅在有顶层节点自上次派发后完成时才扫描（每行边界的无效扫描税）
+                if self.top_level_finalized != dispatched_mark {
+                    dispatched_mark = self.top_level_finalized;
+                    if self.dispatch_top_level_events(obs, &mut cursor, prev_last_offset) {
+                        stopped = true;
+                        break;
+                    }
+                }
+            }
         }
         if self.parse_error.is_some() {
-            return;
+            return BlockScanStatus::Complete;
         }
         while self.curr_proc_node != self.doc {
-            self.finalize(self.curr_proc_node, self.last_location)
+            self.finalize(self.curr_proc_node, self.last_offset)
         }
-        self.tree[self.doc].end = self.last_location;
+        if !stopped {
+            if let Some(obs) = observer.as_deref_mut() {
+                // EOF 边界：此时不存在未接受的行，last_offset 无需还原
+                stopped = self.dispatch_top_level_events(obs, &mut cursor, self.last_offset);
+            }
+        }
+        self.tree[self.doc].span.end = self.last_offset;
         self.tree.reset();
+        if stopped {
+            BlockScanStatus::Stopped
+        } else {
+            BlockScanStatus::Complete
+        }
+    }
+    /// 从 `cursor` 之后遍历 `Document` 直接子节点，对每个已 finalized 的
+    /// 节点派发事件；frontmatter 跳过。visitor 返回 `Stop` 时丢弃该节点
+    /// 之后的全部内容并返回 `true`。
+    fn dispatch_top_level_events(
+        &mut self,
+        observer: &mut dyn FnMut(&TopLevelBlockEvent<'_>) -> VisitControl,
+        cursor: &mut Option<usize>,
+        prev_last_offset: u32,
+    ) -> bool {
+        loop {
+            let next = match *cursor {
+                Some(prev) => self.tree.get_next(prev),
+                None => self.tree.get_first_child(self.doc),
+            };
+            let Some(child) = next else {
+                return false;
+            };
+            // 仍在处理中的子节点及其后续内容还未稳定
+            if self.tree[child].processing {
+                return false;
+            }
+            *cursor = Some(child);
+            if matches!(self.tree[child].body, MarkdownNode::FrontMatter(_)) {
+                continue;
+            }
+            let control = {
+                let event = TopLevelBlockEvent {
+                    node_id: child,
+                    tree: &self.tree,
+                };
+                observer(&event)
+            };
+            match control {
+                VisitControl::Continue => continue,
+                VisitControl::Stop => {
+                    // 当前行开启了将被丢弃的内容时，本行不属于已接受前缀，
+                    // last_offset 还原为上一行的值（与直接解析前缀一致）
+                    if self.tree.get_next(child).is_some() || self.curr_proc_node != self.doc {
+                        self.last_offset = prev_last_offset;
+                    }
+                    self.discard_unaccepted_after(child);
+                    return true;
+                }
+            }
+        }
+    }
+    /// 终态停止：卸链 `accepted` 之后的全部顶层子节点，并清理它们的
+    /// pending inline、footnote 注册、HTML 栈与 fork 状态。
+    /// 节点 id 单调分配，`accepted` 之后创建的所有节点 id 均不小于其
+    /// 下一个兄弟节点的 id，因此按 id 阈值清理是完备的。
+    fn discard_unaccepted_after(&mut self, accepted: usize) {
+        if let Some(first_dropped) = self.tree.get_next(accepted) {
+            let cutoff = first_dropped;
+            let mut cur = Some(first_dropped);
+            while let Some(id) = cur {
+                cur = self.tree.get_next(id);
+                self.tree.unlink(id);
+            }
+            while let Some(top) = self.tree.peek_up() {
+                if top >= cutoff {
+                    self.tree.pop();
+                } else {
+                    break;
+                }
+            }
+            self.inlines.discard_from(cutoff);
+            self.footnotes.retain(|_, id| *id < cutoff);
+            self.html_stacks.retain(|(_, id)| *id < cutoff);
+            self.heading_nodes.retain(|id| *id < cutoff);
+            self.semantic_id_nodes.retain(|id| *id < cutoff);
+        }
+        self.curr_proc_node = self.doc;
+        self.prev_proc_node = self.doc;
+        self.last_matched_node = self.doc;
+        self.all_closed = true;
     }
     // +9.5869ms
     //     inlines::process +8.729ms
@@ -439,24 +822,17 @@ impl<'input> Parser<'input> {
         if self.reach_node_limit() {
             return;
         }
-        self.parse_reference_link();
-        // drain inlines map 避免额外的 keys Vec 分配
-        let inlines = std::mem::take(&mut self.inlines);
-        for (idx, mut spans) in inlines {
+        // BlockId 无需在此发现：inline 引擎在物化时就是 id 的写入者。
+        // discover_block_ids 仅服务语义准备阶段（选择前的可寻址性）。
+        self.prepare_reference_definitions();
+        // C4：按 pending 规模一次预留 inline 节点空间（经验 ≈3 节点/条目）
+        self.tree.reserve_nodes(self.inlines.len() * 3 + 64);
+        // 存储本身即文档顺序（P4）；B1 的排序已随之移除
+        while let Some((idx, spans)) = self.inlines.take_next_in_document_order() {
             if self.reach_node_limit() {
                 return;
             }
-            let node = &self.tree[idx].body;
-            if !node.accepts_lines() {
-                eprintln!("WARNING: Invalid node {node:?} exists inlines");
-                continue;
-            }
-            // 去除最后一个 Span 末尾的空白
-            if let Some(last) = spans.last_mut() {
-                last.trim_end_matches(|b: u8| b == b' ' || b == b'\t');
-            }
-            inlines::process(idx, self, spans);
-            self.normalize_component_children(idx);
+            self.materialize_pending_entry(idx, spans);
             if self.reach_node_limit() {
                 return;
             }
@@ -466,15 +842,43 @@ impl<'input> Parser<'input> {
         }
         self.parse_footnote_list();
     }
-    pub fn into_ast(self) -> Document {
+    /// 物化一个 pending 条目：完整解析与选择性解析共用的唯一物化器
+    /// （末行去尾空白 → inline 引擎 → 组件规范化）。
+    pub(crate) fn materialize_pending_entry(
+        &mut self,
+        idx: usize,
+        mut spans: crate::pending::PendingSegments<'input>,
+    ) {
+        let node = &self.tree[idx].body;
+        if !node.accepts_lines() {
+            eprintln!("WARNING: Invalid node {node:?} exists inlines");
+            return;
+        }
+        // 去除最后一个 Span 末尾的空白
+        if let Some(last) = spans.last_mut() {
+            last.trim_end_matches(|b: u8| b == b' ' || b == b'\t');
+        }
+        inlines::process(idx, self, spans);
+        self.normalize_component_children(idx);
+    }
+    pub fn into_ast(self) -> Document<'input> {
         Document {
+            source: SourceText::Borrowed(self.scanner.source_str()),
             tree: self.tree,
             tags: self.tags,
+            line_starts: std::sync::OnceLock::new(),
         }
     }
     fn ensure_limits(&self) -> Result<(), ParseError> {
+        // TextRef::Source 的区间使用 u32 偏移
+        let actual = self.scanner.source().len();
+        if actual > u32::MAX as usize {
+            return Err(ParseError::InputTooLarge {
+                limit: u32::MAX as usize,
+                actual,
+            });
+        }
         if let Some(limit) = self.options.max_input_bytes {
-            let actual = self.scanner.source().len();
             if actual > limit {
                 return Err(ParseError::InputTooLarge { limit, actual });
             }
@@ -487,7 +891,7 @@ impl<'input> Parser<'input> {
         }
         Ok(())
     }
-    fn reach_node_limit(&mut self) -> bool {
+    pub(crate) fn reach_node_limit(&mut self) -> bool {
         let Some(limit) = self.options.max_nodes else {
             return false;
         };
@@ -500,7 +904,7 @@ impl<'input> Parser<'input> {
         }
         true
     }
-    fn parse_reference_link(&mut self) {
+    pub(crate) fn parse_reference_link(&mut self) {
         let mut nodes = std::mem::take(&mut self.ref_link_candidates_scratch);
         nodes.clear();
         nodes.reserve(self.inlines.len().max(16).saturating_sub(nodes.capacity()));
@@ -533,31 +937,144 @@ impl<'input> Parser<'input> {
             next = self.tree.get_next(idx);
         }
     }
-    fn parse_footnote_list(&mut self) {
-        if self.footnote_refs.is_empty() {
+    pub(crate) fn parse_footnote_list(&mut self) {
+        if self.footnote_ref_nodes.is_empty() {
+            self.footnotes.clear();
+            self.footnote_refs.clear();
             return;
         }
+        // 按源码位置排序引用；最终编号、出现序数与自动标签均由位置决定，
+        // 与 inline 处理调度无关（如语义准备阶段的 Heading 预物化）。
+        // B1 之后完整解析按文档顺序处理，位置序 == 处理序，输出保持不变。
+        let mut refs = std::mem::take(&mut self.footnote_ref_nodes);
+        refs.sort_by_key(|(id, _)| self.tree[*id].span.start);
 
-        let mut values = std::mem::take(&mut self.footnote_values_scratch);
-        values.clear();
-        values.extend(self.footnote_refs.drain());
-        values.sort_by(|a, b| a.1.0.cmp(&b.1.0));
+        // 位置序首见顺序即最终编号顺序
+        let mut order: Vec<String> = Vec::new();
+        let mut totals: FxHashMap<String, usize> = FxHashMap::default();
+        for (_, label) in &refs {
+            if !totals.contains_key(label) {
+                order.push(label.clone());
+            }
+            *totals.entry(label.clone()).or_default() += 1;
+        }
+
+        // 每个位置的引用总数，在重命名前按 order 对齐捕获
+        let totals_by_pos: Vec<usize> = order.iter().map(|label| totals[label]).collect();
+
+        // 内联脚注自动标签按位置序重生成，镜像创建时的命名方案：
+        // 候选从自身最终编号起，跳过位置更靠前的已占用标签。
+        // 先整体算出与 order 对齐的最终标签表，再两阶段应用，
+        // 避免交换式重命名（1↔2）在原地 rekey 时相互覆盖。
+        let provisional: FxHashSet<String> = self.inline_footnote_defs.drain(..).collect();
+        let mut final_labels: Vec<String> = Vec::with_capacity(order.len());
+        let mut inline_by_pos: Vec<bool> = Vec::with_capacity(order.len());
+        {
+            let mut taken: FxHashSet<String> = FxHashSet::default();
+            for (pos, label) in order.iter().enumerate() {
+                let is_inline = provisional.contains(label);
+                let final_label = if is_inline {
+                    let mut n = pos + 1;
+                    loop {
+                        let candidate = format!("inline-footnote-{n}");
+                        if !taken.contains(&candidate) {
+                            break candidate;
+                        }
+                        n += 1;
+                    }
+                } else {
+                    label.clone()
+                };
+                taken.insert(final_label.clone());
+                final_labels.push(final_label);
+                inline_by_pos.push(is_inline);
+            }
+        }
+        let renames: FxHashMap<String, String> = order
+            .iter()
+            .zip(&final_labels)
+            .filter(|(old, new)| old != new)
+            .map(|(old, new)| (old.clone(), new.clone()))
+            .collect();
+        if !renames.is_empty() {
+            // 两阶段迁移 footnotes map 与定义 payload：先全部取出，再写入新键
+            let moved: Vec<(String, usize)> = renames
+                .iter()
+                .filter_map(|(old, new)| {
+                    self.footnotes
+                        .remove(old)
+                        .map(|def_id| (new.clone(), def_id))
+                })
+                .collect();
+            for (new_label, def_id) in moved {
+                if let MarkdownNode::Footnote(footnote) = &mut self.tree[def_id].body {
+                    footnote.label = crate::utils::percent_encode::encode(&new_label, true);
+                }
+                self.footnotes.insert(new_label, def_id);
+            }
+            for (_, label) in refs.iter_mut() {
+                if let Some(new) = renames.get(label) {
+                    *label = new.clone();
+                }
+            }
+        }
+        let order = final_labels;
+
+        // 补丁每个引用节点：最终编号 + 位置序出现序数 + 最终标签
+        let index_of: FxHashMap<&str, usize> = order
+            .iter()
+            .enumerate()
+            .map(|(i, label)| (label.as_str(), i + 1))
+            .collect();
+        let mut occurrence: FxHashMap<&str, usize> = FxHashMap::default();
+        for (id, label) in &refs {
+            let index = index_of[label.as_str()];
+            let seen = occurrence.entry(label.as_str()).or_insert(0);
+            *seen += 1;
+            if let MarkdownNode::Link(link) = &mut self.tree[*id].body {
+                if let crate::ast::link::Link::Footnote(footnote_link) = link.as_mut() {
+                    footnote_link.index = index;
+                    footnote_link.ref_count = *seen;
+                    footnote_link.footnote_label =
+                        crate::utils::percent_encode::encode(label, true);
+                }
+            }
+        }
 
         let mut resolved = std::mem::take(&mut self.footnote_resolved_scratch);
         resolved.clear();
-        resolved.reserve(values.len().saturating_sub(resolved.capacity()));
-        for (label, (_, ref_count)) in values.drain(..) {
-            if let Some(node_id) = self.footnotes.remove(&label) {
-                resolved.push((node_id, ref_count));
+        resolved.reserve(order.len().saturating_sub(resolved.capacity()));
+        // FootnoteList 的结束位置按文档位置计算：优先取位置最靠后的内联脚注
+        // 定义，否则取位置最靠后的块级定义（等价于旧的"最后创建的定义"，
+        // 但与 inline 处理调度无关）。
+        let mut end_all: Option<(u32, u32)> = None;
+        let mut end_inline: Option<(u32, u32)> = None;
+        for ((label, total), is_inline) in order.iter().zip(&totals_by_pos).zip(&inline_by_pos) {
+            if let Some(def_id) = self.footnotes.remove(label) {
+                resolved.push((def_id, *total));
+                let node = &self.tree[def_id];
+                let key = node.span.start;
+                let entry = (key, node.span.end);
+                if end_all.map(|(k, _)| key >= k).unwrap_or(true) {
+                    end_all = Some(entry);
+                }
+                if *is_inline && end_inline.map(|(k, _)| key >= k).unwrap_or(true) {
+                    end_inline = Some(entry);
+                }
             }
         }
-        inlines::process_footnote_list(self, &resolved);
+        let end_location = end_inline
+            .or(end_all)
+            .map(|(_, end)| end)
+            .unwrap_or(self.tree[self.doc].span.end);
+        inlines::process_footnote_list(self, &resolved, end_location);
         self.footnotes.clear();
+        self.footnote_refs.clear();
 
-        values.clear();
         resolved.clear();
-        self.footnote_values_scratch = values;
         self.footnote_resolved_scratch = resolved;
+        refs.clear();
+        self.footnote_ref_nodes = refs;
     }
     fn incorporate_line(&mut self, mut line: Span<'input>) {
         let mut container = self.doc;
@@ -702,15 +1219,15 @@ impl<'input> Parser<'input> {
                                 self.append_html_raw_text_line(
                                     container,
                                     sub.to_unescape_string(),
-                                    (sub.start_location(), sub.last_token_end_location()),
+                                    (sub.cursor_or_end() as u32, sub.end() as u32),
                                 );
                             }
                         }
                         line.skip(after);
-                        self.finalize(container, line.start_location());
+                        self.finalize(container, line.cursor_or_end() as u32);
                         if !line.is_end() {
-                            let idx =
-                                self.append_block(MarkdownNode::Paragraph, line.start_location());
+                            let idx = self
+                                .append_block(MarkdownNode::Paragraph, line.cursor_or_end() as u32);
                             self.append_inline(idx, line);
                         }
                     } else {
@@ -721,7 +1238,7 @@ impl<'input> Parser<'input> {
                             self.append_html_raw_text_line(
                                 container,
                                 line.to_unescape_string(),
-                                (line.start_location(), line.last_token_end_location()),
+                                (line.cursor_or_end() as u32, line.end() as u32),
                             );
                         }
                     }
@@ -732,20 +1249,24 @@ impl<'input> Parser<'input> {
                     self.append_inline(container, line);
                 }
             } else if !line.is_end() && !line.is_blank() {
-                container = self.append_block(MarkdownNode::Paragraph, line.start_location());
+                container = self.append_block(MarkdownNode::Paragraph, line.cursor_or_end() as u32);
                 self.append_inline(container, line);
             }
         }
     }
-    pub(crate) fn append_block(&mut self, node: MarkdownNode, loc: Location) -> usize {
+    pub(crate) fn append_block(&mut self, node: MarkdownNode, loc: u32) -> usize {
+        let is_heading = matches!(node, MarkdownNode::Heading(_));
         // 如果当前处理中的节点无法容纳插入的节点则退回当上一层
         while !self.tree[self.curr_proc_node].body.can_contain(&node) {
             self.finalize(self.curr_proc_node, loc)
         }
         let idx = self.tree.append(Node::new(node, loc));
+        if is_heading {
+            self.heading_nodes.push(idx);
+        }
         self.tree.push();
         self.curr_proc_node = idx;
-        self.last_location = loc;
+        self.last_offset = loc;
         // println!(
         //     "创建节点 #{idx} {:?} ↑ {:?} ← {:?} 🤣 {:?}",
         //     self.tree[idx].body,
@@ -757,7 +1278,7 @@ impl<'input> Parser<'input> {
         // );
         idx
     }
-    pub(crate) fn append_free_node(&mut self, node: MarkdownNode, loc: Location) -> usize {
+    pub(crate) fn append_free_node(&mut self, node: MarkdownNode, loc: u32) -> usize {
         let idx = self.tree.create_node(Node::new(node, loc));
         // #[cfg(debug_assertions)]
         // println!("创建游离节点 #{idx} {:?}", self.tree[idx].body);
@@ -767,7 +1288,7 @@ impl<'input> Parser<'input> {
         &mut self,
         id: usize,
         node: MarkdownNode,
-        location: (Location, Location),
+        location: (u32, u32),
     ) -> usize {
         let needs_text_postprocess = matches!(&node, MarkdownNode::Text(_))
             && self
@@ -775,31 +1296,31 @@ impl<'input> Parser<'input> {
                 .get_last_child(id)
                 .is_some_and(|last| matches!(self.tree[last].body, MarkdownNode::Text(..)));
         let idx = self.tree.append_child(id, Node::new(node, location.0));
-        self.tree[idx].end = location.1;
+        self.tree[idx].span.end = location.1;
         if needs_text_postprocess {
             self.text_postprocess_parents.insert(id);
         }
         // println!("创建节点 #{idx} {:?}", self.tree[idx].body)
         idx
     }
-    pub(crate) fn replace_block(&mut self, node: MarkdownNode, loc: Location) -> Option<usize> {
-        self.last_location = loc;
+    pub(crate) fn replace_block(&mut self, node: MarkdownNode, loc: u32) -> Option<usize> {
+        self.last_offset = loc;
+        let is_heading = matches!(node, MarkdownNode::Heading(_));
         if let Some(idx) = self.tree.peek_up() {
             // println!("替换节点 {:?} => {:?}", self.tree[idx].body, node)
             self.tree[idx].body = node;
+            if is_heading {
+                self.heading_nodes.push(idx);
+            }
             Some(idx)
         } else {
             None
         }
     }
     pub(crate) fn append_inline(&mut self, block_idx: usize, line: Span<'input>) {
-        self.inlines.entry(block_idx).or_default().push(line)
+        self.inlines.push_line(block_idx, line)
     }
-    pub(crate) fn append_text(
-        &mut self,
-        content: impl AsRef<str>,
-        location: (Location, Location),
-    ) -> usize {
+    pub(crate) fn append_text(&mut self, content: impl AsRef<str>, location: (u32, u32)) -> usize {
         // 如果当前处理中的节点无法容纳插入的节点则退回当上一层
         if !self.tree[self.curr_proc_node].body.accepts_lines() {
             panic!(
@@ -810,7 +1331,7 @@ impl<'input> Parser<'input> {
         let idx = self
             .tree
             .append(Node::new(content.as_ref().into(), location.0));
-        self.tree[idx].end = location.1;
+        self.tree[idx].span.end = location.1;
         // println!("创建节点 #{idx} {:?}", self.tree[idx].body)
         idx
     }
@@ -819,7 +1340,7 @@ impl<'input> Parser<'input> {
         &mut self,
         parent: usize,
         content: &str,
-        location: (Location, Location),
+        location: (u32, u32),
     ) -> usize {
         let transformed = if self.options.smart_punctuation
             && crate::utils::smart_punctuation::needs_smart_punctuation(content)
@@ -835,12 +1356,13 @@ impl<'input> Parser<'input> {
             .filter(|id| self.tree[*id].processing)
             .map(|id| (id, &mut self.tree[id].body))
         {
+            let source = self.scanner.source_str();
             if let Some(cow) = &transformed {
-                text.push_str(cow.as_ref());
+                text.make_owned(source).push_str(cow.as_ref());
             } else {
-                text.push_str(content);
+                text.make_owned(source).push_str(content);
             }
-            self.tree[idx].end = location.1;
+            self.tree[idx].span.end = location.1;
             return idx;
         }
         match transformed {
@@ -854,12 +1376,59 @@ impl<'input> Parser<'input> {
         }
     }
 
+    /// 追加**源码切片**文本（P1b 快路径）：`[start, end)` 为源码绝对 byte 区间。
+    /// 与上一个仍在处理的 Text 相邻（上一个为 `Source` 且区间首尾相接）时
+    /// 零拷贝扩展区间；否则按需物化拼接；新建节点保存 `TextRef::Source`。
+    pub(crate) fn append_text_span_to(
+        &mut self,
+        parent: usize,
+        start: u32,
+        end: u32,
+        location: (u32, u32),
+    ) -> usize {
+        debug_assert!(end as usize <= self.scanner.source().len());
+        if let Some((idx, MarkdownNode::Text(text))) = self
+            .tree
+            .get_last_child(parent)
+            .filter(|id| self.tree[*id].processing)
+            .map(|id| (id, &mut self.tree[id].body))
+        {
+            let source = self.scanner.source_str();
+            match text {
+                TextRef::Source(span) if span.end == start => span.end = end,
+                _ => text
+                    .make_owned(source)
+                    .push_str(&source[start as usize..end as usize]),
+            }
+            self.tree[idx].span.end = location.1;
+            return idx;
+        }
+        let has_left_text = self
+            .tree
+            .get_last_child(parent)
+            .is_some_and(|id| matches!(self.tree[id].body, MarkdownNode::Text(..)));
+        let idx = self.tree.append_child(
+            parent,
+            Node::new(
+                MarkdownNode::Text(TextRef::Source(crate::ast::text::SourceSpan::new(
+                    start, end,
+                ))),
+                location.0,
+            ),
+        );
+        self.tree[idx].span.end = location.1;
+        if has_left_text {
+            self.text_postprocess_parents.insert(parent);
+        }
+        idx
+    }
+
     #[inline]
     pub(crate) fn append_text_to_no_smart(
         &mut self,
         parent: usize,
         content: &str,
-        location: (Location, Location),
+        location: (u32, u32),
     ) -> usize {
         if let Some((idx, MarkdownNode::Text(text))) = self
             .tree
@@ -867,8 +1436,9 @@ impl<'input> Parser<'input> {
             .filter(|id| self.tree[*id].processing)
             .map(|id| (id, &mut self.tree[id].body))
         {
-            text.push_str(content);
-            self.tree[idx].end = location.1;
+            let source = self.scanner.source_str();
+            text.make_owned(source).push_str(content);
+            self.tree[idx].span.end = location.1;
             return idx;
         }
 
@@ -877,11 +1447,11 @@ impl<'input> Parser<'input> {
             .get_last_child(parent)
             .is_some_and(|id| matches!(self.tree[id].body, MarkdownNode::Text(..)));
 
-        let text = content.to_owned();
+        let text = TextRef::Owned(content.to_owned());
         let idx = self
             .tree
             .append_child(parent, Node::new(MarkdownNode::Text(text), location.0));
-        self.tree[idx].end = location.1;
+        self.tree[idx].span.end = location.1;
         if has_left_text {
             self.text_postprocess_parents.insert(parent);
         }
@@ -892,7 +1462,7 @@ impl<'input> Parser<'input> {
         &mut self,
         parent: usize,
         mut content: String,
-        location: (Location, Location),
+        location: (u32, u32),
     ) -> usize {
         // 应用 smart punctuation 转换（dash 和 ellipsis）
         if self.options.smart_punctuation
@@ -910,8 +1480,9 @@ impl<'input> Parser<'input> {
             .filter(|id| self.tree[*id].processing)
             .map(|id| (id, &mut self.tree[id].body))
         {
-            text.push_str(&content);
-            self.tree[idx].end = location.1;
+            let source = self.scanner.source_str();
+            text.make_owned(source).push_str(&content);
+            self.tree[idx].span.end = location.1;
             idx
         } else {
             self.append_text_to_owned_no_smart(parent, content, location)
@@ -922,7 +1493,7 @@ impl<'input> Parser<'input> {
         &mut self,
         parent: usize,
         content: String,
-        location: (Location, Location),
+        location: (u32, u32),
     ) -> usize {
         if let Some((idx, MarkdownNode::Text(text))) = self
             .tree
@@ -930,18 +1501,20 @@ impl<'input> Parser<'input> {
             .filter(|id| self.tree[*id].processing)
             .map(|id| (id, &mut self.tree[id].body))
         {
-            text.push_str(&content);
-            self.tree[idx].end = location.1;
+            let source = self.scanner.source_str();
+            text.make_owned(source).push_str(&content);
+            self.tree[idx].span.end = location.1;
             return idx;
         }
         let has_left_text = self
             .tree
             .get_last_child(parent)
             .is_some_and(|id| matches!(self.tree[id].body, MarkdownNode::Text(..)));
-        let idx = self
-            .tree
-            .append_child(parent, Node::new(MarkdownNode::Text(content), location.0));
-        self.tree[idx].end = location.1;
+        let idx = self.tree.append_child(
+            parent,
+            Node::new(MarkdownNode::Text(TextRef::Owned(content)), location.0),
+        );
+        self.tree[idx].span.end = location.1;
         if has_left_text {
             self.text_postprocess_parents.insert(parent);
         }
@@ -952,7 +1525,7 @@ impl<'input> Parser<'input> {
         &mut self,
         parent: usize,
         ch: char,
-        location: (Location, Location),
+        location: (u32, u32),
     ) -> usize {
         if let Some((idx, MarkdownNode::Text(text))) = self
             .tree
@@ -960,20 +1533,20 @@ impl<'input> Parser<'input> {
             .filter(|id| self.tree[*id].processing)
             .map(|id| (id, &mut self.tree[id].body))
         {
-            text.push(ch);
-            self.tree[idx].end = location.1;
+            let source = self.scanner.source_str();
+            text.make_owned(source).push(ch);
+            self.tree[idx].span.end = location.1;
             return idx;
         }
         let has_left_text = self
             .tree
             .get_last_child(parent)
             .is_some_and(|id| matches!(self.tree[id].body, MarkdownNode::Text(..)));
-        let mut text = String::new();
-        text.push(ch);
-        let idx = self
-            .tree
-            .append_child(parent, Node::new(MarkdownNode::Text(text), location.0));
-        self.tree[idx].end = location.1;
+        let idx = self.tree.append_child(
+            parent,
+            Node::new(MarkdownNode::Text(TextRef::from(ch)), location.0),
+        );
+        self.tree[idx].span.end = location.1;
         if has_left_text {
             self.text_postprocess_parents.insert(parent);
         }
@@ -998,13 +1571,13 @@ impl<'input> Parser<'input> {
                 break;
             }
             let parent = self.tree.get_parent(self.prev_proc_node);
-            self.finalize(self.prev_proc_node, self.last_location);
+            self.finalize(self.prev_proc_node, self.last_offset);
             self.prev_proc_node = parent
         }
         self.all_closed = true;
     }
     /// 调用指定节点的 finalize 方法处理并关闭该节点，将当前节点指针移动至父节点
-    pub(crate) fn finalize(&mut self, node_id: usize, location: Location) {
+    pub(crate) fn finalize(&mut self, node_id: usize, location: u32) {
         let parent = self.tree.get_parent(node_id);
         assert_ne!(
             node_id, self.doc,
@@ -1020,6 +1593,9 @@ impl<'input> Parser<'input> {
         if Some(node_id) == self.tree.peek_up() {
             self.tree.pop();
         }
+        if parent == self.doc {
+            self.top_level_finalized += 1;
+        }
         self.curr_proc_node = parent;
     }
 
@@ -1027,7 +1603,7 @@ impl<'input> Parser<'input> {
         &mut self,
         parent: usize,
         content: String,
-        location: (Location, Location),
+        location: (u32, u32),
     ) -> usize {
         let mut value = content;
         if self.tree.get_last_child(parent).is_some() {
@@ -1076,18 +1652,23 @@ impl<'input> Parser<'input> {
     }
 
     fn remove_whitespace_text_children(&mut self, parent: usize) {
+        let source = self.scanner.source_str();
         let mut current = self.tree.get_first_child(parent);
         while let Some(idx) = current {
             current = self.tree.get_next(idx);
             if let MarkdownNode::Text(text) = &self.tree[idx].body {
-                if text.chars().all(|ch| matches!(ch, ' ' | '\t')) {
+                if text
+                    .resolve(source)
+                    .chars()
+                    .all(|ch| matches!(ch, ' ' | '\t'))
+                {
                     self.tree.remove(idx);
                 }
             }
         }
     }
 
-    fn normalize_component_children(&mut self, parent: usize) {
+    pub(crate) fn normalize_component_children(&mut self, parent: usize) {
         if !self.is_component_node(parent) {
             return;
         }
@@ -1216,10 +1797,11 @@ Text
         let (deferred_doc, snapshot) = Parser::new_with_options(text, options)
             .parse_frontmatter_phase()
             .expect("frontmatter phase should succeed");
-        let resumed = Parser::from_phase_snapshot(text, snapshot, deferred_doc)
-            .expect("snapshot restore should succeed")
-            .continue_parse_checked()
-            .expect("continue parse should succeed");
+        let resumed =
+            Parser::from_phase_snapshot(text, snapshot, deferred_doc.tree, deferred_doc.tags)
+                .expect("snapshot restore should succeed")
+                .continue_parse_checked()
+                .expect("continue parse should succeed");
         assert_eq!(full.to_html(), resumed.to_html());
         assert_eq!(full.len(), resumed.len());
     }
@@ -1230,7 +1812,8 @@ Text
         let (deferred_doc, snapshot) = Parser::new(text)
             .parse_frontmatter_phase()
             .expect("frontmatter phase should succeed");
-        let result = Parser::from_phase_snapshot("x", snapshot, deferred_doc);
+        let result =
+            Parser::from_phase_snapshot("x", snapshot, deferred_doc.tree, deferred_doc.tags);
         assert!(matches!(
             result,
             Err(ParseError::SnapshotInputLengthMismatch {

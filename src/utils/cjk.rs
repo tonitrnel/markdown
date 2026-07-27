@@ -46,7 +46,9 @@ fn is_ascii_alnum(ch: char) -> bool {
 }
 /// 在 CJK 字符与 ASCII 字母数字之间插入空格。
 /// 单次 O(n) 扫描，无需修改时返回 `Cow::Borrowed` 避免分配。
-#[allow(dead_code)]
+// 生产路径只调用 correct_cjk_spacing_with_nouns；本封装保留给单元测试与
+// 无名词表的调用方，非 test 构建下允许 dead_code。
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn correct_cjk_spacing(text: &str) -> Cow<'_, str> {
     correct_cjk_spacing_with_nouns(text, (&[] as &[&str]).iter())
 }

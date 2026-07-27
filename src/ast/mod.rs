@@ -13,6 +13,7 @@ pub mod list;
 pub mod math;
 pub mod reference;
 pub mod table;
+pub mod text;
 pub mod thematic_break;
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -29,7 +30,7 @@ pub enum MarkdownNode {
     // 硬换行，末尾跟随空格、'\' 或多个 \n
     HardBreak,
     // 文本
-    Text(String),
+    Text(text::TextRef),
     // 内部嵌入
     Embed(Box<embed::Embed>),
     // 标题
@@ -191,11 +192,16 @@ impl From<image::Image> for MarkdownNode {
 }
 impl From<&str> for MarkdownNode {
     fn from(value: &str) -> Self {
-        MarkdownNode::Text(value.to_string())
+        MarkdownNode::Text(text::TextRef::from(value))
     }
 }
 impl From<String> for MarkdownNode {
     fn from(value: String) -> Self {
+        MarkdownNode::Text(text::TextRef::Owned(value))
+    }
+}
+impl From<text::TextRef> for MarkdownNode {
+    fn from(value: text::TextRef) -> Self {
         MarkdownNode::Text(value)
     }
 }

@@ -1,5 +1,7 @@
 # Markdown Parser v2 性能架构设计
 
+> **执行状态（2026-07-26）：** 本文保留性能问题、数据布局证据和挑战目标，但不再规定实施方式或顺序。具体实施顺序正在 [Wayfinder 决策地图](../../.scratch/markdown-parser-incremental-iteration/map.md) 中收敛；`ParserV2`、并行 compact AST、一次性公共 API/WASM 切换不在当前执行范围。v2A 的 `5 ms`、相对 `2x` 和分配降低 `50%` 仅作为挑战目标；v2B 是在 v2A 证据之后才定义的最终挑战。
+
 ## 概述
 
 本设计定义下一 major version 的 Markdown 解析器性能架构，并把交付分为 v2A 架构落地版和 v2B 深度优化版。在保留完整 CommonMark、GFM、OFM、CJK、位置、引用和脚注语义的前提下，v2A 把完整 AST 解析相对 `pulldown-cmark` 完整事件消费的性能差距稳定压缩到 2 倍以内；v2B 进一步把 1.5 倍作为硬性验收线，并以 1.2 倍作为冲刺目标。
@@ -357,7 +359,7 @@ Block Phase 继续使用逐行 CommonMark Block 算法，但输出 Compact Block
 
 本设计依赖并纳入：
 
-`docs/superpowers/specs/2026-07-19-selective-inline-events-design.md`
+`docs/specs/2026-07-19-selective-inline-events-design.md`
 
 现有设计中的以下语义继续有效：
 

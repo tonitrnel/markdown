@@ -1,12 +1,10 @@
-use crate::inlines::{bracket::BracketChain, delimiter::DelimiterChain};
-use crate::parser::Location;
 use crate::parser::Parser;
-use crate::span::{MergedSpan, Span};
+use crate::span::MergedSpan;
 
-mod bracket;
+pub(crate) mod bracket;
 mod code;
 mod comment;
-mod delimiter;
+pub(crate) mod delimiter;
 mod emoji;
 mod entity;
 mod footnote;
@@ -29,16 +27,26 @@ struct ProcessCtx<'a, 'input> {
     id: usize,
     parser: &'a mut Parser<'input>,
     line: &'a mut MergedSpan<'input>,
-    brackets: Option<BracketChain>,
-    delimiters: Option<DelimiterChain>,
+    /// 当前容器 bracket 链的尾部（`Parser::bracket_store` 索引）
+    brackets: Option<usize>,
+    /// 当前容器 delimiter 链的尾部（`Parser::delimiter_store` 索引）
+    delimiters: Option<usize>,
 }
 
 /// 处理 inline 元素。使用 MergedSpan 将多个 Span 合并为统一视图，
 /// 在 Span 之间自动插入换行符，避免包含中间行的前缀字符。
-pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec<Span<'input>>) {
+pub(super) fn process<'input>(
+    id: usize,
+    parser: &mut Parser<'input>,
+    spans: crate::pending::PendingSegments<'input>,
+) {
     if spans.is_empty() {
         return;
     }
+    // 嵌套调用（内联脚注定义体、HTML 文本）以 base/truncate 协议隔离：
+    // 本次调用只使用 >= base 的条目，退出时截回，外层索引保持有效。
+    let delimiter_base = parser.delimiter_store.len();
+    let bracket_base = parser.bracket_store.len();
 
     // 规范化每个 Span：将 start 调整为 cursor 位置（去掉已跳过的缩进）
     let mut spans = spans;
@@ -75,18 +83,25 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec
         special_table[b'{' as usize] = true;
     }
 
+    let gate_flags = GateFlags {
+        ofm: ctx.parser.options.obsidian_flavored,
+        non_default: !ctx.parser.options.default_flavored,
+        gfm_autolink: ctx.parser.options.github_flavored
+            && ctx.parser.options.gfm_extended_autolink,
+    };
+
     // 累积连续文本的字节偏移范围，避免逐字符 to_string() 堆分配
     let mut text_acc: Option<TextAccumulator> = None;
 
     while let Some(byte) = ctx.line.peek() {
         if !special_table[byte as usize] {
             // 非特殊字节：直接批量累积，不需要 snapshot/resume
-            accumulate_run(&mut text_acc, &mut ctx, &special_table);
+            accumulate_run(&mut text_acc, &mut ctx, &special_table, gate_flags);
             continue;
         }
         // 对明显不可能命中的特殊字节做快速剪枝，避免无效 flush + snapshot/resume
         if !should_try_special(&ctx, byte) {
-            accumulate_run(&mut text_acc, &mut ctx, &special_table);
+            accumulate_run(&mut text_acc, &mut ctx, &special_table, gate_flags);
             continue;
         }
 
@@ -206,7 +221,7 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec
         if !handled {
             // 未匹配，恢复快照并累积当前字符
             ctx.line.resume(&snapshot);
-            accumulate_run(&mut text_acc, &mut ctx, &special_table);
+            accumulate_run(&mut text_acc, &mut ctx, &special_table, gate_flags);
         }
     }
     // 处理结束，刷新剩余累积文本
@@ -215,6 +230,47 @@ pub(super) fn process<'input>(id: usize, parser: &mut Parser<'input>, spans: Vec
     // 最终处理 delimiter 和 text
     delimiter::process_final(id, ctx.parser, &mut ctx.brackets, &mut ctx.delimiters);
     text::process_final(id, ctx.parser);
+    parser.delimiter_store.truncate(delimiter_base);
+    parser.bracket_store.truncate(bracket_base);
+}
+
+/// `accumulate_run` 扫描环门控的选项快照（每次 inline 处理构建一次）。
+#[derive(Clone, Copy)]
+struct GateFlags {
+    ofm: bool,
+    non_default: bool,
+    gfm_autolink: bool,
+}
+
+/// 扫描环内的 1 字节前瞻门控：返回 `false` 表示该特殊字节不可能开启任何
+/// 语法，可并入文本 run。规则与 `should_try_special` 的源码局部部分一致
+/// （两处必须同步维护）；跨 Span 情形由调用方保守放行，不进入本函数。
+#[inline]
+fn scan_gate(b: u8, next: u8, prev: Option<u8>, f: GateFlags) -> bool {
+    match b {
+        b'!' => next == b'[',
+        b'%' if f.ofm => next == b'%',
+        b'&' => matches!(next, b'#' | b'A'..=b'Z' | b'a'..=b'z'),
+        b'<' => !matches!(next, b' ' | b'\t' | b'\n' | b'\r'),
+        b'h' | b'H' if f.gfm_autolink => matches!(next, b't' | b'T'),
+        b'w' | b'W' if f.gfm_autolink => matches!(next, b'w' | b'W'),
+        b'=' if f.ofm => next == b'=',
+        b'^' if f.ofm => {
+            matches!(next, b'[' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-')
+        }
+        b'#' if f.ofm => {
+            prev.is_none_or(|p| matches!(p, b'\n' | b'\r' | b' ' | b'\t'))
+                && matches!(next, b'a'..=b'z' | b'A'..=b'Z' | 0xC0..=0xFF)
+        }
+        b':' if f.non_default => {
+            matches!(
+                next,
+                b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'+' | b'-' | 0x80..=0xFF
+            )
+        }
+        b'$' if f.non_default => next == b'$' || !next.is_ascii_whitespace(),
+        _ => true,
+    }
 }
 
 #[inline]
@@ -317,13 +373,10 @@ enum TextAccumulator<'a> {
         slice: &'a str,
         /// 切片在 source 中的结束偏移，用于判断是否可以原地扩展
         range_end: usize,
-        start_location: Location,
+        start_location: u32,
     },
     /// 回退路径：跨 Span 或需要拼接时用 String
-    Owned {
-        text: String,
-        start_location: Location,
-    },
+    Owned { text: String, start_location: u32 },
 }
 
 /// 256 字节查找表：OFM 模式下的特殊字节（编译期常量）
@@ -409,10 +462,12 @@ fn accumulate_run<'input>(
     text_acc: &mut Option<TextAccumulator<'input>>,
     ctx: &mut ProcessCtx<'_, 'input>,
     special_table: &[bool; 256],
+    gate_flags: GateFlags,
 ) {
     // 尝试在当前 Span 内批量扫描
     if let Some(span) = ctx.line.current_span() {
         let source = span.source_slice();
+        let span_start = span.start();
         let start = span.cursor();
         let end = span.end();
         let mut pos = start;
@@ -425,6 +480,21 @@ fn accumulate_run<'input>(
             let b = unsafe { *source.get_unchecked(pos) };
             if b < 0x80 {
                 if special_table[b as usize] {
+                    // 门控（M3）：与 should_try_special 同规则的 1 字节前瞻，
+                    // 明显不可能命中的特殊字节不打断文本 run。
+                    // Span 末字节保守放行（跨 Span 语义交给 dispatch 层）。
+                    if pos + 1 < end {
+                        let next = unsafe { *source.get_unchecked(pos + 1) };
+                        let prev = if pos > span_start {
+                            Some(source[pos - 1])
+                        } else {
+                            None
+                        };
+                        if !scan_gate(b, next, prev, gate_flags) {
+                            pos += 1;
+                            continue;
+                        }
+                    }
                     break;
                 }
                 pos += 1;
@@ -455,7 +525,7 @@ fn accumulate_run<'input>(
                 }
                 None => {
                     let chunk = unsafe { std::str::from_utf8_unchecked(&source[start..pos]) };
-                    let start_loc = ctx.line.start_location();
+                    let start_loc = ctx.line.cursor_or_end() as u32;
                     *text_acc = Some(TextAccumulator::Slice {
                         source_ptr: source.as_ptr(),
                         slice: chunk,
@@ -519,7 +589,7 @@ fn fallback_accumulate<'input>(
     text_acc: &mut Option<TextAccumulator<'input>>,
     ctx: &mut ProcessCtx<'_, 'input>,
 ) {
-    let pre_loc = ctx.line.start_location();
+    let pre_loc = ctx.line.cursor_or_end() as u32;
     if let Some(byte) = ctx.line.next_byte() {
         let char_len = if byte < 0x80 {
             1
@@ -576,10 +646,10 @@ fn strip_image_size_suffix_from_pending_text(
     if !ctx.parser.options.obsidian_flavored {
         return;
     }
-    let Some(bracket) = ctx.brackets.clone() else {
+    let Some(bracket_idx) = ctx.brackets else {
         return;
     };
-    if !bracket.is_image() {
+    if !ctx.parser.bracket_store[bracket_idx].is_image() {
         return;
     }
 
@@ -605,7 +675,7 @@ fn strip_image_size_suffix_from_pending_text(
         }
         None => return,
     };
-    bracket.borrow_mut().image_size = Some(size);
+    ctx.parser.bracket_store[bracket_idx].image_size = Some(size);
 }
 
 /// 将累积的文本一次性创建为 Text 节点
@@ -618,13 +688,23 @@ fn flush_text_acc(text_acc: &mut Option<TextAccumulator>, ctx: &mut ProcessCtx) 
     match acc {
         TextAccumulator::Slice {
             slice,
+            range_end,
             start_location,
-            ..
+            source_ptr,
         } if !slice.is_empty() => {
-            let end_loc = ctx.line.start_location();
+            let end_loc = ctx.line.cursor_or_end() as u32;
             if ctx.parser.options.smart_punctuation && may_need_smart_transform(slice) {
                 ctx.parser
                     .append_text_to(ctx.id, slice, (start_location, end_loc));
+            } else if source_ptr == ctx.parser.scanner.source().as_ptr() {
+                // P1b：连续未转换文本保存源码区间，不复制 String
+                let start = (range_end - slice.len()) as u32;
+                ctx.parser.append_text_span_to(
+                    ctx.id,
+                    start,
+                    range_end as u32,
+                    (start_location, end_loc),
+                );
             } else {
                 ctx.parser
                     .append_text_to_no_smart(ctx.id, slice, (start_location, end_loc));
@@ -634,7 +714,7 @@ fn flush_text_acc(text_acc: &mut Option<TextAccumulator>, ctx: &mut ProcessCtx) 
             text,
             start_location,
         } if !text.is_empty() => {
-            let end_loc = ctx.line.start_location();
+            let end_loc = ctx.line.cursor_or_end() as u32;
             if ctx.parser.options.smart_punctuation && may_need_smart_transform(&text) {
                 ctx.parser
                     .append_text_to_owned(ctx.id, text, (start_location, end_loc));

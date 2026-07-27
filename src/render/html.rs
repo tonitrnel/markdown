@@ -4,21 +4,26 @@ use std::fmt;
 use std::fmt::Write;
 
 use crate::ast::{MarkdownNode, callout, html, image, link, list, table};
-use crate::parser::Node;
+use crate::parser::{Document, Node};
 use crate::tree::Tree;
 use crate::{ast, utils};
 
 struct HtmlRender<'input, W> {
     writer: &'input mut W,
     tree: &'input Tree<Node>,
+    source: &'input str,
 }
 
 impl<'input, W> HtmlRender<'input, W>
 where
     W: Write,
 {
-    fn new(tree: &'input Tree<Node>, writer: &'input mut W) -> Self {
-        Self { tree, writer }
+    fn new(tree: &'input Tree<Node>, source: &'input str, writer: &'input mut W) -> Self {
+        Self {
+            tree,
+            source,
+            writer,
+        }
     }
     fn render(&mut self, idx: usize) -> fmt::Result {
         let pair = match &self.tree[idx].body {
@@ -82,11 +87,13 @@ where
             MarkdownNode::Highlighting => Some((Borrowed("<mark>"), Borrowed("</mark>"))),
             MarkdownNode::Link(link_box) => match link_box.as_ref() {
                 link::Link::Default(link) => {
-                    let title = Self::format_title_attr(&link.title);
+                    let title = Self::format_title_attr(
+                        link.title.as_ref().map(|t| t.resolve(self.source)),
+                    );
                     Some((
                         Owned(format!(
                             "<a href=\"{}\"{title}>",
-                            utils::escape_xml(&link.url)
+                            utils::escape_xml(link.url.resolve(self.source))
                         )),
                         Borrowed("</a>"),
                     ))
@@ -159,6 +166,7 @@ where
             )),
             MarkdownNode::Image(img) => {
                 let image::Image { url, title, size } = img.as_ref();
+                let url = url.resolve(self.source);
                 write!(self.writer, "<img src={url:?} alt=\"")?;
                 if let Some(child_idx) = self.tree.get_first_child(idx) {
                     self.write_text(child_idx, true, true)?;
@@ -175,7 +183,7 @@ where
                 write!(
                     self.writer,
                     "\"{}{} />",
-                    Self::format_title_attr(title),
+                    Self::format_title_attr(title.as_ref().map(|t| t.resolve(self.source))),
                     size_attr
                 )?;
                 None
@@ -534,8 +542,12 @@ where
         let Some(last) = self.tree.get_last_child(idx) else {
             return false;
         };
-        !(self.tree[first].start.line == self.tree[idx].start.line
-            && self.tree[last].end.line == self.tree[idx].end.line)
+        let same_line = |a: u32, b: u32| -> bool {
+            let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+            !self.source.as_bytes()[lo as usize..hi as usize].contains(&b'\n')
+        };
+        !(same_line(self.tree[first].span.start, self.tree[idx].span.start)
+            && same_line(self.tree[last].span.end, self.tree[idx].span.end))
     }
     fn html_block_has_raw_opening(&self, idx: usize) -> bool {
         let Some(first) = self.tree.get_first_child(idx) else {
@@ -544,7 +556,8 @@ where
         let MarkdownNode::Text(text) = &self.tree[first].body else {
             return false;
         };
-        text.trim_start_matches(|c| c == ' ' || c == '\t')
+        text.resolve(self.source)
+            .trim_start_matches(|c| c == ' ' || c == '\t')
             .starts_with('<')
     }
     fn html_block_has_raw_closing(&self, idx: usize, name: &str) -> bool {
@@ -552,7 +565,7 @@ where
         let needle = format!("</{}", name.to_ascii_lowercase());
         while let Some(child) = next {
             if let MarkdownNode::Text(text) = &self.tree[child].body {
-                let lower = text.to_ascii_lowercase();
+                let lower = text.resolve(self.source).to_ascii_lowercase();
                 if lower.contains(&needle) {
                     return true;
                 }
@@ -573,7 +586,8 @@ where
         };
         matches!(
             &self.tree[last].body,
-            MarkdownNode::Text(text) if text.chars().all(|ch| matches!(ch, ' ' | '\t'))
+            MarkdownNode::Text(text)
+                if text.resolve(self.source).chars().all(|ch| matches!(ch, ' ' | '\t'))
         )
     }
     // fn block_indent_prefix(&self, idx: usize) -> String {
@@ -586,11 +600,12 @@ where
         include_next_sibling: bool,
         xml_escape: bool,
     ) -> fmt::Result {
-        if let MarkdownNode::Text(str) = &self.tree[idx].body {
+        if let MarkdownNode::Text(text) = &self.tree[idx].body {
+            let str = text.resolve(self.source);
             if xml_escape && str.contains(['&', '<', '>', '"']) {
                 write!(self.writer, "{}", utils::escape_xml(str))?;
             } else {
-                write!(self.writer, "{}", str)?;
+                write!(self.writer, "{str}")?;
             }
         } else if let Some(child_idx) = self.tree.get_first_child(idx) {
             self.write_text(child_idx, true, self.tree[idx].body.xml_escape())?;
@@ -806,8 +821,8 @@ where
         writeln!(self.writer, "</tr>")?;
         Ok(())
     }
-    fn format_title_attr(title: &Option<String>) -> String {
-        if let Some(title) = &title {
+    fn format_title_attr(title: Option<&str>) -> String {
+        if let Some(title) = title {
             format!(" title=\"{}\"", utils::escape_xml(title))
         } else {
             String::new()
@@ -1001,15 +1016,17 @@ where
     }
 }
 
-impl Tree<Node> {
+impl Document<'_> {
+    /// 渲染 HTML。`TextRef::Source` 区间在写出时对文档源码解析，
+    /// 因此渲染必须经 Document（而非裸 Tree）。
     pub fn to_html(&self) -> String {
-        if self.is_empty() {
+        if self.tree.is_empty() {
             return String::new();
         }
         // Most Markdown inputs expand modestly when rendered to HTML.
         // Reserve upfront to reduce repeated String growth during write!.
-        let mut buffer = String::with_capacity(self.node_slots_len().saturating_mul(32));
-        let _ = HtmlRender::new(self, &mut buffer).write_html(0);
+        let mut buffer = String::with_capacity(self.tree.node_slots_len().saturating_mul(32));
+        let _ = HtmlRender::new(&self.tree, self.source(), &mut buffer).write_html(0);
         buffer
     }
 }

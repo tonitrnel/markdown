@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+use markdown::ast::text::TextRef;
 use markdown::{
     Document as MarkdownDocument, Location, MarkdownNode, Node, ParseError, Parser, ParserOptions,
-    ParserPhaseSnapshot, Tree,
+    ParserPhaseSnapshot,
 };
 
+mod json_tree;
 mod types;
 
 /// TypeScript type bindings for WASM exports
@@ -26,9 +28,12 @@ extern "C" {
 
     #[wasm_bindgen(typescript_type = "ParserOptions")]
     pub type TParserOptions;
+
+    #[wasm_bindgen(typescript_type = "SemanticTarget[]")]
+    pub type TSemanticTargets;
 }
 
-fn kind(node: &MarkdownNode) -> &'static str {
+pub(crate) fn kind(node: &MarkdownNode) -> &'static str {
     match node {
         MarkdownNode::Document => "document",
         MarkdownNode::FrontMatter(..) => "frontmatter",
@@ -75,14 +80,40 @@ pub struct AstNode {
     children: Vec<AstNode>,
 }
 
-impl From<&Node> for AstNode {
-    fn from(value: &Node) -> Self {
+impl AstNode {
+    /// `TextRef::Source` 在导出时解析为自有文本，序列化输出与旧版逐字节一致。
+    fn from_node(value: &Node, doc: &MarkdownDocument) -> Self {
+        let source = doc.source();
+        fn materialize(text: &mut TextRef, source: &str) {
+            if matches!(text, TextRef::Source(_)) {
+                *text = TextRef::Owned(text.resolve(source).to_string());
+            }
+        }
+        let mut content = value.body.clone();
+        match &mut content {
+            MarkdownNode::Text(text) => materialize(text, source),
+            MarkdownNode::Link(link) => {
+                if let markdown::ast::link::Link::Default(link) = link.as_mut() {
+                    materialize(&mut link.url, source);
+                    if let Some(title) = &mut link.title {
+                        materialize(title, source);
+                    }
+                }
+            }
+            MarkdownNode::Image(image) => {
+                materialize(&mut image.url, source);
+                if let Some(title) = &mut image.title {
+                    materialize(title, source);
+                }
+            }
+            _ => {}
+        }
         Self {
             id: value.id.as_ref().map(|b| (**b).clone()),
             kind: kind(&value.body).to_string(),
-            start: value.start,
-            end: value.end,
-            content: value.body.clone(),
+            start: doc.location_at(value.span.start as usize),
+            end: doc.location_at(value.span.end as usize),
+            content,
             children: Vec::new(),
         }
     }
@@ -92,16 +123,16 @@ impl From<&Node> for AstNode {
 /// 解析后的 Markdown 文档，包含 AST 和元数据
 #[wasm_bindgen]
 pub struct Document {
-    inner: MarkdownDocument,
-    source: Option<String>,
+    inner: MarkdownDocument<'static>,
     snapshot: Option<ParserPhaseSnapshot>,
 }
 
-fn transform_ast(ast: &Tree<Node>, index: usize, children: &mut Vec<AstNode>) {
+fn transform_ast(doc: &MarkdownDocument, index: usize, children: &mut Vec<AstNode>) {
+    let ast = &doc.tree;
     let mut next = ast.get_first_child(index);
     while let Some(next_idx) = next {
-        let mut tree = AstNode::from(&ast[next_idx]);
-        transform_ast(ast, next_idx, &mut tree.children);
+        let mut tree = AstNode::from_node(&ast[next_idx], doc);
+        transform_ast(doc, next_idx, &mut tree.children);
         children.push(tree);
         next = ast.get_next(next_idx)
     }
@@ -201,11 +232,10 @@ fn build_parser_options(input: Option<WasmParserOptions>) -> (ParserOptions, Par
     (options, parse_mode)
 }
 
-impl From<MarkdownDocument> for Document {
-    fn from(value: MarkdownDocument) -> Self {
+impl From<MarkdownDocument<'static>> for Document {
+    fn from(value: MarkdownDocument<'static>) -> Self {
         Self {
             inner: value,
-            source: None,
             snapshot: None,
         }
     }
@@ -214,13 +244,11 @@ impl From<MarkdownDocument> for Document {
 impl Document {
     /// Build a deferred document after phase 1 parse (frontmatter only).
     fn from_frontmatter_phase(
-        source: String,
-        document: MarkdownDocument,
+        document: MarkdownDocument<'static>,
         snapshot: ParserPhaseSnapshot,
     ) -> Self {
         Self {
             inner: document,
-            source: Some(source),
             snapshot: Some(snapshot),
         }
     }
@@ -238,6 +266,10 @@ fn parse_error_to_js(err: ParseError) -> JsValue {
         ParseError::SnapshotInputLengthMismatch { expected, actual } => {
             format!("snapshot source length mismatch expected={expected}, actual={actual}")
         }
+        // 选择性解析是 Rust-only API，WASM 路径不会产生该错误
+        ParseError::InvalidSelectionNode { node_id } => {
+            format!("invalid selection node id={node_id}")
+        }
     };
     JsValue::from_str(&msg)
 }
@@ -248,11 +280,26 @@ impl Document {
     /// 获取完整的 AST 树
     #[wasm_bindgen(getter)]
     pub fn tree(&self) -> TAstNode {
-        let mut tree = AstNode::from(&self.inner.tree[0]);
-        transform_ast(&self.inner.tree, 0, &mut tree.children);
+        let mut tree = AstNode::from_node(&self.inner.tree[0], &self.inner);
+        transform_ast(&self.inner, 0, &mut tree.children);
         serde_wasm_bindgen::to_value(&tree)
             .unwrap_or(JsValue::NULL)
             .unchecked_into::<TAstNode>()
+    }
+    /// Complete AST as one JSON string (W1): a direct tree-walk writer,
+    /// no per-node reflection — pair with `JSON.parse` on the JS side.
+    /// Compact v2 shape vs `.tree`: `start`/`end` are source **byte
+    /// offsets** (matching `SemanticTarget`), absent `id`/`content`/empty
+    /// `children` are omitted, frontmatter maps are plain objects;
+    /// `content` payload shapes are otherwise identical. The raw string
+    /// is also cache/transfer-friendly.
+    /// 完整 AST 的单个 JSON 字符串（W1）：直写遍历、无逐节点反射，JS 侧
+    /// `JSON.parse` 配对。紧凑 v2 形状：`start`/`end` 为源码**字节偏移**
+    /// （与 `SemanticTarget` 一致）、无值 `id`/`content`/空 `children`
+    /// 省略、frontmatter 为普通对象；`content` 载荷形状与 `.tree` 一致。
+    /// 原始字符串亦可直接缓存/传输。
+    pub fn tree_json(&self) -> String {
+        json_tree::tree_to_json(&self.inner)
     }
     /// Returns document tags as an unsorted array.
     /// Ordering is not guaranteed and should not be relied upon.
@@ -277,7 +324,7 @@ impl Document {
     /// 将文档转换为 HTML
     #[wasm_bindgen]
     pub fn to_html(&self) -> String {
-        self.inner.tree.to_html()
+        self.inner.to_html()
     }
 
     /// Get the frontmatter metadata if present
@@ -304,14 +351,11 @@ impl Document {
         let Some(snapshot) = self.snapshot.take() else {
             return Ok(());
         };
-        let Some(source) = self.source.as_deref() else {
-            return Err(JsValue::from_str("missing source for deferred parse"));
-        };
-        let parser = Parser::from_phase_snapshot(source, snapshot, std::mem::take(&mut self.inner))
+        // 源码保存在 inner Document（owned）内，经核心的 owned 往返完成第二阶段
+        let document = std::mem::take(&mut self.inner);
+        let document = Parser::continue_parse_from_snapshot_string(document, snapshot)
             .map_err(parse_error_to_js)?;
-        let document = parser.continue_parse_checked().map_err(parse_error_to_js)?;
         self.inner = document;
-        self.source = None;
         Ok(())
     }
 }
@@ -327,14 +371,13 @@ impl Document {
 #[wasm_bindgen]
 pub fn parse(text: String) -> Document {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    let parser = Parser::new_with_options(
-        &text,
+    let document = Parser::parse_string(
+        text,
         ParserOptions::default()
             .enabled_gfm()
             .enabled_ofm()
             .enabled_cjk_autocorrect(),
     );
-    let document = parser.parse();
     Document::from(document)
 }
 
@@ -359,16 +402,118 @@ pub fn parse_with_options(text: String, options: TParserOptions) -> Document {
     let raw = options.unchecked_into::<JsValue>();
     let parsed_options = serde_wasm_bindgen::from_value::<WasmParserOptions>(raw).ok();
     let (options, parse_mode) = build_parser_options(parsed_options);
-    let parser = Parser::new_with_options(&text, options);
     match parse_mode {
-        ParseMode::Full => Document::from(parser.parse()),
+        ParseMode::Full => Document::from(Parser::parse_string(text, options)),
         ParseMode::FrontmatterOnly => {
-            let (document, snapshot) = parser
-                .parse_frontmatter_phase()
+            let (document, snapshot) = Parser::parse_frontmatter_phase_string(text, options)
                 .expect("parse failed: input exceeds parser limits");
-            Document::from_frontmatter_phase(text, document, snapshot)
+            Document::from_frontmatter_phase(document, snapshot)
         }
     }
+}
+
+/// Semantic target info returned by `query_semantic_targets`.
+/// `query_semantic_targets` 返回的语义目标信息。
+#[derive(Serialize)]
+struct SemanticTargetInfo {
+    node_id: u32,
+    /// Heading level 1-6 when the target is a heading / 目标为标题时的层级
+    heading_level: Option<u8>,
+    /// OFM BlockId when present / 存在时的 OFM BlockId
+    block_id: Option<String>,
+    /// Obsidian-style reference text (formatting stripped by the real
+    /// inline engine) / Obsidian 式引用文本（真实 Inline 引擎剥离格式）
+    ref_text: String,
+    /// Source byte offsets / 源码字节偏移
+    start_offset: u32,
+    end_offset: u32,
+}
+
+fn query_targets_impl(text: &str, options: ParserOptions) -> Vec<SemanticTargetInfo> {
+    use markdown::selective::{InlineSelection, VisitControl};
+    let mut out = Vec::new();
+    let mut phase = Parser::new_with_options(text, options)
+        .parse_blocks_with(|_| true, |_| VisitControl::Continue)
+        .prepare_semantic_targets();
+    let mut selection = InlineSelection::default();
+    phase.visit_semantic_targets(
+        |_| true,
+        &mut selection,
+        |target, _| {
+            let ref_text = target.ref_text();
+            let node = target.node();
+            out.push(SemanticTargetInfo {
+                node_id: target.node_id() as u32,
+                heading_level: target.heading().map(|h| *h.level() as u8),
+                block_id: target.block_id().map(str::to_owned),
+                ref_text,
+                start_offset: node.span.start,
+                end_offset: node.span.end,
+            });
+            VisitControl::Continue
+        },
+    );
+    out
+}
+
+/// Fast target lookup for Obsidian-style addressing: block phase +
+/// semantic preparation only — no full-tree boundary serialization.
+/// `node_id` values are stable across calls for byte-identical text
+/// with identical options.
+/// Obsidian 式寻址的快速目标查询：仅块相位 + 语义准备，不做全树跨边界
+/// 序列化。对逐字节相同的文本与相同选项，`node_id` 跨调用稳定。
+#[wasm_bindgen]
+pub fn query_semantic_targets(text: String) -> TSemanticTargets {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    let targets = query_targets_impl(
+        &text,
+        ParserOptions::default()
+            .enabled_gfm()
+            .enabled_ofm()
+            .enabled_cjk_autocorrect(),
+    );
+    serde_wasm_bindgen::to_value(&targets)
+        .unwrap_or(JsValue::NULL)
+        .unchecked_into::<TSemanticTargets>()
+}
+
+/// `query_semantic_targets` with user-specified options (`parse_mode` ignored).
+/// 带用户选项的 `query_semantic_targets`（`parse_mode` 忽略）。
+#[wasm_bindgen]
+pub fn query_semantic_targets_with_options(
+    text: String,
+    options: TParserOptions,
+) -> TSemanticTargets {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    let raw = options.unchecked_into::<JsValue>();
+    let parsed_options = serde_wasm_bindgen::from_value::<WasmParserOptions>(raw).ok();
+    let (options, _) = build_parser_options(parsed_options);
+    let targets = query_targets_impl(&text, options);
+    serde_wasm_bindgen::to_value(&targets)
+        .unwrap_or(JsValue::NULL)
+        .unchecked_into::<TSemanticTargets>()
+}
+
+/// Selective parse: materialize inlines only for `node_ids` (descendants
+/// expand automatically; referenced footnote definitions follow).
+/// Unselected nodes keep block structure without inline children, so
+/// `.tree` shrinks with the selection. Invalid ids throw.
+/// 选择性解析：仅物化 `node_ids`（后代自动展开；被引脚注定义随附）。
+/// 未选节点保留 Block 结构、无 inline 子树，`.tree` 随选择缩小。非法 id 抛错。
+#[wasm_bindgen]
+pub fn parse_selected(text: String, node_ids: Vec<u32>) -> Result<Document, JsValue> {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    let ids: Vec<usize> = node_ids.into_iter().map(|id| id as usize).collect();
+    let document = Parser::parse_selected_string_checked(
+        text,
+        ParserOptions::default()
+            .enabled_gfm()
+            .enabled_ofm()
+            .enabled_cjk_autocorrect(),
+        &ids,
+    )
+    .map_err(parse_error_to_js)?;
+    Ok(Document::from(document))
 }
 
 /// Get the parser version string
@@ -384,6 +529,45 @@ pub fn version() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W1：直写 JSON 与内部树逐节点一致（可解析、计数相等、形状抽查）。
+    #[test]
+    fn tree_json_is_valid_and_complete() {
+        let src = "# T ^h1\n\npara [a](https://e.com/x \"t\") ![i](img) `c`\n\n- item ^b1\n";
+        let doc = Parser::parse_string(
+            src.to_string(),
+            ParserOptions::default().enabled_gfm().enabled_ofm(),
+        );
+        let wrapped = Document {
+            inner: doc,
+            snapshot: None,
+        };
+        let json = wrapped.tree_json();
+        let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
+        fn count(v: &serde_json::Value) -> usize {
+            1 + v["children"]
+                .as_array()
+                .map(|c| c.iter().map(count).sum())
+                .unwrap_or(0)
+        }
+        fn tree_count(doc: &MarkdownDocument, id: usize) -> usize {
+            let mut n = 1;
+            let mut child = doc.tree.get_first_child(id);
+            while let Some(c) = child {
+                n += tree_count(doc, c);
+                child = doc.tree.get_next(c);
+            }
+            n
+        }
+        assert_eq!(count(&value), tree_count(&wrapped.inner, 0));
+        assert_eq!(value["kind"], "document");
+        let h = &value["children"][0];
+        assert_eq!(h["kind"], "heading");
+        assert_eq!(h["id"], "h1");
+        assert!(h["start"].is_u64() && h["end"].is_u64());
+        assert!(json.contains("\"content\":{\"variant\":\"default\",\"url\":\"https://e.com/x\""));
+        assert!(!json.contains("\"content\":null"));
+    }
 
     /// Test two-phase parsing produces same result as one-phase parsing
     /// 测试两阶段解析与一阶段解析产生相同结果
@@ -425,8 +609,7 @@ This is **bold** and *italic*.
 
         println!("ast_phase1:\n{:?}", doc_phase1);
 
-        let mut doc_phase2 =
-            Document::from_frontmatter_phase(markdown.to_string(), doc_phase1, snapshot);
+        let mut doc_phase2 = Document::from_frontmatter_phase(doc_phase1, snapshot);
         doc_phase2.continue_parse().expect("phase 2 failed");
 
         println!("ast_phase2:\n{:?}", doc_phase2.inner.tree);
@@ -438,8 +621,8 @@ This is **bold** and *italic*.
         );
         assert_eq!(doc_full.inner.tags, doc_phase2.inner.tags, "tags mismatch");
         assert_eq!(
-            doc_full.inner.tree.to_html(),
-            doc_phase2.inner.tree.to_html(),
+            doc_full.inner.to_html(),
+            doc_phase2.inner.to_html(),
             "HTML mismatch"
         );
     }

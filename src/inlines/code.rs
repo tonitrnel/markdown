@@ -7,7 +7,7 @@ pub(super) fn process(
         line, parser, id, ..
     }: &mut ProcessCtx,
 ) -> bool {
-    let code_start_location = line.start_location();
+    let code_start_location = line.cursor_or_end() as u32;
     let marker_length = line.starts_count(b'`');
     line.skip(marker_length);
     let after_marker_snapshot = line.snapshot();
@@ -47,7 +47,7 @@ pub(super) fn process(
         }
     }
     if marker_count != marker_length {
-        let marker_end_location = line.location_at_byte(content_start);
+        let marker_end_location = (content_start) as u32;
         parser.append_text_to_owned(
             *id,
             "`".repeat(marker_length),
@@ -56,7 +56,7 @@ pub(super) fn process(
         line.resume(&after_marker_snapshot);
         return true;
     }
-    let code_end_location = line.location_at_byte(line.cursor());
+    let code_end_location = (line.cursor()) as u32;
     let content_end = line.cursor() - marker_length;
     let parent = parser.append_to(
         *id,
@@ -73,9 +73,36 @@ pub(super) fn process(
         .as_bytes()
         .iter()
         .any(|&b| b == b'\n' || b == b'\r');
+    let has_newline = content_str.as_bytes().iter().any(|&b| b == b'\n');
+    let start_loc = (content_start) as u32;
+    let end_loc = (content_end) as u32;
+    // 恒等快路径（M3）：无换行替换、无表格 `\|` 改写时内容即源码切片；
+    // 剥一对空格的边缘仍是子切片。真正改写时才走 Owned 路径。
+    let identity = !has_newline && !(in_table && content_str.as_bytes().contains(&b'\\'));
+    if identity {
+        let (mut s, mut e) = (content_start, content_end);
+        if content_str.len() >= 2
+            && content_str.starts_with(' ')
+            && content_str.ends_with(' ')
+            && (content_str.contains('`') || had_line_endings || marker_length >= 2)
+        {
+            s += 1;
+            e -= 1;
+        }
+        let gfm_single_space = parser.options.github_flavored
+            && marker_length >= 3
+            && e - s == 1
+            && content_str.as_bytes()[s - content_start] == b' ';
+        if gfm_single_space {
+            parser.append_text_to_owned(parent, String::new(), (start_loc, end_loc));
+        } else {
+            parser.append_text_span_to(parent, s as u32, e as u32, (start_loc, end_loc));
+        }
+        return true;
+    }
     let mut text = if in_table {
         escaped_string(content_str, &['|'])
-    } else if content_str.as_bytes().iter().any(|&b| b == b'\n') {
+    } else if has_newline {
         content_str.replace('\n', " ")
     } else {
         content_str.to_string()
@@ -99,8 +126,6 @@ pub(super) fn process(
     if parser.options.github_flavored && marker_length >= 3 && text == " " {
         text.clear();
     }
-    let start_loc = line.location_at_byte(content_start);
-    let end_loc = line.location_at_byte(content_end);
     parser.append_text_to_owned(parent, text, (start_loc, end_loc));
     true
 }

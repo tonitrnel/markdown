@@ -1,0 +1,4 @@
+# W3（ticket 30）：wasm 构建默认启用 SIMD（memchr 等热路径向量化，parse −15~35%）。
+# 运行时要求 simd128（2021+ 主流引擎；Obsidian/Electron/现代浏览器均满足）。
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "target-feature=+simd128"]

@@ -45,10 +45,10 @@ pub(super) fn process_inline(ctx: &mut ProcessCtx) -> bool {
         return false;
     }
 
-    let start_location = ctx.line.start_location();
-    let content_start_location = ctx.line.location_at_byte(content_start);
-    let content_end_location = ctx.line.location_at_byte(cursor);
-    let end_location = ctx.line.location_at_byte(cursor + 1);
+    let start_location = ctx.line.cursor_or_end() as u32;
+    let content_start_location = (content_start) as u32;
+    let content_end_location = (cursor) as u32;
+    let end_location = (cursor + 1) as u32;
     let content_span = span.slice_from_abs(content_start, cursor);
 
     let mut label_index = ctx.parser.footnote_refs.len() + 1;
@@ -70,18 +70,20 @@ pub(super) fn process_inline(ctx: &mut ProcessCtx) -> bool {
         })),
         start_location,
     );
-    ctx.parser.tree[footnote_idx].end = end_location;
+    ctx.parser.tree[footnote_idx].span.end = end_location;
     let paragraph_idx = ctx.parser.append_to(
         footnote_idx,
         MarkdownNode::Paragraph,
         (content_start_location, content_end_location),
     );
-    super::process(paragraph_idx, ctx.parser, vec![content_span]);
+    super::process(paragraph_idx, ctx.parser, smallvec::smallvec![content_span]);
     ctx.parser.footnotes.insert(label.clone(), footnote_idx);
 
+    // index 与自动标签此处为临时值；parse_footnote_list 会按源码位置统一最终化
     let index = ctx.parser.footnote_refs.len() + 1;
-    ctx.parser.footnote_refs.insert(label, (index, 1));
-    ctx.parser.append_to(
+    ctx.parser.footnote_refs.insert(label.clone(), (index, 1));
+    ctx.parser.inline_footnote_defs.push(label.clone());
+    let ref_node = ctx.parser.append_to(
         ctx.id,
         MarkdownNode::Link(Box::new(link::Link::Footnote(link::FootnoteLink {
             footnote_label: encoded_label,
@@ -90,24 +92,20 @@ pub(super) fn process_inline(ctx: &mut ProcessCtx) -> bool {
         }))),
         (start_location, end_location),
     );
+    ctx.parser.footnote_ref_nodes.push((ref_node, label));
     ctx.line.skip(cursor + 1 - start);
     true
 }
 
-pub(crate) fn process_footnote_list(parser: &mut Parser, node_refcounts: &[(usize, usize)]) {
-    let locations = {
-        let mut start = 0;
-        let mut end = 0;
-        for node_refcount in node_refcounts.iter() {
-            start = node_refcount.0.min(start);
-            end = node_refcount.0.max(end);
-        }
-        let start = parser.tree[0].start;
-        let end = parser.tree[end].end;
-        (start, end)
-    };
+pub(crate) fn process_footnote_list(
+    parser: &mut Parser,
+    node_refcounts: &[(usize, usize)],
+    end_location: u32,
+) {
+    // 结束位置由调用方按文档位置计算（与 inline 处理调度无关）
+    let locations = (parser.tree[0].span.start, end_location);
     let parent = parser.append_free_node(MarkdownNode::FootnoteList, locations.0);
-    parser.tree[parent].end = locations.1;
+    parser.tree[parent].span.end = locations.1;
     for &(idx, ref_count) in node_refcounts {
         let node = &mut parser.tree[idx];
         let ref_label = if let MarkdownNode::Footnote(footnote) = &mut node.body {
@@ -116,7 +114,7 @@ pub(crate) fn process_footnote_list(parser: &mut Parser, node_refcounts: &[(usiz
         } else {
             continue;
         };
-        let location = node.end;
+        let location = node.span.end;
         let mut last_child = parser.tree.get_last_child(idx);
         while let Some(idx) = last_child {
             if let MarkdownNode::Paragraph = parser.tree[idx].body {

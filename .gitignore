@@ -2,3 +2,9 @@ target/
 .idea/
 .vscode/
 .DS_Store
+.worktrees/
+
+# polyglot bench build artifact (rebuilt by run.sh)
+bench/compare/polyglot/c/cmark_bench
+wasm-binding/pkg/
+bench/compare/wasm/node_modules/

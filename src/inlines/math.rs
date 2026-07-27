@@ -8,7 +8,7 @@ pub(super) fn process(
     }: &mut ProcessCtx,
     is_block: bool,
 ) -> bool {
-    let start_location = line.start_location();
+    let start_location = line.cursor_or_end() as u32;
     let delimiter_len = if is_block { 2 } else { 1 };
     line.skip(delimiter_len);
     // 检查开头是否允许（非 block 时不能以空白开头）
@@ -22,7 +22,7 @@ pub(super) fn process(
     if !allow_open {
         return false;
     }
-    let expr_start_loc = line.start_location();
+    let expr_start_loc = line.cursor_or_end() as u32;
     let mut expression_bytes: Vec<u8> = Vec::new();
     let expr_end_loc = loop {
         let Some(current) = line.peek() else {
@@ -37,7 +37,7 @@ pub(super) fn process(
             {
                 return false;
             }
-            break line.start_location();
+            break line.cursor_or_end() as u32;
         }
         if let Some(next) = line.next_byte() {
             expression_bytes.push(next);
@@ -46,7 +46,7 @@ pub(super) fn process(
         }
     };
     line.skip(delimiter_len);
-    let end_location = line.start_location();
+    let end_location = line.cursor_or_end() as u32;
     let node = if is_block {
         parser.append_to(
             *id,

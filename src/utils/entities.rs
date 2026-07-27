@@ -2154,6 +2154,15 @@ pub(crate) enum EscapeState {
     Hex,
     Dec,
 }
+/// 恒等快路径：不含 `&` 时零分配借用。
+pub(crate) fn unescape_string_cow(str: &str) -> std::borrow::Cow<'_, str> {
+    if str.contains('&') {
+        std::borrow::Cow::Owned(unescape_string(str))
+    } else {
+        std::borrow::Cow::Borrowed(str)
+    }
+}
+
 pub(crate) fn unescape_string(str: impl AsRef<str>) -> String {
     let str = str.as_ref();
     if str.contains('&') {

@@ -102,7 +102,7 @@ impl heading::ATXHeading {
 
 impl BlockStrategy for heading::ATXHeading {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
-        let location = line.start_location();
+        let location = line.cursor_or_end() as u32;
         line.skip_indent();
         if let Some((hash_count, start, end)) = Self::try_match(line) {
             parser.close_unmatched_blocks();
@@ -138,7 +138,7 @@ impl BlockStrategy for heading::SetextHeading {
             line.skip_indent();
             let first = line.peek();
             if first == Some(b'=') || first == Some(b'-') {
-                if let Some(spans) = parser.inlines.get(&container) {
+                if let Some(spans) = parser.inlines.get(container) {
                     let all_ref_def = !spans.is_empty()
                         && spans.iter().all(crate::inlines::is_link_reference_line);
                     if all_ref_def {
@@ -162,7 +162,7 @@ impl BlockStrategy for heading::SetextHeading {
                     MarkdownNode::Heading(heading::Heading::SETEXT(heading::SetextHeading {
                         level,
                     })),
-                    line.end_location(),
+                    line.char_end_offset() as u32,
                 );
                 return BlockMatching::MatchedLeaf;
             }
@@ -211,14 +211,14 @@ mod tests {
                 }
                 _ => panic!("Expected heading, found {:?}", ast[i + 1].body),
             }
-            assert_eq!(ast[i + 1].start, start);
-            assert_eq!(ast[i + 1].end, end);
+            assert_eq!(ast.location_at(ast[i + 1].span.start as usize), start);
+            assert_eq!(ast.location_at(ast[i + 1].span.end as usize), end);
             assert_eq!(ast.get_next(i + 1), Some(i + 2));
         }
         assert_eq!(ast[7].body, MarkdownNode::Paragraph);
         let last = expected_locations.last().unwrap();
-        assert_eq!(ast[7].start, last.0);
-        assert_eq!(ast[7].end, last.1);
+        assert_eq!(ast.location_at(ast[7].span.start as usize), last.0);
+        assert_eq!(ast.location_at(ast[7].span.end as usize), last.1);
     }
     #[test]
     fn test_setext_heading() {
@@ -247,8 +247,8 @@ baz*
                     level: heading::HeadingLevel::try_from(i).unwrap(),
                 }))
             );
-            assert_eq!(ast[i].start, start);
-            assert_eq!(ast[i].end, end);
+            assert_eq!(ast.location_at(ast[i].span.start as usize), start);
+            assert_eq!(ast.location_at(ast[i].span.end as usize), end);
             assert_eq!(ast.get_next(i), Some(i + 1));
         }
         assert_eq!(
@@ -258,7 +258,7 @@ baz*
             }))
         );
         let last = expected_locations.last().unwrap();
-        assert_eq!(ast[3].start, last.0);
-        assert_eq!(ast[3].end, last.1);
+        assert_eq!(ast.location_at(ast[3].span.start as usize), last.0);
+        assert_eq!(ast.location_at(ast[3].span.end as usize), last.1);
     }
 }

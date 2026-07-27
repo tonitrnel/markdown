@@ -1,72 +1,19 @@
 use crate::ast::MarkdownNode;
 use crate::inlines::ProcessCtx;
 use crate::span::MergedSpan;
-use std::cell::{Ref, RefCell, RefMut};
-use std::fmt::{Debug, Formatter};
-use std::rc::Rc;
 
-#[derive(Clone)]
-pub(super) struct Delimiter {
-    pub(super) delimiter_byte: u8,
-    pub(super) can_open: bool,
-    pub(super) can_close: bool,
-    pub(super) length: usize,
-    pub(super) prev: Option<DelimiterChain>,
-    pub(super) next: Option<DelimiterChain>,
-    pub(super) position: usize,
-    pub(super) node: usize,
-}
-impl PartialEq for Delimiter {
-    fn eq(&self, other: &Self) -> bool {
-        self.node == other.node
-    }
-}
-
-#[derive(Clone, PartialEq)]
-pub(super) struct DelimiterChain(Rc<RefCell<Delimiter>>);
-impl DelimiterChain {
-    pub(super) fn new(delimiter: Delimiter) -> Self {
-        Self(Rc::new(RefCell::new(delimiter)))
-    }
-    pub(super) fn borrow(&self) -> Ref<'_, Delimiter> {
-        self.0.borrow()
-    }
-    pub(super) fn borrow_mut(&self) -> RefMut<'_, Delimiter> {
-        self.0.borrow_mut()
-    }
-}
-
-impl Debug for DelimiterChain {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut count = 0;
-        {
-            let cur = self.borrow();
-            writeln!(
-                f,
-                "  {count}. [{}]({},{})@{}#{}",
-                cur.delimiter_byte as char, cur.can_open, cur.can_close, cur.length, cur.node
-            )?;
-        }
-        let mut prev = self.borrow().prev.clone();
-        while let Some(prev_delimiter) = prev {
-            count += 1;
-            {
-                let prev = prev_delimiter.borrow();
-                writeln!(
-                    f,
-                    "  {count}. [{}]({},{})@{}#{}",
-                    prev.delimiter_byte as char,
-                    prev.can_open,
-                    prev.can_close,
-                    prev.length,
-                    prev.node
-                )?;
-            }
-            let cloned = prev_delimiter.borrow().prev.clone();
-            prev = cloned;
-        }
-        Ok(())
-    }
+/// delimiter 工作区条目（P2）：以 `Parser::delimiter_store` 中的索引成链，
+/// 取代逐 delimiter 的 `Rc<RefCell<_>>` 堆分配；容量跨容器复用，
+/// 嵌套 `inlines::process`（内联脚注/HTML 文本）以 base/truncate 协议隔离。
+pub(crate) struct Delimiter {
+    pub(crate) delimiter_byte: u8,
+    pub(crate) can_open: bool,
+    pub(crate) can_close: bool,
+    pub(crate) length: usize,
+    pub(crate) prev: Option<usize>,
+    pub(crate) next: Option<usize>,
+    pub(crate) position: usize,
+    pub(crate) node: usize,
 }
 
 /// 判断字节是否为空白
@@ -366,38 +313,26 @@ pub(super) fn before(
     let scan_result = scan_delimiters(line, parser.options.cjk_friendly_delimiters);
     let start = line.cursor();
     let (text, locations) = {
-        // For quotes, we need to skip the byte and get the location
+        // P1b：标记本身就是连续源码切片，保存区间不分配 String
         if matches!(scan_result.0, b'\'' | b'"') {
             line.skip(1);
             let end = line.cursor();
-            let text = if scan_result.0 == b'\'' {
-                "'".to_string()
-            } else {
-                "\"".to_string()
-            };
-            let loc_start = line.location_at_byte(start);
-            let loc_end = line.location_at_byte(end);
+            let text = crate::ast::text::TextRef::Source(crate::ast::text::SourceSpan::new(
+                start as u32,
+                end as u32,
+            ));
+            let loc_start = (start) as u32;
+            let loc_end = (end) as u32;
             (text, (loc_start, loc_end))
         } else {
             line.skip(scan_result.1);
             let end = line.cursor();
-            // 对常见 delimiter 使用静态字符串避免分配
-            let text = match (scan_result.0, scan_result.1) {
-                (b'*', 1) => "*".to_string(),
-                (b'*', 2) => "**".to_string(),
-                (b'*', 3) => "***".to_string(),
-                (b'_', 1) => "_".to_string(),
-                (b'_', 2) => "__".to_string(),
-                (b'~', 1) => "~".to_string(),
-                (b'~', 2) => "~~".to_string(),
-                (b'=', 2) => "==".to_string(),
-                _ => {
-                    let slice = line.slice_from_abs(start, end);
-                    slice.to_string()
-                }
-            };
-            let loc_start = line.location_at_byte(start);
-            let loc_end = line.location_at_byte(end);
+            let text = crate::ast::text::TextRef::Source(crate::ast::text::SourceSpan::new(
+                start as u32,
+                end as u32,
+            ));
+            let loc_start = (start) as u32;
+            let loc_end = (end) as u32;
             (text, (loc_start, loc_end))
         }
     };
@@ -408,22 +343,22 @@ pub(super) fn before(
         && (!enabled_gfm_strikethrough || scan_result.1 == 1 || scan_result.1 == 2)
         && (!enabled_ofm_highlight || scan_result.1 == 2)
     {
-        *delimiters = Some(DelimiterChain::new(Delimiter {
+        let store = &mut parser.delimiter_store;
+        let idx = store.len();
+        store.push(Delimiter {
             delimiter_byte: scan_result.0,
             can_open: scan_result.2,
             can_close: scan_result.3,
             length: scan_result.1,
-            prev: delimiters.clone(),
+            prev: *delimiters,
             next: None,
             position: start,
             node,
-        }));
-        if let Some(delimiters) = delimiters {
-            let cloned = delimiters.clone();
-            if let Some(previous) = &delimiters.borrow().prev {
-                previous.borrow_mut().next = Some(cloned);
-            }
+        });
+        if let Some(previous) = *delimiters {
+            store[previous].next = Some(idx);
         }
+        *delimiters = Some(idx);
     }
     true
 }
@@ -435,300 +370,277 @@ pub(super) fn process(
     stack_bottom: usize,
 ) {
     let mut openers_bottom = [stack_bottom; 21];
-    let mut candidate = delimiters.clone();
-    let mut closer = None;
-    while let Some(candidate_delimiter) = candidate
-        .as_ref()
-        .filter(|it| it.borrow().position >= stack_bottom)
+    // 定位 position >= stack_bottom 的最底部 delimiter 作为起始 closer
+    let mut candidate = *delimiters;
+    let mut closer: Option<usize> = None;
+    while let Some(idx) =
+        candidate.filter(|&it| parser.delimiter_store[it].position >= stack_bottom)
     {
-        closer = Some(candidate_delimiter.clone());
-        let cloned_previous = candidate_delimiter.borrow().prev.clone();
-        candidate = cloned_previous;
+        closer = Some(idx);
+        candidate = parser.delimiter_store[idx].prev;
     }
-    while let Some(closer_delimiter) = closer.as_ref() {
-        if closer_delimiter.borrow().can_close {
-            let (mut opener, openers_bottom_index) = {
-                let closer_delimiter = closer_delimiter.borrow();
-                let openers_bottom_index = match closer_delimiter.delimiter_byte {
-                    b'"' => 0,
-                    b'\'' => 1,
-                    b'_' => {
-                        2 + (if closer_delimiter.can_open { 3 } else { 0 })
-                            + (closer_delimiter.length % 3)
-                    }
-                    b'*' => {
-                        8 + (if closer_delimiter.can_open { 3 } else { 0 })
-                            + (closer_delimiter.length % 3)
-                    }
-                    b'~' => {
-                        14 + if closer_delimiter.can_open { 2 } else { 0 } + closer_delimiter.length
-                    }
-                    b'=' => 19 + if closer_delimiter.can_open { 1 } else { 0 },
-                    _ => panic!(
-                        "Invalid delimiter byte {}",
-                        closer_delimiter.delimiter_byte as char
-                    ),
-                };
-                (closer_delimiter.prev.clone(), openers_bottom_index)
-            };
-            let mut opener_found = false;
-            {
-                let closer_delimiter = closer_delimiter.borrow();
-                while let Some(opener_delimiter) = opener
-                    .as_ref()
-                    .filter(|it| it.borrow().position >= openers_bottom[openers_bottom_index])
-                {
-                    {
-                        let opener_delimiter = opener_delimiter.borrow();
-                        let odd_match = (closer_delimiter.can_open || opener_delimiter.can_close)
-                            && closer_delimiter.length % 3 != 0
-                            && (opener_delimiter.length + closer_delimiter.length) % 3 == 0;
-                        if opener_delimiter.can_open
-                            && opener_delimiter.delimiter_byte == closer_delimiter.delimiter_byte
-                            && !odd_match
-                        {
-                            opener_found = true;
-                            break;
-                        }
-                    }
-                    {
-                        let cloned_previous = opener_delimiter.borrow().prev.clone();
-                        opener = cloned_previous;
-                    }
-                }
+    while let Some(closer_idx) = closer {
+        let (
+            closer_byte,
+            closer_can_open,
+            closer_can_close,
+            closer_length,
+            closer_prev,
+            closer_next,
+        ) = {
+            let d = &parser.delimiter_store[closer_idx];
+            (
+                d.delimiter_byte,
+                d.can_open,
+                d.can_close,
+                d.length,
+                d.prev,
+                d.next,
+            )
+        };
+        if !closer_can_close {
+            closer = closer_next;
+            continue;
+        }
+        let openers_bottom_index = match closer_byte {
+            b'"' => 0,
+            b'\'' => 1,
+            b'_' => 2 + (if closer_can_open { 3 } else { 0 }) + (closer_length % 3),
+            b'*' => 8 + (if closer_can_open { 3 } else { 0 }) + (closer_length % 3),
+            b'~' => 14 + if closer_can_open { 2 } else { 0 } + closer_length,
+            b'=' => 19 + if closer_can_open { 1 } else { 0 },
+            _ => panic!("Invalid delimiter byte {}", closer_byte as char),
+        };
+        let mut opener = closer_prev;
+        let mut opener_found = false;
+        while let Some(opener_idx) = opener.filter(|&it| {
+            parser.delimiter_store[it].position >= openers_bottom[openers_bottom_index]
+        }) {
+            let od = &parser.delimiter_store[opener_idx];
+            let odd_match = (closer_can_open || od.can_close)
+                && closer_length % 3 != 0
+                && (od.length + closer_length) % 3 == 0;
+            if od.can_open && od.delimiter_byte == closer_byte && !odd_match {
+                opener_found = true;
+                break;
             }
-            let mut old_closer = closer.clone();
-            let closer_byte = closer_delimiter.borrow().delimiter_byte;
-            match closer_byte {
-                b'*' | b'_' | b'~' | b'=' => {
-                    if let Some(opener_delimiter) = opener.as_ref().filter(|_| opener_found) {
-                        let opener_inl = opener_delimiter.borrow().node;
-                        let closer_inl = closer_delimiter.borrow().node;
+            opener = od.prev;
+        }
+        let old_closer = closer;
+        match closer_byte {
+            b'*' | b'_' | b'~' | b'=' => {
+                if let Some(opener_idx) = opener.filter(|_| opener_found) {
+                    let opener_inl = parser.delimiter_store[opener_idx].node;
+                    let closer_inl = parser.delimiter_store[closer_idx].node;
 
-                        // Safety check: if opener and closer don't have the same parent,
-                        // skip this delimiter pair to avoid tree corruption
-                        if parser.tree.get_parent(opener_inl) != parser.tree.get_parent(closer_inl)
-                        {
-                            // Don't process this pair, just move to next closer
-                            let cloned_next = closer_delimiter.borrow().next.clone();
-                            closer = cloned_next;
-                            continue;
-                        }
+                    // Safety check: if opener and closer don't have the same parent,
+                    // skip this delimiter pair to avoid tree corruption
+                    if parser.tree.get_parent(opener_inl) != parser.tree.get_parent(closer_inl) {
+                        closer = parser.delimiter_store[closer_idx].next;
+                        continue;
+                    }
 
-                        let mut opener_char_nums =
-                            if let MarkdownNode::Text(t) = &parser.tree[opener_inl].body {
-                                t.len()
-                            } else {
-                                0
-                            };
-                        let mut closer_char_nums =
-                            if let MarkdownNode::Text(t) = &parser.tree[closer_inl].body {
-                                t.len()
-                            } else {
-                                0
-                            };
-                        let used_delimiter_nums = if closer_char_nums >= 2 && opener_char_nums >= 2
-                        {
-                            2
+                    let source = parser.scanner.source_str();
+                    let mut opener_char_nums =
+                        if let MarkdownNode::Text(t) = &parser.tree[opener_inl].body {
+                            t.len(source)
                         } else {
-                            1
+                            0
                         };
-                        if let MarkdownNode::Text(text) = &mut parser.tree[opener_inl].body {
-                            text.truncate(text.len() - used_delimiter_nums);
-                            opener_char_nums = text.len();
-                            parser.tree[opener_inl].end.column -= used_delimiter_nums as u64;
-                        }
-                        if let MarkdownNode::Text(text) = &mut parser.tree[closer_inl].body {
-                            text.truncate(text.len() - used_delimiter_nums);
-                            closer_char_nums = text.len();
-                            parser.tree[closer_inl].end.column -= used_delimiter_nums as u64;
-                        }
-                        let start_location = parser.tree[opener_inl].end;
-                        let node = match closer_byte {
-                            b'*' | b'_' => {
-                                if used_delimiter_nums == 1 {
-                                    parser.append_free_node(MarkdownNode::Emphasis, start_location)
-                                } else {
-                                    parser.append_free_node(MarkdownNode::Strong, start_location)
-                                }
-                            }
-                            b'~' => {
-                                parser.append_free_node(MarkdownNode::Strikethrough, start_location)
-                            }
-                            b'=' => {
-                                parser.append_free_node(MarkdownNode::Highlighting, start_location)
-                            }
-                            _ => panic!("Invalid delimiter byte {}", closer_byte as char),
+                    let mut closer_char_nums =
+                        if let MarkdownNode::Text(t) = &parser.tree[closer_inl].body {
+                            t.len(source)
+                        } else {
+                            0
                         };
-                        parser.tree[node].end = {
-                            let mut loc = parser.tree[closer_inl].end;
-                            loc.column += used_delimiter_nums as u64;
-                            loc
-                        };
-                        let mut temp = parser.tree.get_next(opener_inl);
-                        while let Some(item) = temp.filter(|it| it != &closer_inl) {
-                            let next = parser.tree.get_next(item);
-                            parser.tree.unlink(item);
-                            parser.tree.set_parent(item, node);
-                            temp = next;
-                        }
-                        parser
-                            .tree
-                            .set_parent(node, parser.tree.get_parent(opener_inl));
-                        // Safety check: if opener and closer don't have the same parent,
-                        // skip this delimiter pair to avoid tree corruption
-                        if parser.tree.get_parent(opener_inl) != parser.tree.get_parent(closer_inl)
-                        {
-                            // Don't process this pair, just move to next closer
-                            let cloned_next = closer_delimiter.borrow().next.clone();
-                            closer = cloned_next;
-                            continue;
-                        }
-                        parser.tree.set_next(opener_inl, node);
-                        parser.tree.set_prev(closer_inl, node);
-                        if opener_delimiter.borrow().next.as_ref() != Some(closer_delimiter) {
-                            opener_delimiter.borrow_mut().next = closer.clone();
-                            closer_delimiter.borrow_mut().prev = opener.clone();
-                        }
-                        if opener_char_nums == 0 {
-                            parser.tree.remove(opener_inl);
-                            remove_delimiter(&mut opener)
-                        }
-                        if closer_char_nums == 0 {
-                            parser.tree.remove(closer_inl);
-                            let cloned_next = closer_delimiter.borrow().next.clone();
-                            remove_delimiter(&mut closer);
-                            closer = cloned_next
-                        }
+                    let used_delimiter_nums = if closer_char_nums >= 2 && opener_char_nums >= 2 {
+                        2
                     } else {
-                        let cloned_next = closer_delimiter.borrow().next.clone();
-                        closer = cloned_next;
+                        1
+                    };
+                    if let MarkdownNode::Text(text) = &mut parser.tree[opener_inl].body {
+                        text.truncate(text.len(source) - used_delimiter_nums, source);
+                        opener_char_nums = text.len(source);
+                        parser.tree[opener_inl].span.end -= used_delimiter_nums as u32;
                     }
-                }
-                b'\'' => {
-                    if opener_found {
-                        // Found matching opener, convert opener to left quote and closer to right quote
-                        if let Some(opener_delimiter) = opener.as_ref() {
-                            let opener_node = &mut parser.tree[opener_delimiter.borrow().node];
-                            opener_node.body = MarkdownNode::Text("\u{2018}".into());
+                    if let MarkdownNode::Text(text) = &mut parser.tree[closer_inl].body {
+                        text.truncate(text.len(source) - used_delimiter_nums, source);
+                        closer_char_nums = text.len(source);
+                        parser.tree[closer_inl].span.end -= used_delimiter_nums as u32;
+                    }
+                    let start_location = parser.tree[opener_inl].span.end;
+                    let node = match closer_byte {
+                        b'*' | b'_' => {
+                            if used_delimiter_nums == 1 {
+                                parser.append_free_node(MarkdownNode::Emphasis, start_location)
+                            } else {
+                                parser.append_free_node(MarkdownNode::Strong, start_location)
+                            }
                         }
-                        let closer_node = &mut parser.tree[closer_delimiter.borrow().node];
-                        closer_node.body = MarkdownNode::Text("\u{2019}".into());
-                        // Remove both opener and closer from delimiter chain
-                        remove_delimiter(&mut opener);
-                    } else {
-                        // No matching opener, treat as apostrophe (right single quote)
-                        let node = &mut parser.tree[closer_delimiter.borrow().node];
-                        node.body = MarkdownNode::Text("\u{2019}".into());
-                    }
-                    let cloned_next = closer_delimiter.borrow().next.clone();
-                    closer = cloned_next;
-                }
-                b'"' => {
-                    if opener_found {
-                        // Found matching opener, convert opener to left quote and closer to right quote
-                        if let Some(opener_delimiter) = opener.as_ref() {
-                            let opener_node = &mut parser.tree[opener_delimiter.borrow().node];
-                            opener_node.body = MarkdownNode::Text("\u{201C}".into());
+                        b'~' => {
+                            parser.append_free_node(MarkdownNode::Strikethrough, start_location)
                         }
-                        let closer_node = &mut parser.tree[closer_delimiter.borrow().node];
-                        closer_node.body = MarkdownNode::Text("\u{201D}".into());
-                        // Remove both opener and closer from delimiter chain
-                        remove_delimiter(&mut opener);
-                    } else {
-                        // No matching opener, should not happen for double quotes in normal text
-                        // but treat as right double quote
-                        let node = &mut parser.tree[closer_delimiter.borrow().node];
-                        node.body = MarkdownNode::Text("\u{201D}".into());
+                        b'=' => parser.append_free_node(MarkdownNode::Highlighting, start_location),
+                        _ => panic!("Invalid delimiter byte {}", closer_byte as char),
+                    };
+                    parser.tree[node].span.end =
+                        parser.tree[closer_inl].span.end + used_delimiter_nums as u32;
+                    let mut temp = parser.tree.get_next(opener_inl);
+                    while let Some(item) = temp.filter(|it| it != &closer_inl) {
+                        let next = parser.tree.get_next(item);
+                        parser.tree.unlink(item);
+                        parser.tree.set_parent(item, node);
+                        temp = next;
                     }
-                    let cloned_next = closer_delimiter.borrow().next.clone();
-                    closer = cloned_next;
-                }
-                _ => (),
-            };
-            if let Some(old_closer_delimiter) = old_closer.as_ref().filter(|_| !opener_found) {
-                openers_bottom[openers_bottom_index] = old_closer_delimiter.borrow().position;
-                if !old_closer_delimiter.borrow().can_open {
-                    remove_delimiter(&mut old_closer)
+                    parser
+                        .tree
+                        .set_parent(node, parser.tree.get_parent(opener_inl));
+                    // Safety check: if opener and closer don't have the same parent,
+                    // skip this delimiter pair to avoid tree corruption
+                    if parser.tree.get_parent(opener_inl) != parser.tree.get_parent(closer_inl) {
+                        closer = parser.delimiter_store[closer_idx].next;
+                        continue;
+                    }
+                    parser.tree.set_next(opener_inl, node);
+                    parser.tree.set_prev(closer_inl, node);
+                    if parser.delimiter_store[opener_idx].next != Some(closer_idx) {
+                        parser.delimiter_store[opener_idx].next = Some(closer_idx);
+                        parser.delimiter_store[closer_idx].prev = Some(opener_idx);
+                    }
+                    if opener_char_nums == 0 {
+                        parser.tree.remove(opener_inl);
+                        let mut slot = Some(opener_idx);
+                        remove_delimiter(&mut parser.delimiter_store, &mut slot);
+                    }
+                    if closer_char_nums == 0 {
+                        parser.tree.remove(closer_inl);
+                        let next = parser.delimiter_store[closer_idx].next;
+                        let mut slot = Some(closer_idx);
+                        remove_delimiter(&mut parser.delimiter_store, &mut slot);
+                        closer = next;
+                    }
+                } else {
+                    closer = parser.delimiter_store[closer_idx].next;
                 }
             }
-        } else {
-            let cloned_next = closer_delimiter.borrow().next.clone();
-            closer = cloned_next;
+            b'\'' => {
+                if opener_found {
+                    // Found matching opener, convert opener to left quote and closer to right quote
+                    if let Some(opener_idx) = opener {
+                        let opener_node = &mut parser.tree[parser.delimiter_store[opener_idx].node];
+                        opener_node.body = MarkdownNode::Text("\u{2018}".into());
+                    }
+                    let closer_node = &mut parser.tree[parser.delimiter_store[closer_idx].node];
+                    closer_node.body = MarkdownNode::Text("\u{2019}".into());
+                    // Remove both opener and closer from delimiter chain
+                    remove_delimiter(&mut parser.delimiter_store, &mut opener);
+                } else {
+                    // No matching opener, treat as apostrophe (right single quote)
+                    let node = &mut parser.tree[parser.delimiter_store[closer_idx].node];
+                    node.body = MarkdownNode::Text("\u{2019}".into());
+                }
+                closer = parser.delimiter_store[closer_idx].next;
+            }
+            b'"' => {
+                if opener_found {
+                    // Found matching opener, convert opener to left quote and closer to right quote
+                    if let Some(opener_idx) = opener {
+                        let opener_node = &mut parser.tree[parser.delimiter_store[opener_idx].node];
+                        opener_node.body = MarkdownNode::Text("\u{201C}".into());
+                    }
+                    let closer_node = &mut parser.tree[parser.delimiter_store[closer_idx].node];
+                    closer_node.body = MarkdownNode::Text("\u{201D}".into());
+                    // Remove both opener and closer from delimiter chain
+                    remove_delimiter(&mut parser.delimiter_store, &mut opener);
+                } else {
+                    // No matching opener, should not happen for double quotes in normal text
+                    // but treat as right double quote
+                    let node = &mut parser.tree[parser.delimiter_store[closer_idx].node];
+                    node.body = MarkdownNode::Text("\u{201D}".into());
+                }
+                closer = parser.delimiter_store[closer_idx].next;
+            }
+            _ => (),
+        };
+        if !opener_found {
+            if let Some(oc) = old_closer {
+                openers_bottom[openers_bottom_index] = parser.delimiter_store[oc].position;
+                if !parser.delimiter_store[oc].can_open {
+                    let mut slot = Some(oc);
+                    remove_delimiter(&mut parser.delimiter_store, &mut slot);
+                }
+            }
         }
     }
-    while delimiters
-        .as_ref()
-        .filter(|it| it.borrow().position >= stack_bottom)
-        .is_some()
+    while let Some(tail_idx) =
+        delimiters.filter(|&it| parser.delimiter_store[it].position >= stack_bottom)
     {
         // Before removing, check if it's a quote delimiter and convert it
-        if let Some(delimiter) = delimiters.as_ref() {
-            let delimiter_byte = delimiter.borrow().delimiter_byte;
-            if matches!(delimiter_byte, b'\'' | b'"') {
-                let node_id = delimiter.borrow().node;
-                let can_open = delimiter.borrow().can_open;
-                let can_close = delimiter.borrow().can_close;
-                let next_is_lower_alpha = parser
-                    .tree
-                    .get_next(node_id)
-                    .and_then(|next_id| match &parser.tree[next_id].body {
-                        MarkdownNode::Text(text) => text.chars().next(),
-                        _ => None,
-                    })
-                    .is_some_and(|ch| ch.is_ascii_lowercase());
+        let delimiter_byte = parser.delimiter_store[tail_idx].delimiter_byte;
+        if matches!(delimiter_byte, b'\'' | b'"') {
+            let node_id = parser.delimiter_store[tail_idx].node;
+            let can_open = parser.delimiter_store[tail_idx].can_open;
+            let can_close = parser.delimiter_store[tail_idx].can_close;
+            let source = parser.scanner.source_str();
+            let next_is_lower_alpha = parser
+                .tree
+                .get_next(node_id)
+                .and_then(|next_id| match &parser.tree[next_id].body {
+                    MarkdownNode::Text(text) => text.resolve(source).chars().next(),
+                    _ => None,
+                })
+                .is_some_and(|ch| ch.is_ascii_lowercase());
 
-                // Convert unmatched quotes
-                let node = &mut parser.tree[node_id];
-                if delimiter_byte == b'\'' {
-                    // For unmatched single quotes:
-                    // - leading contractions like `'tis` should become apostrophes (right quote)
-                    // - other openers stay as left quotes.
-                    node.body = if can_open && !can_close {
-                        if next_is_lower_alpha {
-                            MarkdownNode::Text("\u{2019}".into())
-                        } else {
-                            MarkdownNode::Text("\u{2018}".into())
-                        }
-                    } else {
+            // Convert unmatched quotes
+            let node = &mut parser.tree[node_id];
+            if delimiter_byte == b'\'' {
+                // For unmatched single quotes:
+                // - leading contractions like `'tis` should become apostrophes (right quote)
+                // - other openers stay as left quotes.
+                node.body = if can_open && !can_close {
+                    if next_is_lower_alpha {
                         MarkdownNode::Text("\u{2019}".into())
-                    };
-                } else if delimiter_byte == b'"' {
-                    // For double quotes: if can_open, use left quote; otherwise use right quote
-                    node.body = if can_open && !can_close {
-                        MarkdownNode::Text("\u{201C}".into())
                     } else {
-                        MarkdownNode::Text("\u{201D}".into())
-                    };
-                }
+                        MarkdownNode::Text("\u{2018}".into())
+                    }
+                } else {
+                    MarkdownNode::Text("\u{2019}".into())
+                };
+            } else if delimiter_byte == b'"' {
+                // For double quotes: if can_open, use left quote; otherwise use right quote
+                node.body = if can_open && !can_close {
+                    MarkdownNode::Text("\u{201C}".into())
+                } else {
+                    MarkdownNode::Text("\u{201D}".into())
+                };
             }
         }
-        remove_delimiter(delimiters)
+        remove_delimiter(&mut parser.delimiter_store, delimiters);
     }
 }
 
-fn remove_delimiter(delimiter_chain: &mut Option<DelimiterChain>) {
-    let delimiter = match delimiter_chain.as_ref() {
-        Some(d) => d,
-        None => return,
+fn remove_delimiter(store: &mut [Delimiter], slot: &mut Option<usize>) {
+    let Some(idx) = *slot else {
+        return;
     };
-    if let Some(previous) = delimiter.borrow().prev.as_ref() {
-        previous.borrow_mut().next = delimiter.borrow().next.clone();
+    let prev = store[idx].prev;
+    let next = store[idx].next;
+    if let Some(p) = prev {
+        store[p].next = next;
     }
-    if let Some(next) = delimiter.borrow().next.as_ref() {
-        next.borrow_mut().prev = delimiter.borrow().prev.clone();
+    if let Some(n) = next {
+        store[n].prev = prev;
         return;
     }
-    let cloned_previous = delimiter.borrow().prev.clone();
-    *delimiter_chain = cloned_previous
+    *slot = prev;
 }
 
 /// 最终处理 delimiter chain（在所有 Span 处理完毕后调用）
 pub(super) fn process_final<'input>(
     id: usize,
     parser: &mut crate::parser::Parser<'input>,
-    brackets: &mut Option<super::BracketChain>,
-    delimiters: &mut Option<DelimiterChain>,
+    brackets: &mut Option<usize>,
+    delimiters: &mut Option<usize>,
 ) {
     let mut empty_line = crate::span::MergedSpan::from_single(crate::span::Span::empty());
     let mut ctx = ProcessCtx {

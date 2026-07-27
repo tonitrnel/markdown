@@ -10,7 +10,7 @@ impl BlockStrategy for list::ListItem {
             container,
         }: BeforeCtx,
     ) -> BlockMatching {
-        let location = line.start_location();
+        let location = line.cursor_or_end() as u32;
 
         if line.is_indented() && !matches!(parser.tree[container].body, MarkdownNode::ListItem(..))
         {
@@ -374,10 +374,15 @@ impl BlockStrategy for list::List {
             MarkdownNode::List(list) => list.tight(),
             _ => return,
         };
+        let source = parser.scanner.source();
         let check_tight = |curr, next| -> bool {
-            let curr_end = subtree_end_line(parser, curr);
-            let next_start = parser.tree[next].start.line;
-            next_start.saturating_sub(curr_end) <= 1
+            // 行差 == 两偏移间的换行符数（line = 之前 '\n' 数 + 1）
+            let curr_end = subtree_end_offset(parser, curr) as usize;
+            let next_start = parser.tree[next].span.start as usize;
+            if curr_end >= next_start {
+                return true;
+            }
+            memchr::memchr_iter(b'\n', &source[curr_end..next_start]).count() <= 1
         };
         // Check between list items
         let mut item = parser.tree.get_first_child(id);
@@ -415,25 +420,25 @@ impl BlockStrategy for list::List {
     }
 }
 
-fn subtree_end_line(parser: &Parser<'_>, idx: usize) -> u64 {
-    // For container nodes (List, ListItem), don't use their own end.line
+fn subtree_end_offset(parser: &Parser<'_>, idx: usize) -> u32 {
+    // For container nodes (List, ListItem), don't use their own end
     // because it's set during finalization and may not reflect actual content end.
-    // Instead, only use end.line from leaf nodes or recurse into children.
+    // Instead, only use end from leaf nodes or recurse into children.
     let own_end = if matches!(
         parser.tree[idx].body,
         MarkdownNode::List(..) | MarkdownNode::ListItem(..)
     ) {
-        parser.tree[idx].start.line
+        parser.tree[idx].span.start
     } else {
-        parser.tree[idx].end.line
+        parser.tree[idx].span.end
     };
-    let mut max_line = own_end;
+    let mut max_offset = own_end;
     let mut child = parser.tree.get_first_child(idx);
     while let Some(curr) = child {
-        max_line = max_line.max(subtree_end_line(parser, curr));
+        max_offset = max_offset.max(subtree_end_offset(parser, curr));
         child = parser.tree.get_next(curr);
     }
-    max_line
+    max_offset
 }
 
 fn match_list_node(a: &MarkdownNode, b: &MarkdownNode) -> bool {

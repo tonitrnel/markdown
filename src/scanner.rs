@@ -1,5 +1,3 @@
-use crate::parser::Location;
-
 /// 字节扫描器，直接在输入字节切片上操作，替代 Tokenizer 中间层。
 ///
 /// Scanner 通过字节偏移进行模式匹配，不生成中间 Token 枚举集合，
@@ -11,18 +9,14 @@ pub struct Scanner<'input> {
     source_str: &'input str,
     /// 当前扫描位置（字节偏移）
     pos: usize,
-    /// 当前行号（从 1 开始）
-    line: u64,
-    /// 当前列号（从 1 开始，按字符计数）
-    col: u64,
+    /// 源码不含 `\r`（构建时一次 memchr 检测）：行尾扫描走单针快路径
+    no_cr: bool,
 }
 
 /// Scanner 快照，用于保存和恢复扫描位置
 #[derive(Debug, Clone, Copy)]
 pub struct ScannerSnapshot {
     pos: usize,
-    line: u64,
-    col: u64,
 }
 
 impl<'input> Scanner<'input> {
@@ -32,8 +26,7 @@ impl<'input> Scanner<'input> {
             source: source.as_bytes(),
             source_str: source,
             pos: 0,
-            line: 1,
-            col: 1,
+            no_cr: memchr::memchr(b'\r', source.as_bytes()).is_none(),
         }
     }
 
@@ -53,32 +46,16 @@ impl<'input> Scanner<'input> {
     #[inline]
     pub fn advance(&mut self) -> Option<u8> {
         let byte = self.source.get(self.pos).copied();
-        if let Some(b) = byte {
+        if byte.is_some() {
             self.pos += 1;
-            if b == b'\n' {
-                self.line += 1;
-                self.col = 1;
-            } else if !is_utf8_continuation(b) {
-                self.col += 1;
-            }
         }
         byte
     }
 
-    /// 前进 n 个字节（更新行列信息）
+    /// 前进 n 个字节
     #[inline]
     pub fn advance_by(&mut self, n: usize) {
-        let end = (self.pos + n).min(self.source.len());
-        while self.pos < end {
-            let b = self.source[self.pos];
-            self.pos += 1;
-            if b == b'\n' {
-                self.line += 1;
-                self.col = 1;
-            } else if !is_utf8_continuation(b) {
-                self.col += 1;
-            }
-        }
+        self.pos = (self.pos + n).min(self.source.len());
     }
 
     /// 当前字节偏移位置
@@ -122,7 +99,6 @@ impl<'input> Scanner<'input> {
             match b {
                 b' ' | b'\t' => {
                     self.pos += 1;
-                    self.col += 1;
                 }
                 _ => break,
             }
@@ -133,8 +109,13 @@ impl<'input> Scanner<'input> {
     /// 跳过到行尾（换行符或输入末尾），返回行尾位置
     pub fn skip_to_eol(&mut self) -> usize {
         let remaining = &self.source[self.pos..];
-        // 使用 memchr2 同时搜索 \n 和 \r，利用 SIMD 加速
-        let pos = match memchr::memchr2(b'\n', b'\r', remaining) {
+        // 无 `\r` 源码用单针 memchr（更快）；否则 memchr2 同时搜 \n 和 \r
+        let found = if self.no_cr {
+            memchr::memchr(b'\n', remaining)
+        } else {
+            memchr::memchr2(b'\n', b'\r', remaining)
+        };
+        let pos = match found {
             Some(offset) => self.pos + offset,
             None => self.source.len(),
         };
@@ -182,34 +163,16 @@ impl<'input> Scanner<'input> {
         self.source_str
     }
 
-    /// 获取当前 Location（行号、列号）
-    #[inline]
-    pub fn location(&self) -> Location {
-        Location::new(self.line, self.col)
-    }
-
-    /// 获取当前行号
-    #[inline]
-    pub fn line_number(&self) -> u64 {
-        self.line
-    }
-
     /// 创建当前位置的快照
     #[inline]
     pub fn snapshot(&self) -> ScannerSnapshot {
-        ScannerSnapshot {
-            pos: self.pos,
-            line: self.line,
-            col: self.col,
-        }
+        ScannerSnapshot { pos: self.pos }
     }
 
     /// 恢复到之前保存的快照位置
     #[inline]
     pub fn resume(&mut self, snapshot: &ScannerSnapshot) {
         self.pos = snapshot.pos;
-        self.line = snapshot.line;
-        self.col = snapshot.col;
     }
 
     /// 直接设置位置（不更新行列信息，仅用于特殊场景）

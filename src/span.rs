@@ -1,4 +1,3 @@
-use crate::parser::Location;
 use crate::scanner::Scanner;
 use std::fmt::{self, Debug, Formatter, Write};
 
@@ -6,7 +5,7 @@ use std::fmt::{self, Debug, Formatter, Write};
 ///
 /// Span 使用字节偏移范围引用原始输入切片，不拥有独立的数据副本，
 /// 从而消除 Token 收集和 Vec 分配的开销。
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct Span<'input> {
     /// 原始输入引用（字节切片）
     source: &'input [u8],
@@ -22,14 +21,6 @@ pub struct Span<'input> {
     indent_bytes: usize,
     /// 缩进是否已跳过
     indent_skipped: bool,
-    /// 行是否为纯 ASCII（字节数 == 字符数，location 计算 O(1)）
-    is_ascii: bool,
-    /// 行号（从 1 开始）
-    line_number: u64,
-    /// 行起始列号（从 1 开始）
-    start_col: u64,
-    /// 预计算的整行字符数（start..end），用于 O(1) 的 last_token_end_location
-    total_chars: usize,
 }
 
 /// 轻量级快照，仅存储游标和偏移信息，零分配。
@@ -41,10 +32,6 @@ pub struct SpanSnapshot {
     indent_spaces: u16,
     indent_bytes: usize,
     indent_skipped: bool,
-    is_ascii: bool,
-    line_number: u64,
-    start_col: u64,
-    total_chars: usize,
 }
 
 impl Debug for SpanSnapshot {
@@ -69,25 +56,13 @@ impl<'input> Span<'input> {
             indent_spaces: 0,
             indent_bytes: 0,
             indent_skipped: true,
-            is_ascii: true,
-            line_number: 0,
-            start_col: 0,
-            total_chars: 0,
         }
     }
 
     /// 将 start 调整为 cursor 位置，用于合并前去掉已跳过的缩进
     pub fn normalize_start(&mut self) {
         if self.cursor > self.start {
-            let delta_cols = if self.is_ascii {
-                self.cursor - self.start
-            } else {
-                count_chars(self.source, self.start, self.cursor)
-            };
-            self.start_col += delta_cols as u64;
             self.start = self.cursor;
-            // start 变化后，按需重新计算
-            self.total_chars = 0;
         }
     }
 
@@ -101,8 +76,6 @@ impl<'input> Span<'input> {
 
         let start = scanner.pos();
         let source = scanner.source();
-        let line_number = scanner.line_number();
-        let start_col = scanner.location().column;
 
         // 扫描到行尾
         let end = scanner.skip_to_eol();
@@ -127,9 +100,6 @@ impl<'input> Span<'input> {
         // 如果是空白行，indent_bytes 设为行长度
         let indent_bytes_final = if blank { end - start } else { indent_bytes };
 
-        // 快速检测是否纯 ASCII
-        let is_ascii = source[start..end].is_ascii();
-
         Some(Span {
             source,
             start,
@@ -138,11 +108,6 @@ impl<'input> Span<'input> {
             indent_spaces,
             indent_bytes: indent_bytes_final,
             indent_skipped: false,
-            is_ascii,
-            line_number,
-            start_col,
-            // 延迟计算：0 表示未计算，需要时再算
-            total_chars: 0,
         })
     }
 
@@ -270,10 +235,6 @@ impl<'input> Span<'input> {
             indent_spaces,
             indent_bytes: indent_bytes_final,
             indent_skipped: first.indent_skipped,
-            is_ascii: spans.iter().all(|s| s.is_ascii),
-            line_number: first.line_number,
-            start_col: first.start_col,
-            total_chars: count_chars(first.source, start, end),
         })
     }
 
@@ -286,10 +247,6 @@ impl<'input> Span<'input> {
             indent_spaces: self.indent_spaces,
             indent_bytes: self.indent_bytes,
             indent_skipped: self.indent_skipped,
-            is_ascii: self.is_ascii,
-            line_number: self.line_number,
-            start_col: self.start_col,
-            total_chars: self.total_chars,
         }
     }
 
@@ -301,10 +258,6 @@ impl<'input> Span<'input> {
         self.indent_spaces = snapshot.indent_spaces;
         self.indent_bytes = snapshot.indent_bytes;
         self.indent_skipped = snapshot.indent_skipped;
-        self.is_ascii = snapshot.is_ascii;
-        self.line_number = snapshot.line_number;
-        self.start_col = snapshot.start_col;
-        self.total_chars = snapshot.total_chars;
         self
     }
 
@@ -518,6 +471,27 @@ impl<'input> Span<'input> {
         self.cursor
     }
 
+    /// `start_location()` 的字节偏移对应物：游标偏移；已消费完毕时退到行内容终点。
+    #[inline]
+    pub fn cursor_or_end(&self) -> usize {
+        self.cursor.min(self.end.min(self.source.len()))
+    }
+
+    /// `end_location()` 的字节偏移对应物：游标处字符的独占终点
+    /// （`location_at` 对其换算出「该字符列 + 1」，与急切实现一致）；
+    /// 已消费完毕时退到行内容终点。
+    #[inline]
+    pub fn char_end_offset(&self) -> usize {
+        if self.is_end() {
+            return self.end.min(self.source.len());
+        }
+        let p = self.cursor.min(self.source.len());
+        match self.source.get(p) {
+            Some(&b) => p + utf8_char_width(b),
+            None => p,
+        }
+    }
+
     /// 获取原始 source 字节切片
     #[inline]
     pub fn source_slice(&self) -> &'input [u8] {
@@ -540,77 +514,10 @@ impl<'input> Span<'input> {
 
     // --- Location 相关方法 ---
 
-    /// 计算指定字节偏移处的 Location
-    /// 获取指定绝对字节偏移处的 Location（供 inline 文本累积器使用）
-    pub fn location_at_byte(&self, byte_pos: usize) -> Location {
-        self.location_at(byte_pos)
-    }
-
-    fn location_at(&self, byte_pos: usize) -> Location {
-        if self.is_ascii {
-            // 纯 ASCII 行：字节偏移 == 字符偏移，O(1)
-            let col_offset = byte_pos.saturating_sub(self.start);
-            Location::new(self.line_number, self.start_col + col_offset as u64)
-        } else {
-            let col_offset = count_chars(self.source, self.start, byte_pos);
-            Location::new(self.line_number, self.start_col + col_offset as u64)
-        }
-    }
-
-    /// 获取当前游标位置的 Location
-    pub fn start_location(&self) -> Location {
-        if self.is_end() {
-            // 如果已消费完毕，返回行尾位置
-            self.location_at(self.end.min(self.source.len()))
-        } else {
-            self.location_at(self.cursor)
-        }
-    }
-
-    /// 获取当前游标位置的结束 Location（下一个字符位置）
-    pub fn end_location(&self) -> Location {
-        let pos = if self.is_end() { self.end } else { self.cursor };
-        let loc = self.location_at(pos);
-        Location::new(loc.line, loc.column + 1)
-    }
-
-    /// 获取行最后一个字符的结束 Location
-    pub fn last_token_end_location(&self) -> Location {
-        if self.start >= self.end {
-            return self.end_location();
-        }
-        if self.is_ascii {
-            Location::new(
-                self.line_number,
-                self.start_col + (self.end - self.start) as u64,
-            )
-        } else if self.total_chars > 0 {
-            Location::new(self.line_number, self.start_col + self.total_chars as u64)
-        } else {
-            let char_count = count_chars(self.source, self.start, self.end);
-            Location::new(self.line_number, self.start_col + char_count as u64)
-        }
-    }
-
-    /// 确保 total_chars 已计算（用于需要多次访问的场景）
-    pub fn ensure_total_chars(&mut self) {
-        if self.total_chars == 0 && self.start < self.end {
-            self.total_chars = count_chars(self.source, self.start, self.end);
-        }
-    }
-
     /// 创建一个子 Span（切片），用于传递给 inline parser
     pub fn slice(&self, start: usize, end: usize) -> Span<'input> {
         let abs_start = (self.cursor + start).min(self.end);
         let abs_end = (self.cursor + end).min(self.end);
-        let (col_offset, total_chars) = if self.is_ascii {
-            (abs_start - self.start, abs_end - abs_start)
-        } else {
-            (
-                count_chars(self.source, self.start, abs_start),
-                count_chars(self.source, abs_start, abs_end),
-            )
-        };
         Span {
             source: self.source,
             start: abs_start,
@@ -619,10 +526,6 @@ impl<'input> Span<'input> {
             indent_spaces: 0,
             indent_bytes: 0,
             indent_skipped: true,
-            is_ascii: self.is_ascii,
-            line_number: self.line_number,
-            start_col: self.start_col + col_offset as u64,
-            total_chars,
         }
     }
 
@@ -633,14 +536,6 @@ impl<'input> Span<'input> {
         if abs_end < abs_start {
             std::mem::swap(&mut abs_start, &mut abs_end);
         }
-        let (col_offset, total_chars) = if self.is_ascii {
-            (abs_start - self.start, abs_end - abs_start)
-        } else {
-            (
-                count_chars(self.source, self.start, abs_start),
-                count_chars(self.source, abs_start, abs_end),
-            )
-        };
         Span {
             source: self.source,
             start: abs_start,
@@ -649,10 +544,6 @@ impl<'input> Span<'input> {
             indent_spaces: 0,
             indent_bytes: 0,
             indent_skipped: true,
-            is_ascii: self.is_ascii,
-            line_number: self.line_number,
-            start_col: self.start_col + col_offset as u64,
-            total_chars,
         }
     }
 
@@ -666,14 +557,6 @@ impl<'input> Span<'input> {
         while e > s && matches!(self.source[e - 1], b' ' | b'\t') {
             e -= 1;
         }
-        let (col_offset, total_chars) = if self.is_ascii {
-            (s - self.start, e - s)
-        } else {
-            (
-                count_chars(self.source, self.start, s),
-                count_chars(self.source, s, e),
-            )
-        };
         Span {
             source: self.source,
             start: s,
@@ -682,10 +565,6 @@ impl<'input> Span<'input> {
             indent_spaces: 0,
             indent_bytes: 0,
             indent_skipped: true,
-            is_ascii: self.is_ascii,
-            line_number: self.line_number,
-            start_col: self.start_col + col_offset as u64,
-            total_chars,
         }
     }
 
@@ -779,9 +658,23 @@ fn compute_indent(source: &[u8], start: usize, end: usize) -> (u16, usize) {
     (spaces, bytes)
 }
 
+/// UTF-8 前导字节的编码宽度（continuation/非法字节按 1 处理，防御性）
+#[inline]
+pub(crate) fn utf8_char_width(b: u8) -> usize {
+    if b < 0x80 {
+        1
+    } else if b < 0xE0 {
+        if b < 0xC0 { 1 } else { 2 }
+    } else if b < 0xF0 {
+        3
+    } else {
+        4
+    }
+}
+
 /// 计算从 start 到 end 范围内的字符数（非 continuation bytes 的数量）
 #[inline]
-fn count_chars(source: &[u8], start: usize, end: usize) -> usize {
+pub(crate) fn count_chars(source: &[u8], start: usize, end: usize) -> usize {
     let start = start.min(source.len());
     let end = end.min(source.len());
     if start >= end {
@@ -1113,8 +1006,8 @@ mod prop_tests {
 /// 与 `Span::merge` 不同，`MergedSpan` 保持每个 Span 的独立性，
 /// 在 Span 之间自动插入换行符，避免包含中间行的前缀字符（如 blockquote 的 `>`）。
 pub struct MergedSpan<'input> {
-    /// 原始 Span 列表
-    spans: Vec<Span<'input>>,
+    /// 原始 Span 列表（一、两段内联，与 pending 存储同构不再中转分配）
+    spans: smallvec::SmallVec<[Span<'input>; 2]>,
     /// 当前正在处理的 Span 索引
     current_span_index: usize,
     /// 是否在 Span 之间（需要插入换行符）
@@ -1123,7 +1016,7 @@ pub struct MergedSpan<'input> {
 
 impl<'input> MergedSpan<'input> {
     /// 从多个 Span 创建 MergedSpan
-    pub fn new(spans: Vec<Span<'input>>) -> Self {
+    pub fn new(spans: smallvec::SmallVec<[Span<'input>; 2]>) -> Self {
         MergedSpan {
             spans,
             current_span_index: 0,
@@ -1134,7 +1027,7 @@ impl<'input> MergedSpan<'input> {
     /// 从单个 Span 创建 MergedSpan
     pub fn from_single(span: Span<'input>) -> Self {
         MergedSpan {
-            spans: vec![span],
+            spans: smallvec::smallvec![span],
             current_span_index: 0,
             at_span_boundary: false,
         }
@@ -1261,29 +1154,6 @@ impl<'input> MergedSpan<'input> {
         self.at_span_boundary = snapshot.at_span_boundary;
     }
 
-    /// 获取当前位置的 Location
-    pub fn start_location(&self) -> Location {
-        if self.current_span_index >= self.spans.len() {
-            // 已结束，返回最后一个 Span 的结束位置
-            if let Some(last) = self.spans.last() {
-                return last.last_token_end_location();
-            }
-            return Location::new(1, 1);
-        }
-        self.spans[self.current_span_index].start_location()
-    }
-
-    /// 获取当前位置的结束 Location
-    pub fn end_location(&self) -> Location {
-        if self.current_span_index >= self.spans.len() {
-            if let Some(last) = self.spans.last() {
-                return last.last_token_end_location();
-            }
-            return Location::new(1, 1);
-        }
-        self.spans[self.current_span_index].end_location()
-    }
-
     /// 获取当前 Span 的引用（用于需要访问底层 Span 的场景）
     pub fn current_span(&self) -> Option<&Span<'input>> {
         if self.current_span_index < self.spans.len() {
@@ -1323,6 +1193,23 @@ impl Debug for MergedSpanSnapshot {
 }
 
 impl<'input> MergedSpan<'input> {
+    /// `start_location()` 的字节偏移对应物：活动 Span 的游标偏移；
+    /// 全部消费完毕时退到末 Span 的内容终点。
+    pub fn cursor_or_end(&self) -> usize {
+        if self.current_span_index >= self.spans.len() {
+            return self.spans.last().map(|s| s.end()).unwrap_or(0);
+        }
+        self.spans[self.current_span_index].cursor_or_end()
+    }
+
+    /// `end_location()` 的字节偏移对应物：游标处字符的独占终点。
+    pub fn char_end_offset(&self) -> usize {
+        if self.current_span_index >= self.spans.len() {
+            return self.spans.last().map(|s| s.end()).unwrap_or(0);
+        }
+        self.spans[self.current_span_index].char_end_offset()
+    }
+
     /// 获取当前绝对字节偏移（与 Span API 对齐）
     pub fn cursor(&self) -> usize {
         if self.at_span_boundary {
@@ -1487,13 +1374,6 @@ impl<'input> MergedSpan<'input> {
     //     }
     // }
 
-    /// 从绝对字节偏移创建子 Span（用于 delimiter 等场景）
-    pub fn slice_from_abs(&self, abs_start: usize, abs_end: usize) -> Span<'input> {
-        self.current_span()
-            .map(|s| s.slice_from_abs(abs_start, abs_end))
-            .unwrap_or_else(Span::empty)
-    }
-
     // /// 如果当前字节匹配则消费
     // pub fn consume(&mut self, byte: u8) -> bool {
     //     if self.peek() == Some(byte) {
@@ -1510,22 +1390,6 @@ impl<'input> MergedSpan<'input> {
     //         span.advance_cursor();
     //     }
     // }
-
-    /// 获取指定绝对字节偏移处的 Location
-    pub fn location_at_byte(&self, byte_pos: usize) -> Location {
-        // 找到包含该字节偏移的 Span
-        for span in &self.spans {
-            if byte_pos >= span.start() && byte_pos <= span.end() {
-                return span.location_at_byte(byte_pos);
-            }
-        }
-        // 如果找不到，返回最后一个 Span 的结束位置
-        if let Some(last) = self.spans.last() {
-            last.last_token_end_location()
-        } else {
-            Location::new(1, 1)
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1538,7 +1402,7 @@ mod merged_span_tests {
         let s1 = Span::extract(&mut scanner).unwrap();
         let s2 = Span::extract(&mut scanner).unwrap();
         let s3 = Span::extract(&mut scanner).unwrap();
-        let mut merged = MergedSpan::new(vec![s1, s2, s3]);
+        let mut merged = MergedSpan::new(smallvec::smallvec![s1, s2, s3]);
 
         let snapshot = merged.snapshot();
         while merged.next_byte().is_some() {}

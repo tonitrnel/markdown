@@ -38,6 +38,20 @@ export interface Location{
 export type Tags = string[];
 
 /**
+ * Semantic target for Obsidian-style addressing (heading / block-id).
+ * `node_id` is stable across calls for byte-identical text with identical options.
+ * Offsets are UTF-8 byte positions into the source.
+ */
+export interface SemanticTarget {
+  node_id: number;
+  heading_level?: 1 | 2 | 3 | 4 | 5 | 6;
+  block_id?: string;
+  ref_text: string;
+  start_offset: number;
+  end_offset: number;
+}
+
+/**
  * 解析模式
  * Parse mode
  */

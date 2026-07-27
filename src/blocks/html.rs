@@ -551,7 +551,7 @@ impl BlockStrategy for html::Html {
             container,
         }: BeforeCtx,
     ) -> BlockMatching {
-        let location = line.start_location();
+        let location = line.cursor_or_end() as u32;
         let indent_len = line.indent_len();
         if line.is_indented() {
             return BlockMatching::Unmatched;
@@ -689,10 +689,7 @@ impl BlockStrategy for html::Html {
                                 parser.append_text_to_owned(
                                     parent,
                                     previous.to_string(),
-                                    (
-                                        previous.start_location(),
-                                        previous.last_token_end_location(),
-                                    ),
+                                    (previous.cursor_or_end() as u32, previous.end() as u32),
                                 );
                             }
                             if let MarkdownNode::Html(h) = &mut parser.tree[parent].body {
@@ -707,8 +704,10 @@ impl BlockStrategy for html::Html {
                             }
                             line.skip(indent_len + start + len);
                             if !line.is_end() {
-                                let idx = parser
-                                    .append_block(MarkdownNode::Paragraph, line.start_location());
+                                let idx = parser.append_block(
+                                    MarkdownNode::Paragraph,
+                                    line.cursor_or_end() as u32,
+                                );
                                 parser.append_inline(idx, line.slice(0, line.len()));
                                 line.skip_to_end()
                             }
@@ -718,15 +717,12 @@ impl BlockStrategy for html::Html {
                                 if parser.current_proc().body.accepts_lines() {
                                     parser.append_text(
                                         previous.to_string(),
-                                        (
-                                            previous.start_location(),
-                                            previous.last_token_end_location(),
-                                        ),
+                                        (previous.cursor_or_end() as u32, previous.end() as u32),
                                     );
                                 } else {
                                     let idx = parser.append_block(
                                         MarkdownNode::Paragraph,
-                                        previous.start_location(),
+                                        previous.cursor_or_end() as u32,
                                     );
                                     parser.append_inline(idx, previous);
                                 }
@@ -737,9 +733,11 @@ impl BlockStrategy for html::Html {
                             );
                             line.skip(indent_len + start + len);
                             if !line.is_end() {
-                                parser.finalize(idx, line.start_location());
-                                let idx = parser
-                                    .append_block(MarkdownNode::Paragraph, line.start_location());
+                                parser.finalize(idx, line.cursor_or_end() as u32);
+                                let idx = parser.append_block(
+                                    MarkdownNode::Paragraph,
+                                    line.cursor_or_end() as u32,
+                                );
                                 parser.append_inline(idx, line.slice(0, line.len()));
                                 line.skip_to_end()
                             }
@@ -1285,7 +1283,7 @@ return 0;
         assert_eq!(
             ast[2].body,
             MarkdownNode::Text(
-                "<p>\n  Geckos are a group of usually small, usually nocturnal lizards. They are found on every continent except Antarctica.\n</p>".to_string()
+                "<p>\n  Geckos are a group of usually small, usually nocturnal lizards. They are found on every continent except Antarctica.\n</p>".into()
             )
         );
         assert_eq!(ast.len(), 3);
@@ -1308,7 +1306,11 @@ return 0;
                 html::Flag::Full
             ))))
         );
-        assert_eq!(ast[3].body, MarkdownNode::Text("Click Me 1".to_string()));
+        if let MarkdownNode::Text(text) = &ast[3].body {
+            assert_eq!(text.resolve(ast.source()), "Click Me 1");
+        } else {
+            panic!("expected text node, got {:?}", ast[3].body);
+        }
         assert_eq!(ast.len(), 4);
     }
 
@@ -1449,7 +1451,11 @@ _world_.
             let mut child = ast.get_first_child(parent);
             while let Some(idx) = child {
                 if let MarkdownNode::Text(text) = &ast[idx].body {
-                    if text.chars().all(|ch| matches!(ch, ' ' | '\t')) {
+                    if text
+                        .resolve(ast.source())
+                        .chars()
+                        .all(|ch| matches!(ch, ' ' | '\t'))
+                    {
                         has_whitespace_only_text = true;
                     }
                 }
@@ -1482,7 +1488,10 @@ _world_.
                         html::Html::Inline(html::HtmlType::HtmlComment) => {
                             if let Some(text_idx) = ast.get_first_child(idx) {
                                 if ast.get_next(text_idx).is_none()
-                                    && matches!(&ast[text_idx].body, MarkdownNode::Text(t) if t.starts_with("<!--") && t.ends_with("-->"))
+                                    && matches!(&ast[text_idx].body, MarkdownNode::Text(t) if {
+                                        let t = t.resolve(ast.source());
+                                        t.starts_with("<!--") && t.ends_with("-->")
+                                    })
                                 {
                                     has_html_comment_whole = true;
                                 }

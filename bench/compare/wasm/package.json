@@ -1,0 +1,13 @@
+{
+  "name": "wasm-compare-bench",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "commonmark": "^0.31.2",
+    "markdown-it": "^14.1.0",
+    "marked": "^15.0.7",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
+  }
+}

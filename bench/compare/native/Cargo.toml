@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+# comrak（完整 AST，工作量最等价的对照）与 rushdown（完整 AST，v2B 冲刺参照）
+# 按对照约束参与：rushdown 核心为 CommonMark，仅进 commonmark 通道；
+# comrak 在 shared_gfm 通道开启 table/strikethrough/tasklist 扩展；均不进 OFM 通道。
 [dependencies]
 comrak = "0.54.0"
 markdown_local = { package = "markdown", path = "../../.." }
-markdown_rs = { package = "markdown", version = "1.0.0" }
 pulldown-cmark = "0.13"
 rushdown = "0.18.0"
 

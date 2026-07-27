@@ -1,40 +1,28 @@
-use std::cell::{Ref, RefCell, RefMut};
-use std::rc::Rc;
-
 use crate::ast::{self, MarkdownNode};
 use crate::inlines::ProcessCtx;
 use crate::utils;
 
 #[derive(Clone)]
-pub(super) enum BracketVariant {
+pub(crate) enum BracketVariant {
     Link,
     Image,
 }
-#[derive(Clone)]
-pub(super) struct Bracket {
-    pub(super) node: usize,
-    pub(super) prev: Option<BracketChain>,
-    pub(super) bracket_after: bool,
-    pub(super) index: usize,
-    pub(super) active: bool,
-    pub(super) variant: BracketVariant,
-    pub(super) image_size: Option<(u32, Option<u32>)>,
+/// bracket 工作区条目（P3）：以 `Parser::bracket_store` 中的索引成链
+/// （`prev` 单向），取代逐 bracket 的 `Rc<RefCell<_>>` 堆分配；容量随
+/// delimiter 工作区同一 base/truncate 协议复用与隔离。
+pub(crate) struct Bracket {
+    pub(crate) node: usize,
+    pub(crate) prev: Option<usize>,
+    pub(crate) bracket_after: bool,
+    pub(crate) index: usize,
+    pub(crate) active: bool,
+    pub(crate) variant: BracketVariant,
+    pub(crate) image_size: Option<(u32, Option<u32>)>,
 }
-#[derive(Clone)]
-pub(super) struct BracketChain(Rc<RefCell<Bracket>>);
 
-impl BracketChain {
-    pub(super) fn new(bracket: Bracket) -> Self {
-        Self(Rc::new(RefCell::new(bracket)))
-    }
-    pub(super) fn borrow(&self) -> Ref<'_, Bracket> {
-        self.0.borrow()
-    }
-    pub(super) fn borrow_mut(&self) -> RefMut<'_, Bracket> {
-        self.0.borrow_mut()
-    }
-    pub(super) fn is_image(&self) -> bool {
-        matches!(self.borrow().variant, BracketVariant::Image)
+impl Bracket {
+    pub(crate) fn is_image(&self) -> bool {
+        matches!(self.variant, BracketVariant::Image)
     }
 }
 
@@ -67,38 +55,52 @@ pub(super) fn before(
     is_image: bool,
 ) -> bool {
     let start = line.cursor();
+    // P1b：`[` / `![` 标记保存源码区间，不分配 String
     let (variant, text, locations) = if is_image {
         // '!' + '['
-        let start_loc = line.start_location();
+        let start_loc = line.cursor_or_end() as u32;
         line.next_byte(); // '!'
-        let end_loc = line.location_at_byte(line.cursor() + 1);
+        let end_loc = (line.cursor() + 1) as u32;
         line.next_byte(); // '['
         (
             BracketVariant::Image,
-            "![".to_string(),
+            crate::ast::text::TextRef::Source(crate::ast::text::SourceSpan::new(
+                start as u32,
+                (start + 2) as u32,
+            )),
             (start_loc, end_loc),
         )
     } else {
         // '['
-        let start_loc = line.start_location();
-        let end_loc = line.location_at_byte(line.cursor() + 1);
+        let start_loc = line.cursor_or_end() as u32;
+        let end_loc = (line.cursor() + 1) as u32;
         line.next_byte();
-        (BracketVariant::Link, "[".to_string(), (start_loc, end_loc))
+        (
+            BracketVariant::Link,
+            crate::ast::text::TextRef::Source(crate::ast::text::SourceSpan::new(
+                start as u32,
+                (start + 1) as u32,
+            )),
+            (start_loc, end_loc),
+        )
     };
     let node = parser.append_to(*id, MarkdownNode::Text(text), locations);
     parser.mark_as_processed(node);
-    if let Some(brackets) = brackets.as_ref() {
-        brackets.borrow_mut().bracket_after = true;
+    let store = &mut parser.bracket_store;
+    if let Some(prev_idx) = *brackets {
+        store[prev_idx].bracket_after = true;
     }
-    *brackets = Some(BracketChain::new(Bracket {
+    let idx = store.len();
+    store.push(Bracket {
         node,
-        prev: brackets.clone(),
+        prev: *brackets,
         index: start,
         active: true,
         variant,
         bracket_after: false,
         image_size: None,
-    }));
+    });
+    *brackets = Some(idx);
     true
 }
 
@@ -109,12 +111,12 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         brackets,
         ..
     } = ctx;
-    let opener = match brackets.as_ref() {
-        Some(b) => b,
+    let opener_idx = match *brackets {
+        Some(idx) => idx,
         _ => return false,
     };
-    if !opener.borrow().active {
-        remove_brackets(brackets);
+    if !parser.bracket_store[opener_idx].active {
+        remove_brackets(&parser.bracket_store, brackets);
         return false;
     }
     line.next_byte(); // skip ']'
@@ -122,40 +124,70 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         Some(span) => span,
         None => return false,
     };
-    return if let Some((url, title, is_footnote_link)) =
-        super::link::scan_link_or_image(current_span, opener, &parser.link_refs, &parser.footnotes)
-    {
-        let is_image = opener.is_image();
-        let opener_inl = opener.borrow().node;
-        let start_location = parser.tree[opener_inl].start;
+    let is_image = parser.bracket_store[opener_idx].is_image();
+    // OFM/GFM 语义：bracket 自身内容是已定义脚注标签时优先解析为脚注引用，
+    // 不再把它当作后随 `[...]`/`(...)` 形式的链接文本（`[^a][^b]` 是两个引用，
+    // `[^a](t)` 是引用 + 字面括号）。未定义标签保持原有引用链接回退。
+    let scanned = if is_image {
+        None
+    } else {
+        let open_index = parser.bracket_store[opener_idx].index;
+        own_footnote_label(open_index, current_span, &parser.footnotes)
+            .map(|label| super::link::ScannedLink::Footnote { label })
+    };
+    let scanned = scanned.or_else(|| {
+        super::link::scan_link_or_image(
+            current_span,
+            &parser.bracket_store[opener_idx],
+            &parser.link_refs,
+            &parser.footnotes,
+        )
+    });
+    return if let Some(scanned) = scanned {
+        let opener_inl = parser.bracket_store[opener_idx].node;
+        let start_location = parser.tree[opener_inl].span.start;
+        // 与旧行为保持一致：image 分支优先（`![^x][^y]` 边缘按图片处理）
         let node = if is_image {
-            let size = opener.borrow_mut().image_size.take();
+            let (url, title) = match scanned {
+                super::link::ScannedLink::Resource { url, title } => (url, title),
+                super::link::ScannedLink::Footnote { label } => {
+                    (crate::ast::text::TextRef::Owned(label), None)
+                }
+            };
+            let size = parser.bracket_store[opener_idx].image_size.take();
             parser.append_free_node(
                 MarkdownNode::Image(Box::new(ast::image::Image { url, title, size })),
                 start_location,
             )
-        } else if is_footnote_link {
+        } else if let super::link::ScannedLink::Footnote { label } = &scanned {
+            let label = label.clone();
+            // index/ref_count 此处为临时值；parse_footnote_list 会按源码位置统一最终化
             let (index, ref_count) = parser
                 .footnote_refs
-                .get(&url)
+                .get(&label)
                 .map(|(a, b)| (*a, b + 1))
                 .unwrap_or((parser.footnote_refs.len() + 1, 1));
             parser
                 .footnote_refs
-                .entry(url.clone())
+                .entry(label.clone())
                 .and_modify(|it| it.1 += 1)
                 .or_insert((index, ref_count));
-            parser.append_free_node(
+            let node = parser.append_free_node(
                 MarkdownNode::Link(Box::new(ast::link::Link::Footnote(
                     ast::link::FootnoteLink {
-                        footnote_label: utils::percent_encode::encode(url, true),
+                        footnote_label: utils::percent_encode::encode(&label, true),
                         index,
                         ref_count,
                     },
                 ))),
                 start_location,
-            )
+            );
+            parser.footnote_ref_nodes.push((node, label));
+            node
         } else {
+            let super::link::ScannedLink::Resource { url, title } = scanned else {
+                unreachable!()
+            };
             parser.append_free_node(
                 MarkdownNode::Link(Box::new(ast::link::Link::Default(ast::link::DefaultLink {
                     url,
@@ -171,36 +203,55 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
             parser.tree.set_parent(item, node);
             temp = next;
         }
-        parser.tree[node].end = line.start_location();
+        parser.tree[node].span.end = line.cursor_or_end() as u32;
         parser
             .tree
             .set_parent(node, parser.tree.get_parent(opener_inl));
-        remove_brackets(&mut ctx.brackets);
+        remove_brackets(&ctx.parser.bracket_store, &mut ctx.brackets);
         ctx.parser.tree.remove(opener_inl);
         if !is_image {
-            let mut opener = ctx.brackets.clone();
-            while let Some(bc) = opener.as_ref() {
-                if !bc.is_image() {
-                    bc.borrow_mut().active = false;
+            let store = &mut ctx.parser.bracket_store;
+            let mut cur = ctx.brackets;
+            while let Some(idx) = cur {
+                if !store[idx].is_image() {
+                    store[idx].active = false;
                 }
-                let cloned_previous = bc.borrow().prev.clone();
-                opener = cloned_previous;
+                cur = store[idx].prev;
             }
         }
         true
     } else {
-        remove_brackets(brackets);
+        remove_brackets(&parser.bracket_store, brackets);
         false
     };
 }
 
-pub fn remove_brackets(bracket_chain: &mut Option<BracketChain>) {
-    let bracket = match bracket_chain.as_ref() {
-        Some(b) => b,
-        _ => return,
+/// bracket 自身内容（`[` 与已消费的 `]` 之间）为 `^` + 已定义脚注标签时返回该标签。
+fn own_footnote_label(
+    open_index: usize, // '[' 的绝对字节偏移
+    span: &crate::span::Span,
+    footnotes: &rustc_hash::FxHashMap<String, usize>,
+) -> Option<String> {
+    let close_index = span.cursor().checked_sub(1)?; // 刚跳过的 ']' 位置
+    let source = span.source_slice();
+    let content = source.get(open_index + 1..close_index)?;
+    let rest = content.strip_prefix(b"^")?;
+    if rest.is_empty()
+        || rest
+            .iter()
+            .any(|b| matches!(b, b'\n' | b'\r' | b'[' | b']' | b'\\'))
+    {
+        return None;
+    }
+    let label = std::str::from_utf8(rest).ok()?;
+    footnotes.contains_key(label).then(|| label.to_string())
+}
+
+pub(crate) fn remove_brackets(store: &[Bracket], slot: &mut Option<usize>) {
+    let Some(idx) = *slot else {
+        return;
     };
-    let cloned_previous = bracket.borrow().prev.clone();
-    *bracket_chain = cloned_previous;
+    *slot = store[idx].prev;
 }
 
 #[cfg(test)]

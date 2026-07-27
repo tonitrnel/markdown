@@ -1,10 +1,9 @@
 use crate::ast::{MarkdownNode, table};
 use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, ProcessCtx};
-use crate::parser::Location;
 use crate::span::Span;
 use std::ops::Range;
 
-type Row<'input> = ((Location, Location), Vec<Span<'input>>);
+type Row<'input> = ((u32, u32), Vec<Span<'input>>);
 type ColDefs = Vec<(Range<usize>, table::Alignment)>;
 
 impl From<(bool, bool)> for table::Alignment {
@@ -97,10 +96,7 @@ impl table::Table {
     }
 
     fn parse_columns<'input>(line: &Span<'input>) -> Option<Row<'input>> {
-        let mut row: Row = (
-            (line.start_location(), line.last_token_end_location()),
-            Vec::new(),
-        );
+        let mut row: Row = ((line.cursor_or_end() as u32, line.end() as u32), Vec::new());
         let mut ranges: Vec<Range<usize>> = Vec::new();
         let mut range_start = 0;
         let len = line.len();
@@ -168,7 +164,7 @@ impl table::Table {
     pub(crate) fn reprocess(ProcessCtx { line, parser, id }: ProcessCtx) -> bool {
         let table_id = {
             if parser.tree[id].body != MarkdownNode::TableBody {
-                parser.append_block(MarkdownNode::TableBody, line.start_location());
+                parser.append_block(MarkdownNode::TableBody, line.cursor_or_end() as u32);
                 id
             } else {
                 parser.tree.get_parent(id)
@@ -179,13 +175,13 @@ impl table::Table {
         } else {
             return false;
         };
-        let start_location = line.start_location();
-        let end_location = line.last_token_end_location();
+        let start_location = line.cursor_or_end() as u32;
+        let end_location = line.end() as u32;
         let row_id = parser.append_block(MarkdownNode::TableRow, start_location);
         let col_id = parser.append_block(MarkdownNode::TableDataCol, start_location);
         let col = line.slice(0, line.len());
         parser.finalize(col_id, end_location);
-        parser.inlines.insert(col_id, vec![col]);
+        parser.inlines.insert(col_id, smallvec::smallvec![col]);
         for _ in 1..column {
             let col_id = parser.append_block(MarkdownNode::TableDataCol, end_location);
             parser.finalize(col_id, end_location);
@@ -211,7 +207,7 @@ impl BlockStrategy for table::Table {
         let paragraph_id = parser.curr_proc_node;
         let paragraph_line_count = parser
             .inlines
-            .get(&paragraph_id)
+            .get(paragraph_id)
             .map(|it| it.len())
             .unwrap_or(0);
         if paragraph_line_count == 0 {
@@ -226,7 +222,7 @@ impl BlockStrategy for table::Table {
         let col_len = col_defs.len();
         let Some(header_source) = parser
             .inlines
-            .get(&paragraph_id)
+            .get(paragraph_id)
             .and_then(|it| it.last().cloned())
         else {
             return BlockMatching::Unmatched;
@@ -240,26 +236,25 @@ impl BlockStrategy for table::Table {
             _ => return BlockMatching::Unmatched,
         };
         if paragraph_line_count == 1 {
-            parser.inlines.remove(&paragraph_id);
-            parser.replace_block(table, line.last_token_end_location());
+            parser.inlines.remove(paragraph_id);
+            parser.replace_block(table, line.end() as u32);
         } else {
-            if let Some(lines) = parser.inlines.get_mut(&paragraph_id) {
-                lines.pop();
-                if let Some(last) = lines.last() {
-                    parser.tree[paragraph_id].end = last.last_token_end_location();
-                }
+            parser.inlines.pop_line(paragraph_id);
+            if let Some(last) = parser.inlines.get(paragraph_id).and_then(|s| s.last()) {
+                parser.tree[paragraph_id].span.end = last.end() as u32;
             }
-            let paragraph_end = parser.tree[paragraph_id].end;
+            let paragraph_end = parser.tree[paragraph_id].span.end;
             parser.finalize(paragraph_id, paragraph_end);
-            parser.append_block(table, header_source.start_location());
+            parser.append_block(table, header_source.cursor_or_end() as u32);
         }
         // Write table header
         let idx = parser.append_block(MarkdownNode::TableHead, header_cols.0.0);
         let row_idx = parser.append_block(MarkdownNode::TableRow, header_cols.0.0);
         for column in header_cols.1.into_iter() {
-            let idx = parser.append_block(MarkdownNode::TableHeadCol, column.start_location());
-            parser.finalize(idx, column.last_token_end_location());
-            parser.inlines.insert(idx, vec![column]);
+            let idx =
+                parser.append_block(MarkdownNode::TableHeadCol, column.cursor_or_end() as u32);
+            parser.finalize(idx, column.end() as u32);
+            parser.inlines.insert(idx, smallvec::smallvec![column]);
         }
         parser.finalize(row_idx, header_cols.0.1);
         parser.finalize(idx, header_cols.0.1);
@@ -271,10 +266,10 @@ impl BlockStrategy for table::Table {
     fn process(ProcessCtx { line, parser, id }: ProcessCtx) -> BlockProcessing {
         if let Some(maybe_body_idx) = parser.tree.get_last_child(id) {
             if !matches!(parser.tree[maybe_body_idx].body, MarkdownNode::TableBody) {
-                parser.append_block(MarkdownNode::TableBody, line.start_location());
+                parser.append_block(MarkdownNode::TableBody, line.cursor_or_end() as u32);
             }
         } else {
-            parser.append_block(MarkdownNode::TableBody, line.start_location());
+            parser.append_block(MarkdownNode::TableBody, line.cursor_or_end() as u32);
         }
         let column = if let MarkdownNode::Table(table) = &parser.tree[id].body {
             table.column
@@ -302,9 +297,9 @@ impl BlockStrategy for table::Table {
         let row_id = parser.append_block(MarkdownNode::TableRow, row.0.0);
         let mut inserted = 0;
         for col in row.1.into_iter().take(column) {
-            let idx = parser.append_block(MarkdownNode::TableDataCol, col.start_location());
-            parser.finalize(idx, col.last_token_end_location());
-            parser.inlines.insert(idx, vec![col]);
+            let idx = parser.append_block(MarkdownNode::TableDataCol, col.cursor_or_end() as u32);
+            parser.finalize(idx, col.end() as u32);
+            parser.inlines.insert(idx, smallvec::smallvec![col]);
             inserted += 1;
         }
         let end_location = row.0.1;

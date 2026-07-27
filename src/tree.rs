@@ -1,16 +1,32 @@
-use rustc_hash::FxHashSet;
 use std::fmt::Debug;
+use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
+
+/// 兄弟/子链接的紧凑表示（P5）：槽位 0 恒为根节点、绝不作为任何节点的
+/// child/sibling，因此链接可用 `Option<NonZeroUsize>`（8 字节，含 niche）
+/// 取代 `Option<usize>`（16 字节），每槽节省 32 字节。
+type Link = Option<NonZeroUsize>;
+
+#[inline]
+fn link_to(idx: usize) -> Link {
+    debug_assert!(idx != 0, "根节点（槽 0）不可成为 child/sibling 链接目标");
+    NonZeroUsize::new(idx)
+}
+
+#[inline]
+fn link_get(link: Link) -> Option<usize> {
+    link.map(NonZeroUsize::get)
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct TreeNode<T> {
     // impl `mem::take`
     pub item: Option<T>,
     parent: usize,
-    first_child: Option<usize>,
-    last_child: Option<usize>,
-    next: Option<usize>,
-    prev: Option<usize>,
+    first_child: Link,
+    last_child: Link,
+    next: Link,
+    prev: Link,
 }
 
 impl<T: PartialEq> PartialEq<T> for TreeNode<T> {
@@ -43,8 +59,8 @@ pub struct Tree<T> {
     forks: Vec<usize>,
     /// 存储当前索引，它可能在树主干上，也可能在树分支上或者没有
     cur: Option<usize>,
-    /// 所有 free 节点的索引
-    frees: FxHashSet<usize>,
+    /// free 节点标志位（按节点 id 索引；P5 取代 FxHashSet）
+    free_flags: Vec<bool>,
 }
 impl<T> Index<usize> for Tree<T> {
     type Output = T;
@@ -72,12 +88,17 @@ impl<T: Debug> Tree<T> {
         Tree::default()
     }
     #[allow(unused)]
+    /// 追加预留（v2C C4：inline 相位按 pending 规模一次扩容，减少倍增搬迁）
+    pub(crate) fn reserve_nodes(&mut self, additional: usize) {
+        self.nodes.reserve(additional);
+    }
+
     pub fn with_capacity(cap: usize) -> Tree<T> {
         Tree {
             nodes: Vec::with_capacity(cap),
             forks: vec![],
             cur: None,
-            frees: FxHashSet::default(),
+            free_flags: Vec::new(),
         }
     }
     #[allow(unused)]
@@ -100,35 +121,35 @@ impl<T: Debug> Tree<T> {
         // 如果当前索引存在则进行顺序追加
         if let Some(cur) = self.cur.filter(|idx| !self.is_free_node(idx)) {
             let parent = self.get_parent(cur);
-            self.nodes[cur].next = Some(next);
-            self.nodes[next].prev = Some(cur);
-            self.nodes[parent].last_child = Some(next);
+            self.nodes[cur].next = link_to(next);
+            self.nodes[next].prev = link_to(cur);
+            self.nodes[parent].last_child = link_to(next);
         }
         // 如果当前索引不存在则意味着存在分叉，为最后一个分叉位置创建一个子节点
         else if let Some(&parent) = self.forks.last() {
             if self.nodes[parent].first_child.is_none() {
-                self.nodes[parent].first_child = Some(next)
+                self.nodes[parent].first_child = link_to(next)
             }
             self.nodes[next].prev = self.nodes[parent].last_child;
             // 如果前一个节点为空则补充
-            if let Some(prev) = self.nodes[next].prev {
+            if let Some(prev) = link_get(self.nodes[next].prev) {
                 assert!(self.nodes[prev].next.is_none());
-                self.nodes[prev].next = Some(next)
+                self.nodes[prev].next = link_to(next)
             }
-            self.nodes[parent].last_child = Some(next);
+            self.nodes[parent].last_child = link_to(next);
         }
         self.cur = Some(next);
         next
     }
     pub fn append_child(&mut self, parent: usize, node: T) -> usize {
         let index = self.create_node_attached(node);
-        if let Some(last_child) = self.nodes[parent].last_child {
-            self.nodes[last_child].next = Some(index);
-            self.nodes[index].prev = Some(last_child);
-            self.nodes[parent].last_child = Some(index);
+        if let Some(last_child) = link_get(self.nodes[parent].last_child) {
+            self.nodes[last_child].next = link_to(index);
+            self.nodes[index].prev = link_to(last_child);
+            self.nodes[parent].last_child = link_to(index);
         } else {
-            self.nodes[parent].first_child = Some(index);
-            self.nodes[parent].last_child = Some(index);
+            self.nodes[parent].first_child = link_to(index);
+            self.nodes[parent].last_child = link_to(index);
         }
         self.nodes[index].parent = parent;
         index
@@ -166,7 +187,7 @@ impl<T: Debug> Tree<T> {
             panic!("Tree::push called without current node");
         };
         self.forks.push(cur_ix);
-        self.cur = self.nodes[cur_ix].first_child;
+        self.cur = link_get(self.nodes[cur_ix].first_child);
         cur_ix
     }
     /// 退出当前分支，并返回退出后的当前节点索引。
@@ -195,11 +216,11 @@ impl<T: Debug> Tree<T> {
             next: None,
             prev: None,
         });
-        self.frees.insert(index);
+        self.mark_free(index);
         index
     }
 
-    /// 创建节点但不加入 frees 集合（用于 append/append_child 内部调用，避免 insert+remove 开销）
+    /// 创建节点但不加入 free 集合（用于 append/append_child 内部调用，避免标记开销）
     fn create_node_attached(&mut self, item: T) -> usize {
         let index = self.nodes.len();
         self.nodes.push(TreeNode {
@@ -211,6 +232,20 @@ impl<T: Debug> Tree<T> {
             prev: None,
         });
         index
+    }
+
+    #[inline]
+    fn mark_free(&mut self, index: usize) {
+        if self.free_flags.len() <= index {
+            self.free_flags.resize(index + 1, false);
+        }
+        self.free_flags[index] = true;
+    }
+    #[inline]
+    fn clear_free(&mut self, index: usize) {
+        if let Some(flag) = self.free_flags.get_mut(index) {
+            *flag = false;
+        }
     }
 
     /// 查看当前节点的父节点的 ID
@@ -246,6 +281,12 @@ impl<T: Debug> Tree<T> {
     /// 获取上级节点的位置
     ///
     /// 注：查询节点为 Root 时会返回其自身
+    /// 槽位是否已被释放（v2C C3：增量目标列表的失效过滤）
+    #[inline]
+    pub(crate) fn is_free(&self, index: usize) -> bool {
+        self.free_flags.get(index).copied().unwrap_or(false)
+    }
+
     pub fn get_parent(&self, index: usize) -> usize {
         self.nodes[index].parent
     }
@@ -253,36 +294,36 @@ impl<T: Debug> Tree<T> {
     ///
     /// 注：这会将该节点添加至父节点的 `last_child`
     pub fn set_parent(&mut self, index: usize, parent: usize) {
-        assert!(self.frees.contains(&index), "node must be free node");
+        assert!(self.is_free_node(&index), "node must be free node");
         // #[cfg(debug_assertions)]
         // println!(
         //     "set node #{index} parse，from {} to #{parent}",
         //     self.nodes[index].parent
         // );
         self.nodes[index].parent = parent;
-        self.frees.remove(&index);
-        if let Some(last_child) = self.nodes[parent].last_child {
+        self.clear_free(index);
+        if let Some(last_child) = link_get(self.nodes[parent].last_child) {
             assert!(
                 self.nodes[last_child].next.is_none(),
                 "#{last_child} next node is invalid"
             );
-            self.nodes[last_child].next = Some(index);
-            self.nodes[index].prev = Some(last_child);
-            self.nodes[parent].last_child = Some(index);
+            self.nodes[last_child].next = link_to(index);
+            self.nodes[index].prev = link_to(last_child);
+            self.nodes[parent].last_child = link_to(index);
         } else {
             let parent = &mut self.nodes[parent];
-            parent.first_child = Some(index);
-            parent.last_child = Some(index);
+            parent.first_child = link_to(index);
+            parent.last_child = link_to(index);
         }
     }
     pub fn get_first_child(&self, index: usize) -> Option<usize> {
-        self.nodes[index].first_child
+        link_get(self.nodes[index].first_child)
     }
     pub fn get_last_child(&self, index: usize) -> Option<usize> {
-        self.nodes[index].last_child
+        link_get(self.nodes[index].last_child)
     }
     pub fn get_next(&self, index: usize) -> Option<usize> {
-        self.nodes[index].next
+        link_get(self.nodes[index].next)
     }
     /// 设置目标节点的一个后一个节点为指定节点
     ///
@@ -298,15 +339,15 @@ impl<T: Debug> Tree<T> {
         self.nodes[next].parent = self.get_parent(index);
         // 重写 next 关系
         if let Some(prior_next) = self.get_next(index) {
-            self.nodes[next].next = Some(prior_next);
-            self.nodes[prior_next].prev = Some(next);
+            self.nodes[next].next = link_to(prior_next);
+            self.nodes[prior_next].prev = link_to(next);
         };
         // 设置 next
-        self.nodes[index].next = Some(next);
-        self.nodes[next].prev = Some(index);
+        self.nodes[index].next = link_to(next);
+        self.nodes[next].prev = link_to(index);
     }
     pub fn get_prev(&self, index: usize) -> Option<usize> {
-        self.nodes[index].prev
+        link_get(self.nodes[index].prev)
     }
 
     /// 设置目标节点的一个前一个节点为指定节点
@@ -325,12 +366,12 @@ impl<T: Debug> Tree<T> {
         self.nodes[prev].parent = self.get_parent(index);
         // 重写 prev 关系
         if let Some(prior_prev) = self.get_prev(index) {
-            self.nodes[prev].prev = Some(prior_prev);
-            self.nodes[prior_prev].next = Some(prev);
+            self.nodes[prev].prev = link_to(prior_prev);
+            self.nodes[prior_prev].next = link_to(prev);
         };
         // 设置 prev
-        self.nodes[index].prev = Some(prev);
-        self.nodes[prev].next = Some(index);
+        self.nodes[index].prev = link_to(prev);
+        self.nodes[prev].next = link_to(index);
     }
     /// 移除子节点
     ///
@@ -353,7 +394,7 @@ impl<T: Debug> Tree<T> {
         self.nodes[idx].last_child = None;
         self.nodes[idx].next = None;
         self.nodes[idx].prev = None;
-        self.frees.remove(&idx);
+        self.clear_free(idx);
         match item {
             Some(item) => item,
             None => panic!("Node #{idx} has been released or has an invalid node index"),
@@ -366,47 +407,54 @@ impl<T: Debug> Tree<T> {
         // 断开父节点
         let parent = self.get_parent(idx);
         match (
-            self.nodes[parent].first_child == Some(idx),
-            self.nodes[parent].last_child == Some(idx),
+            link_get(self.nodes[parent].first_child) == Some(idx),
+            link_get(self.nodes[parent].last_child) == Some(idx),
         ) {
             (true, true) => {
                 self.nodes[parent].first_child = None;
                 self.nodes[parent].last_child = None;
             }
             (true, false) => {
-                self.nodes[parent].first_child = self.get_next(idx);
+                self.nodes[parent].first_child = self.nodes[idx].next;
             }
             (false, true) => {
-                self.nodes[parent].last_child = self.get_prev(idx);
+                self.nodes[parent].last_child = self.nodes[idx].prev;
             }
             (false, false) => (),
         }
         self.nodes[idx].parent = 0;
-        self.frees.insert(idx);
+        self.mark_free(idx);
         // 断开前后节点
-        if let Some(prev) = self.nodes[idx].prev {
+        if let Some(prev) = link_get(self.nodes[idx].prev) {
             self.nodes[prev].next = self.nodes[idx].next
         }
-        if let Some(next) = self.nodes[idx].next {
+        if let Some(next) = link_get(self.nodes[idx].next) {
             self.nodes[next].prev = self.nodes[idx].prev
         }
         self.nodes[idx].next = None;
         self.nodes[idx].prev = None;
     }
     pub fn is_free_node(&self, idx: &usize) -> bool {
-        self.frees.contains(idx)
+        self.free_flags.get(*idx).copied().unwrap_or(false)
+    }
+    /// 槽位存在且节点未被移除
+    pub(crate) fn node_exists(&self, idx: usize) -> bool {
+        self.nodes
+            .get(idx)
+            .map(|node| node.item.is_some())
+            .unwrap_or(false)
     }
     #[cfg(debug_assertions)]
     pub fn print_link_info(&self, title: &str, idx: usize) {
         println!("[{title}]: ({:?})", self.nodes[idx].last_child);
-        let mut item = self.nodes[idx].first_child;
+        let mut item = link_get(self.nodes[idx].first_child);
         while let Some(next) = item {
             if let Some(item) = self.nodes[next].item.as_ref() {
                 print!("->#{next}{item:?}");
             } else {
                 print!("->#{next}<Free>");
             }
-            item = self.nodes[next].next;
+            item = link_get(self.nodes[next].next);
         }
         println!();
     }
@@ -418,7 +466,7 @@ impl<T> Default for Tree<T> {
             nodes: Vec::new(),
             forks: Vec::new(),
             cur: None,
-            frees: FxHashSet::default(),
+            free_flags: Vec::new(),
         }
     }
 }
@@ -444,10 +492,10 @@ where
             } else {
                 writeln!(f, "<Free>")?;
             }
-            if let Some(child_ix) = tree.nodes[cur].first_child {
+            if let Some(child_ix) = link_get(tree.nodes[cur].first_child) {
                 debug_tree(tree, child_ix, indent + 1, f)?;
             }
-            if let Some(next_ix) = tree.nodes[cur].next {
+            if let Some(next_ix) = link_get(tree.nodes[cur].next) {
                 debug_tree(tree, next_ix, indent, f)?;
             }
             Ok(())
@@ -458,5 +506,20 @@ where
         } else {
             write!(f, "Empty tree")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TreeNode;
+
+    /// P5 链接压缩后的槽位尺寸上限（压缩前 152 字节，`Option<usize>` 链接 ×4）。
+    #[test]
+    fn tree_node_slot_is_compact() {
+        assert!(
+            std::mem::size_of::<TreeNode<crate::parser::Node>>() <= 120,
+            "TreeNode<Node> = {} bytes",
+            std::mem::size_of::<TreeNode<crate::parser::Node>>()
+        );
     }
 }

@@ -9,7 +9,7 @@ Cross-language benchmark scaffold for:
 ## Run
 
 ```bash
-./bench/third_party/polyglot/run.sh
+./bench/compare/polyglot/run.sh
 ```
 
 Output format:
@@ -20,8 +20,8 @@ name,ms_per_op
 
 Default datasets:
 
-- `default_data`: `bench/third_party/polyglot/data/data.md`
-- `markdown_it_corpus`: merged from `bench/data/markdown-it/*`
+- `default_data`: `bench/compare/polyglot/fixures/data.md`
+- `markdown_it_corpus`: `bench/fixtures/corpora/markdown-it-corpus.md`（已存在时直接复用；缺失时由 `bench/fixtures/corpora/markdown-it/*` 合并生成）
 
 ## Requirements
 
@@ -33,5 +33,5 @@ Default datasets:
 Notes:
 
 - If Go dependencies cannot be downloaded, goldmark rows are emitted as `NA`.
-- `cmark` is built locally under `bench/third_party/polyglot/.third_party` (no system install required).
+- `cmark` is built locally under `bench/compare/polyglot/.third_party` (no system install required).
 - If local cmark build fails, cmark rows are emitted as `NA`.

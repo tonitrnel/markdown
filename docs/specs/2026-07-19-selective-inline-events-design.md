@@ -1,5 +1,18 @@
 # 选择性 Inline 解析与事件设计
 
+> **执行状态（2026-07-26）：** 本文仍是选择性解析的行为来源；具体实施顺序正在 [Wayfinder 决策地图](../../.scratch/markdown-parser-incremental-iteration/map.md) 中收敛，现有渐进式计划仅为工作假设。顶层 Block 事件只提供回调期的只读视图，不承诺可在回调后保存的 `NodeId`；语义准备完成后才可在同一内存会话内使用节点 ID。`Stop` 是终态，不支持序列化、磁盘 checkpoint、跨进程或源码变更后的恢复；选择性结果使用独立输出包装，不伪装为完整解析结果。
+>
+> **F1 实施注（2026-07-26）：** 顶层 Block 事件在稳定的行边界派发。当同一行既关闭上一个顶层 Block 又开启下一个时（如段落后紧跟 `# 标题`），事件回调看到的树视图可能已包含下一个顶层节点的起始行——这弱化了下文"下一个顶层节点的内容还没有提交"的原始表述；`Stop` 的保证不变：返回的前缀树不含任何未接受节点，且与直接解析对应源码前缀逐字节一致（含 `doc.end` 位置语义）。API 形态（`parse_blocks_with[_checked]`、`BlockPhase::finish[_checked]`、`BlockScanStatus`）以 map ticket 06 的 Answer 为准。
+> **(2026-07-27)修订注：** 该文档已经过时，沿用现有的执行状态作为基准。
+
+> **C3 修订注（2026-07-27，行为来源以此为准）：** v2C ticket 22（维护者决策）与 ticket 24 对本文四处做出修订：
+> 1. **§4 Heading Inline 阶段已废除**——语义准备不再急切物化任何 Heading；`SemanticTarget` 新增 `ref_text(&mut self)`（按需以真实 Inline 引擎物化该目标并返回纯文本投影，服务 Obsidian 式寻址匹配），visitor 因此收 `&mut SemanticTarget`。需要完整 Heading AST 时经 `selection.select` 或 `ref_text` 触发；`finish` 仍按文档序补齐，输出不变。
+> 2. **§3 引用定义准备改为惰性**——由 `ref_text`/`parse_selected_inlines`/`finish` 在首次物化前幂等确保；纯结构查询会话零支付。
+> 3. **§2 BlockId 提取为"只发现不改写"**——发现器不从 pending Span 移除标记（剥离仍由 Inline 引擎在物化时完成，引擎以相同值覆盖写 `Node.id`）；发现范围为条目末段行尾形态的安全子集（块中形态仅引擎物化时识别），见 map ticket 10。
+> 4. **§6 空选择下 Heading 同样保持 pending**（原"Heading Inline AST 仍然存在"不再成立）。
+>
+> WASM 暴露（ticket 28）：以无状态查询 API（`query_semantic_targets` / `parse_selected`）过边界，不引入 JS 回调，与本文非目标一致；`node_id` 稳定性契约为"逐字节相同源码 + 相同选项"。
+
 ## 概述
 
 新增一条仅供 Rust 调用者使用的解析路径，包含两个相互独立、支持过滤的事件阶段：

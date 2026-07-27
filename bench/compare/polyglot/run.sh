@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
-BENCH_DIR="$ROOT_DIR/bench/third_party/polyglot"
+BENCH_DIR="$ROOT_DIR/bench/compare/polyglot"
 GO_BIN="${GO_BIN:-/usr/local/go/bin/go}"
 GO_CACHE_DIR="$BENCH_DIR/.gocache"
 GO_MOD_CACHE_DIR="$GO_CACHE_DIR/mod"
@@ -10,12 +10,17 @@ CMARK_SRC_DIR="$BENCH_DIR/.third_party/cmark-master"
 CMARK_BUILD_DIR="$CMARK_SRC_DIR/build"
 CMARK_BIN="$BENCH_DIR/c/cmark_bench"
 CMARK_URL="${CMARK_URL:-https://github.com/commonmark/cmark/archive/refs/heads/master.tar.gz}"
-MARKDOWN_IT_DIR="$ROOT_DIR/bench/fixures/corpora/markdown-it"
-MARKDOWN_IT_CORPUS="$ROOT_DIR/bench/fixures/corpora/markdown-it-corpus.md"
+MARKDOWN_IT_DIR="$ROOT_DIR/bench/fixtures/corpora/markdown-it"
+MARKDOWN_IT_CORPUS="$ROOT_DIR/bench/fixtures/corpora/markdown-it-corpus.md"
 
 mkdir -p "$GO_CACHE_DIR" "$GO_MOD_CACHE_DIR"
 
 build_markdown_it_corpus() {
+  # 该文件同时是 parser_compare 的 include_str! 规范语料；已存在时直接复用，
+  # 绝不重新生成覆盖（字节变化会使已记录的基线失效）。
+  if [[ -s "$MARKDOWN_IT_CORPUS" ]]; then
+    return 0
+  fi
   if [[ ! -d "$MARKDOWN_IT_DIR" ]]; then
     return 1
   fi

@@ -19,26 +19,31 @@ fn skip_leading_continuation_ws(
 }
 
 pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
+    let source = ctx.parser.scanner.source_str();
     if let Some((child_idx, MarkdownNode::Text(text))) = ctx
         .parser
         .tree
         .get_last_child(ctx.id)
         .map(|idx| (idx, &mut ctx.parser.tree[idx].body))
     {
-        if text.ends_with(' ') {
-            let node = if text.ends_with("  ") {
+        let resolved = text.resolve(source);
+        if resolved.ends_with(' ') {
+            let node = if resolved.ends_with("  ") {
                 MarkdownNode::HardBreak
             } else {
                 MarkdownNode::SoftBreak
             };
-            let trimmed = text.trim_end().to_string();
-            let offset = text.len() - trimmed.len();
-            *text = trimmed;
-            ctx.parser.tree[child_idx].end.column -= offset as u64;
+            let trimmed_len = resolved.trim_end().len();
+            let offset = resolved.len() - trimmed_len;
+            text.truncate(trimmed_len, source);
+            ctx.parser.tree[child_idx].span.end -= offset as u32;
             ctx.parser.append_to(
                 ctx.id,
                 node,
-                (ctx.line.start_location(), ctx.line.end_location()),
+                (
+                    ctx.line.cursor_or_end() as u32,
+                    ctx.line.char_end_offset() as u32,
+                ),
             );
             ctx.line.next_byte();
             skip_leading_continuation_ws(ctx);
@@ -59,7 +64,10 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
     ctx.parser.append_to(
         ctx.id,
         MarkdownNode::SoftBreak,
-        (ctx.line.start_location(), ctx.line.end_location()),
+        (
+            ctx.line.cursor_or_end() as u32,
+            ctx.line.char_end_offset() as u32,
+        ),
     );
     ctx.line.next_byte();
     skip_leading_continuation_ws(ctx);
@@ -73,11 +81,11 @@ pub(super) fn process_backslash(
 ) -> bool {
     // 检查 backslash 后面是否是换行符
     if line.validate_with(1, |b| b == b'\n' || b == b'\r') {
-        let end_location = line.location_at_byte(line.cursor() + 2);
+        let end_location = (line.cursor() + 2) as u32;
         parser.append_to(
             *id,
             MarkdownNode::HardBreak,
-            (line.start_location(), end_location),
+            (line.cursor_or_end() as u32, end_location),
         );
         line.skip(2);
         skip_leading_continuation_ws(&mut ProcessCtx {
@@ -92,9 +100,9 @@ pub(super) fn process_backslash(
     // 检查 backslash 后面是否是 ASCII 标点字符（反斜杠转义）
     if let Some(next) = line.get(1) {
         if next.is_ascii_punctuation() {
-            let start_loc = line.start_location();
+            let start_loc = line.cursor_or_end() as u32;
             line.next_byte(); // skip '\'
-            let end_loc = line.location_at_byte(line.cursor() + 1);
+            let end_loc = (line.cursor() + 1) as u32;
             let Some(ch) = line.next_byte() else {
                 return false;
             };

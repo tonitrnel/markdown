@@ -30,10 +30,33 @@ pub(crate) fn decode(uri: impl AsRef<str>) -> String {
     }
     String::from_utf8_lossy(&bytes[..]).to_string()
 }
+/// 恒等快路径：全部字符已在安全集合内（`keep_escaped` 时含 `%`）则零分配借用。
+pub(crate) fn encode_cow(url: &str, keep_escaped: bool) -> std::borrow::Cow<'_, str> {
+    let identity = url.bytes().all(|b| {
+        matches!(b,
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+            | b';' | b',' | b'/' | b'?' | b':' | b'@' | b'&' | b'=' | b'+' | b'$' | b'#')
+            || (b == b'%' && keep_escaped)
+    });
+    if identity {
+        std::borrow::Cow::Borrowed(url)
+    } else {
+        std::borrow::Cow::Owned(encode_slow(url, keep_escaped))
+    }
+}
+
 pub(crate) fn encode(url: impl AsRef<str>, keep_escaped: bool) -> String {
+    match encode_cow(url.as_ref(), keep_escaped) {
+        std::borrow::Cow::Borrowed(s) => s.to_string(),
+        std::borrow::Cow::Owned(s) => s,
+    }
+}
+
+fn encode_slow(url: &str, keep_escaped: bool) -> String {
     use std::fmt::Write;
-    let mut encoded = String::new();
-    for char in url.as_ref().chars() {
+    let mut encoded = String::with_capacity(url.len() + 16);
+    for char in url.chars() {
         match char {
             'A'..='Z'
             | 'a'..='z'

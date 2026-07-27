@@ -23,7 +23,7 @@ pub(super) fn process(
         id, line, parser, ..
     }: &mut ProcessCtx,
 ) -> bool {
-    let start_location = line.start_location();
+    let start_location = line.cursor_or_end() as u32;
     // 跳过开头的 ':'
     line.next_byte();
     // 扫描 emoji 名称：字母、数字、_、+、-，直到遇到 ':'
@@ -52,7 +52,7 @@ pub(super) fn process(
     };
     let emoji_name =
         unsafe { std::str::from_utf8_unchecked(&line.source_slice()[scan_start..end_pos]) };
-    let end_location = line.location_at_byte(end_pos + 1);
+    let end_location = (end_pos + 1) as u32;
     parser.append_to(
         *id,
         MarkdownNode::Emoji(emoji_name.to_string()),

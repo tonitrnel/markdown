@@ -10,14 +10,14 @@ pub(crate) fn process_link_reference(parser: &mut Parser, node_id: usize) {
         MarkdownNode::Paragraph => (),
         _ => return,
     };
-    let mut line = match parser.inlines.get(&node_id).filter(|item| {
+    let mut line = match parser.inlines.get(node_id).filter(|item| {
         item.first()
             .and_then(|it| it.get(0))
             .map(|it| it == b'[')
             .unwrap_or(false)
     }) {
         Some(_) => {
-            let Some(spans) = parser.inlines.remove(&node_id) else {
+            let Some(spans) = parser.inlines.remove(node_id) else {
                 return;
             };
             match Span::merge(&spans) {
@@ -46,7 +46,7 @@ pub(crate) fn process_link_reference(parser: &mut Parser, node_id: usize) {
     if line.is_end() {
         parser.tree.remove(node_id);
     } else {
-        parser.inlines.insert(node_id, vec![line]);
+        parser.inlines.insert(node_id, smallvec::smallvec![line]);
     }
 }
 
@@ -57,7 +57,7 @@ pub(crate) fn process_setext_heading_link_reference(parser: &mut Parser, node_id
     ) {
         return;
     }
-    let Some(spans) = parser.inlines.remove(&node_id) else {
+    let Some(spans) = parser.inlines.remove(node_id) else {
         return;
     };
     let mut consumed = 0usize;
@@ -79,7 +79,10 @@ pub(crate) fn process_setext_heading_link_reference(parser: &mut Parser, node_id
         parser.inlines.insert(node_id, spans);
         return;
     }
-    let remains = spans.into_iter().skip(consumed).collect::<Vec<_>>();
+    let remains = spans
+        .into_iter()
+        .skip(consumed)
+        .collect::<crate::pending::PendingSegments>();
     if !remains.is_empty() {
         parser.inlines.insert(node_id, remains);
     }
@@ -110,10 +113,17 @@ fn scan_link_reference(line: &mut Span) -> Option<(String, String, Option<String
                 return None;
             }
             line.skip(size);
-            utils::percent_encode::encode(
-                link::backslash_unescape(&utils::unescape_string(url.to_string())),
-                true,
-            )
+            // 恒等链零分配（每定义一次，摊薄到全部引用使用）
+            let raw = url.as_str();
+            let unescaped = utils::entities::unescape_string_cow(raw);
+            let unescaped = match link::backslash_unescape_cow(&unescaped) {
+                std::borrow::Cow::Borrowed(_) => unescaped,
+                std::borrow::Cow::Owned(owned) => std::borrow::Cow::Owned(owned),
+            };
+            match utils::percent_encode::encode_cow(&unescaped, true) {
+                std::borrow::Cow::Borrowed(_) => unescaped.into_owned(),
+                std::borrow::Cow::Owned(encoded) => encoded,
+            }
         }
         _ => return None,
     };

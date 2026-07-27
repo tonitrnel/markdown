@@ -4,7 +4,7 @@ use crate::blocks::{BeforeCtx, BlockMatching, BlockProcessing, BlockStrategy, Pr
 
 impl BlockStrategy for callout::Callout {
     fn before(BeforeCtx { line, parser, .. }: BeforeCtx) -> BlockMatching {
-        let location = line.start_location();
+        let location = line.cursor_or_end() as u32;
         if !line.is_indented() && line.advance_next_nonspace().starts_with(b'>', 1) {
             // skip '>' byte
             line.next_byte();

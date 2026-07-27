@@ -6,7 +6,7 @@ pub(super) fn process(
         id, line, parser, ..
     }: &mut ProcessCtx,
 ) -> bool {
-    let start_location = line.start_location();
+    let start_location = line.cursor_or_end() as u32;
     // 检查 '#' 前面的字符：必须是行首、换行或空白
     let cur = line.cursor();
     if cur > line.start() {
@@ -55,7 +55,7 @@ pub(super) fn process(
         return false;
     }
     let tag = unsafe { std::str::from_utf8_unchecked(&line.source_slice()[tag_start..tag_end]) };
-    let end_location = line.location_at_byte(tag_end);
+    let end_location = (tag_end) as u32;
     parser.tags.insert(tag.to_lowercase());
     parser.append_to(
         *id,
