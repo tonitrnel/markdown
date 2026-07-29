@@ -2,6 +2,10 @@
   "name": "wasm-compare-bench",
   "private": true,
   "type": "module",
+  "scripts": {
+    "bench": "node bench.mjs",
+    "bench:quick": "node bench.mjs --quick"
+  },
   "dependencies": {
     "commonmark": "^0.31.2",
     "markdown-it": "^14.1.0",
