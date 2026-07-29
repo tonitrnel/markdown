@@ -1,6 +1,8 @@
+use js_sys::{Object, Reflect, Uint32Array, Uint8Array};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+use markdown::ast::link::Link;
 use markdown::ast::text::TextRef;
 use markdown::{
     Document as MarkdownDocument, Location, MarkdownNode, Node, ParseError, Parser, ParserOptions,
@@ -23,14 +25,20 @@ extern "C" {
     #[wasm_bindgen(typescript_type = "Tags")]
     pub type Tags;
 
-    #[wasm_bindgen(typescript_type = "AstNode")]
-    pub type TAstNode;
-
     #[wasm_bindgen(typescript_type = "ParserOptions")]
     pub type TParserOptions;
 
     #[wasm_bindgen(typescript_type = "SemanticTarget[]")]
     pub type TSemanticTargets;
+
+    #[wasm_bindgen(typescript_type = "AstData")]
+    pub type TAstData;
+
+    #[wasm_bindgen(typescript_type = "HeadingMatch[]")]
+    pub type THeadingMatches;
+
+    #[wasm_bindgen(typescript_type = "LinkMatch[]")]
+    pub type TLinkMatches;
 }
 
 pub(crate) fn kind(node: &MarkdownNode) -> &'static str {
@@ -70,71 +78,153 @@ pub(crate) fn kind(node: &MarkdownNode) -> &'static str {
     }
 }
 
-#[derive(Serialize)]
-pub struct AstNode {
-    id: Option<String>,
-    kind: String,
-    content: MarkdownNode,
-    start: Location,
-    end: Location,
-    children: Vec<AstNode>,
-}
-
-impl AstNode {
-    /// `TextRef::Source` 在导出时解析为自有文本，序列化输出与旧版逐字节一致。
-    fn from_node(value: &Node, doc: &MarkdownDocument) -> Self {
-        let source = doc.source();
-        fn materialize(text: &mut TextRef, source: &str) {
-            if matches!(text, TextRef::Source(_)) {
-                *text = TextRef::Owned(text.resolve(source).to_string());
-            }
-        }
-        let mut content = value.body.clone();
-        match &mut content {
-            MarkdownNode::Text(text) => materialize(text, source),
-            MarkdownNode::Link(link) => {
-                if let markdown::ast::link::Link::Default(link) = link.as_mut() {
-                    materialize(&mut link.url, source);
-                    if let Some(title) = &mut link.title {
-                        materialize(title, source);
-                    }
-                }
-            }
-            MarkdownNode::Image(image) => {
-                materialize(&mut image.url, source);
-                if let Some(title) = &mut image.title {
-                    materialize(title, source);
-                }
-            }
-            _ => {}
-        }
-        Self {
-            id: value.id.as_ref().map(|b| (**b).clone()),
-            kind: kind(&value.body).to_string(),
-            start: doc.location_at(value.span.start as usize),
-            end: doc.location_at(value.span.end as usize),
-            content,
-            children: Vec::new(),
-        }
-    }
-}
-
 /// Parsed markdown document with AST and metadata
 /// 解析后的 Markdown 文档，包含 AST 和元数据
 #[wasm_bindgen]
 pub struct Document {
     inner: MarkdownDocument<'static>,
     snapshot: Option<ParserPhaseSnapshot>,
+    ast_data: Option<NodeArrays>,
 }
 
-fn transform_ast(doc: &MarkdownDocument, index: usize, children: &mut Vec<AstNode>) {
-    let ast = &doc.tree;
-    let mut next = ast.get_first_child(index);
-    while let Some(next_idx) = next {
-        let mut tree = AstNode::from_node(&ast[next_idx], doc);
-        transform_ast(doc, next_idx, &mut tree.children);
-        children.push(tree);
-        next = ast.get_next(next_idx)
+const NO_NODE: u32 = u32::MAX;
+const NODE_KIND_NAMES: [&str; 32] = [
+    "document",
+    "frontmatter",
+    "paragraph",
+    "soft-break",
+    "hard-break",
+    "text",
+    "embed",
+    "heading",
+    "strong",
+    "emphasis",
+    "list",
+    "list-item",
+    "image",
+    "link",
+    "tag",
+    "emoji",
+    "block-quote",
+    "code",
+    "table",
+    "table-head",
+    "table-head-col",
+    "table-body",
+    "table-row",
+    "table-data-col",
+    "strikethrough",
+    "highlighting",
+    "thematic-break",
+    "footnote",
+    "footnote-list",
+    "math",
+    "callout",
+    "html",
+];
+
+struct NodeArrays {
+    kind: Vec<u8>,
+    first_child: Vec<u32>,
+    next_sibling: Vec<u32>,
+    start: Vec<u32>,
+    end: Vec<u32>,
+    payloads_json: String,
+}
+
+fn visit_nodes<F>(document: &MarkdownDocument, node_id: usize, visit: &mut F)
+where
+    F: FnMut(usize, &Node),
+{
+    visit(node_id, &document.tree[node_id]);
+    let mut child = document.tree.get_first_child(node_id);
+    while let Some(child_id) = child {
+        visit_nodes(document, child_id, visit);
+        child = document.tree.get_next(child_id);
+    }
+}
+
+fn link_url(link: &Link, document: &MarkdownDocument) -> Option<String> {
+    match link {
+        Link::Default(link) => Some(document.text(&link.url).to_owned()),
+        Link::Wikilink(link) => Some(link.path.clone()),
+        Link::Footnote(..) | Link::FootnoteBackref(..) => None,
+    }
+}
+
+impl NodeArrays {
+    fn from_document(document: &MarkdownDocument) -> Self {
+        let mut arrays = Self {
+            kind: Vec::with_capacity(document.tree.len()),
+            first_child: Vec::with_capacity(document.tree.len()),
+            next_sibling: Vec::with_capacity(document.tree.len()),
+            start: Vec::with_capacity(document.tree.len()),
+            end: Vec::with_capacity(document.tree.len()),
+            payloads_json: json_tree::node_payloads_to_json(document),
+        };
+        arrays.push_subtree(document, 0);
+        arrays
+    }
+
+    fn push_subtree(&mut self, document: &MarkdownDocument, node_id: usize) -> u32 {
+        let node = &document.tree[node_id];
+        let packed_id = self.kind.len() as u32;
+        self.kind.push(node_kind_code(&node.body));
+        self.first_child.push(NO_NODE);
+        self.next_sibling.push(NO_NODE);
+        self.start.push(node.span.start);
+        self.end.push(node.span.end);
+
+        let mut previous_child = None;
+        let mut child = document.tree.get_first_child(node_id);
+        while let Some(child_id) = child {
+            let packed_child = self.push_subtree(document, child_id);
+            if let Some(previous) = previous_child {
+                self.next_sibling[previous as usize] = packed_child;
+            } else {
+                self.first_child[packed_id as usize] = packed_child;
+            }
+            previous_child = Some(packed_child);
+            child = document.tree.get_next(child_id);
+        }
+        packed_id
+    }
+}
+
+fn node_kind_code(node: &MarkdownNode) -> u8 {
+    match node {
+        MarkdownNode::Document => 0,
+        MarkdownNode::FrontMatter(..) => 1,
+        MarkdownNode::Paragraph => 2,
+        MarkdownNode::SoftBreak => 3,
+        MarkdownNode::HardBreak => 4,
+        MarkdownNode::Text(..) => 5,
+        MarkdownNode::Embed(..) => 6,
+        MarkdownNode::Heading(..) => 7,
+        MarkdownNode::Strong => 8,
+        MarkdownNode::Emphasis => 9,
+        MarkdownNode::List(..) => 10,
+        MarkdownNode::ListItem(..) => 11,
+        MarkdownNode::Image(..) => 12,
+        MarkdownNode::Link(..) => 13,
+        MarkdownNode::Tag(..) => 14,
+        MarkdownNode::Emoji(..) => 15,
+        MarkdownNode::BlockQuote => 16,
+        MarkdownNode::Code(..) => 17,
+        MarkdownNode::Table(..) => 18,
+        MarkdownNode::TableHead => 19,
+        MarkdownNode::TableHeadCol => 20,
+        MarkdownNode::TableBody => 21,
+        MarkdownNode::TableRow => 22,
+        MarkdownNode::TableDataCol => 23,
+        MarkdownNode::Strikethrough => 24,
+        MarkdownNode::Highlighting => 25,
+        MarkdownNode::ThematicBreak => 26,
+        MarkdownNode::Footnote(..) => 27,
+        MarkdownNode::FootnoteList => 28,
+        MarkdownNode::Math(..) => 29,
+        MarkdownNode::Callout(..) => 30,
+        MarkdownNode::Html(..) => 31,
     }
 }
 
@@ -237,6 +327,7 @@ impl From<MarkdownDocument<'static>> for Document {
         Self {
             inner: value,
             snapshot: None,
+            ast_data: None,
         }
     }
 }
@@ -250,6 +341,7 @@ impl Document {
         Self {
             inner: document,
             snapshot: Some(snapshot),
+            ast_data: None,
         }
     }
 }
@@ -276,30 +368,81 @@ fn parse_error_to_js(err: ParseError) -> JsValue {
 
 #[wasm_bindgen]
 impl Document {
-    /// Get the complete AST tree
-    /// 获取完整的 AST 树
-    #[wasm_bindgen(getter)]
-    pub fn tree(&self) -> TAstNode {
-        let mut tree = AstNode::from_node(&self.inner.tree[0], &self.inner);
-        transform_ast(&self.inner, 0, &mut tree.children);
-        serde_wasm_bindgen::to_value(&tree)
-            .unwrap_or(JsValue::NULL)
-            .unchecked_into::<TAstNode>()
+    /// Private transport used by the published JS wrapper to materialize an
+    /// AST. Its layout is intentionally not a public compatibility contract.
+    #[wasm_bindgen(js_name = astData)]
+    pub fn ast_data(&mut self) -> TAstData {
+        if self.ast_data.is_none() {
+            self.ast_data = Some(NodeArrays::from_document(&self.inner));
+        }
+        let arrays = self
+            .ast_data
+            .as_ref()
+            .expect("AST data cache initialized");
+        let object = Object::new();
+        let kind_names = serde_wasm_bindgen::to_value(&NODE_KIND_NAMES)
+            .expect("node kind names are serializable");
+        let set = |name: &str, property_value: &JsValue| {
+            Reflect::set(&object, &JsValue::from_str(name), property_value)
+                .expect("node array property is writable");
+        };
+        set("abi_version", &JsValue::from_f64(1.0));
+        set("root", &JsValue::from_f64(0.0));
+        set("node_count", &JsValue::from_f64(arrays.kind.len() as f64));
+        set("kind_names", &kind_names);
+        set("payloads_json", &JsValue::from_str(&arrays.payloads_json));
+        // SAFETY: the cache owns these immutable vectors for the document lifetime.
+        // Callers must reacquire views after WASM memory growth.
+        let kind = unsafe { Uint8Array::view(&arrays.kind) };
+        let first_child = unsafe { Uint32Array::view(&arrays.first_child) };
+        let next_sibling = unsafe { Uint32Array::view(&arrays.next_sibling) };
+        let start = unsafe { Uint32Array::view(&arrays.start) };
+        let end = unsafe { Uint32Array::view(&arrays.end) };
+        set("kind", &kind);
+        set("first_child", &first_child);
+        set("next_sibling", &next_sibling);
+        set("start", &start);
+        set("end", &end);
+        object.unchecked_into::<TAstData>()
     }
-    /// Complete AST as one JSON string (W1): a direct tree-walk writer,
-    /// no per-node reflection — pair with `JSON.parse` on the JS side.
-    /// Compact v2 shape vs `.tree`: `start`/`end` are source **byte
-    /// offsets** (matching `SemanticTarget`), absent `id`/`content`/empty
-    /// `children` are omitted, frontmatter maps are plain objects;
-    /// `content` payload shapes are otherwise identical. The raw string
-    /// is also cache/transfer-friendly.
-    /// 完整 AST 的单个 JSON 字符串（W1）：直写遍历、无逐节点反射，JS 侧
-    /// `JSON.parse` 配对。紧凑 v2 形状：`start`/`end` 为源码**字节偏移**
-    /// （与 `SemanticTarget` 一致）、无值 `id`/`content`/空 `children`
-    /// 省略、frontmatter 为普通对象；`content` 载荷形状与 `.tree` 一致。
-    /// 原始字符串亦可直接缓存/传输。
-    pub fn tree_json(&self) -> String {
-        json_tree::tree_to_json(&self.inner)
+
+    /// Finds headings without materializing the complete JS AST.
+    #[wasm_bindgen]
+    pub fn query_headings(&self) -> THeadingMatches {
+        let mut headings = Vec::new();
+        visit_nodes(&self.inner, 0, &mut |node_id, node| {
+            if let MarkdownNode::Heading(heading) = &node.body {
+                headings.push(HeadingMatch {
+                    node_id: node_id as u32,
+                    level: *heading.level() as u8,
+                    start_offset: node.span.start,
+                    end_offset: node.span.end,
+                });
+            }
+        });
+        serde_wasm_bindgen::to_value(&headings)
+            .expect("heading matches are serializable")
+            .unchecked_into::<THeadingMatches>()
+    }
+
+    /// Finds links without materializing the complete JS AST. URL text is
+    /// copied only for matching links.
+    #[wasm_bindgen]
+    pub fn query_links(&self) -> TLinkMatches {
+        let mut links = Vec::new();
+        visit_nodes(&self.inner, 0, &mut |node_id, node| {
+            if let MarkdownNode::Link(link) = &node.body {
+                links.push(LinkMatch {
+                    node_id: node_id as u32,
+                    url: link_url(link, &self.inner),
+                    start_offset: node.span.start,
+                    end_offset: node.span.end,
+                });
+            }
+        });
+        serde_wasm_bindgen::to_value(&links)
+            .expect("link matches are serializable")
+            .unchecked_into::<TLinkMatches>()
     }
     /// Returns document tags as an unsorted array.
     /// Ordering is not guaranteed and should not be relied upon.
@@ -356,6 +499,7 @@ impl Document {
         let document = Parser::continue_parse_from_snapshot_string(document, snapshot)
             .map_err(parse_error_to_js)?;
         self.inner = document;
+        self.ast_data = None;
         Ok(())
     }
 }
@@ -425,6 +569,23 @@ struct SemanticTargetInfo {
     /// inline engine) / Obsidian 式引用文本（真实 Inline 引擎剥离格式）
     ref_text: String,
     /// Source byte offsets / 源码字节偏移
+    start_offset: u32,
+    end_offset: u32,
+}
+
+#[derive(Serialize)]
+struct HeadingMatch {
+    node_id: u32,
+    level: u8,
+    start_offset: u32,
+    end_offset: u32,
+}
+
+#[derive(Serialize)]
+struct LinkMatch {
+    node_id: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
     start_offset: u32,
     end_offset: u32,
 }
@@ -541,6 +702,7 @@ mod tests {
         let wrapped = Document {
             inner: doc,
             snapshot: None,
+            node_arrays: None,
         };
         let json = wrapped.tree_json();
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
@@ -567,6 +729,31 @@ mod tests {
         assert!(h["start"].is_u64() && h["end"].is_u64());
         assert!(json.contains("\"content\":{\"variant\":\"default\",\"url\":\"https://e.com/x\""));
         assert!(!json.contains("\"content\":null"));
+    }
+
+    #[test]
+    fn node_arrays_pack_reachable_tree_topology() {
+        let doc = Parser::parse_string(
+            "# Title\n\nA [link](https://example.com).\n".to_string(),
+            ParserOptions::default().enabled_gfm(),
+        );
+        let arrays = NodeArrays::from_document(&doc);
+
+        assert_eq!(arrays.kind.len(), doc.tree.len());
+        assert_eq!(arrays.kind[0], 0, "root is the document kind");
+        assert_eq!(
+            arrays.kind[arrays.first_child[0] as usize], 7,
+            "first child is heading"
+        );
+        assert_eq!(arrays.first_child.len(), arrays.kind.len());
+        assert_eq!(arrays.next_sibling.len(), arrays.kind.len());
+        assert_eq!(arrays.start.len(), arrays.kind.len());
+        assert_eq!(arrays.end.len(), arrays.kind.len());
+        assert!(
+            arrays.kind.iter().any(|&kind| kind == 13),
+            "link is included"
+        );
+        assert!(arrays.next_sibling.iter().any(|&next| next != NO_NODE));
     }
 
     /// Test two-phase parsing produces same result as one-phase parsing

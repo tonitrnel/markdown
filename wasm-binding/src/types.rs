@@ -52,6 +52,47 @@ export interface SemanticTarget {
 }
 
 /**
+ * Compact, read-only AST topology exported as views into WASM memory.
+ * The arrays remain valid until the document is freed or WASM memory grows;
+ * obtain a fresh view after either event.
+ */
+export interface NodeArrays {
+  /** Stable layout version for this columnar export. */
+  readonly abi_version: 1;
+  /** Packed root-node index, currently always zero. */
+  readonly root: number;
+  /** Node count shared by every per-node column. */
+  readonly node_count: number;
+  /** Numeric kind code for each node; resolve through `kind_names`. */
+  readonly kind: Uint8Array;
+  /** First child index, or `0xffffffff` when absent. */
+  readonly first_child: Uint32Array;
+  /** Next sibling index, or `0xffffffff` when absent. */
+  readonly next_sibling: Uint32Array;
+  /** UTF-8 source byte offsets for each node's half-open span. */
+  readonly start: Uint32Array;
+  readonly end: Uint32Array;
+  /** Small static table mapping values in `kind` to node-kind names. */
+  readonly kind_names: readonly string[];
+}
+
+/** A heading found without serializing the complete AST. */
+export interface HeadingMatch {
+  readonly node_id: number;
+  readonly level: 1 | 2 | 3 | 4 | 5 | 6;
+  readonly start_offset: number;
+  readonly end_offset: number;
+}
+
+/** A link found without serializing the complete AST. */
+export interface LinkMatch {
+  readonly node_id: number;
+  readonly url?: string;
+  readonly start_offset: number;
+  readonly end_offset: number;
+}
+
+/**
  * 解析模式
  * Parse mode
  */
