@@ -193,7 +193,7 @@ Output(AST Tree)
 
 ## Release Flow
 
-以下流程用于发布 `1.0.x`（Rust crate + wasm binding）：
+以下流程用于发布任意 `x.y.z` 版本（Rust crate + wasm binding）：
 
 1. 确保工作区干净，避免把无关改动带入发版。
 2. 修改版本号：
@@ -211,15 +211,15 @@ cargo test
 
 ```bash
 git add Cargo.toml wasm-binding/Cargo.toml CHANGELOG.md Cargo.lock
-git commit -m "release: v1.0.x"
+git commit -m "release: vx.y.z"
 ```
 
 6. 打 tag 并推送：
 
 ```bash
-git tag v1.0.x
+git tag vx.y.z
 git push origin master
-git push origin v1.0.x
+git push origin vx.y.z
 ```
 
 7. `publish-wasm.yml` 会在 `v*` tag push 后自动触发，发布：
