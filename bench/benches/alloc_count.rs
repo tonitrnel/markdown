@@ -122,9 +122,36 @@ fn measure(fixture_label: Option<&str>, text: &str) {
     measure_with(fixture_label, text, parse_once);
 }
 
+fn measure_render(text: &str) {
+    let document = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+    let warmup = document.to_html();
+    let output_len = warmup.len();
+    let output_capacity = warmup.capacity();
+
+    let mut elapsed_ns = Vec::with_capacity(PARSES);
+    reset_counts();
+    for _ in 0..PARSES {
+        let started = Instant::now();
+        black_box(document.to_html());
+        elapsed_ns.push(started.elapsed().as_nanos() as u64);
+    }
+
+    let allocs = per_parse(ALLOCS.load(Ordering::Relaxed));
+    let reallocs = per_parse(REALLOCS.load(Ordering::Relaxed));
+    let alloc_bytes = per_parse(ALLOC_BYTES.load(Ordering::Relaxed));
+    let realloc_bytes = per_parse(REALLOC_BYTES.load(Ordering::Relaxed));
+    let median_us = median_ns(&mut elapsed_ns) as f64 / 1_000.0;
+    println!(
+        "[DEBUG-render-a4f2] allocs_per_render={allocs:.2} reallocs_per_render={reallocs:.2} \
+         alloc_bytes_per_render={alloc_bytes:.2} realloc_bytes_per_render={realloc_bytes:.2} \
+         output_len={output_len} output_capacity={output_capacity} median_us={median_us:.2}",
+    );
+}
+
 fn main() {
     // 首行保持既有无前缀格式（既有记录兼容）；合成 lane 逐行追加。
     measure(None, FIXTURE);
+    measure_render(FIXTURE);
     // v2C 会话变体（C4）
     measure_with(Some("session_block_only/_data"), FIXTURE, block_only_once);
     measure_with(Some("session_prepare/_data"), FIXTURE, session_prepare_once);

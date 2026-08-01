@@ -111,10 +111,10 @@ function App() {
     const input = inputSignal();
     const opts = options();
     const now = performance.now();
-    const document = markdown.parse_with_options(input, opts);
+    const document = markdown.parseWithOptions(input, opts);
     setElapsedSignal(Math.ceil((performance.now() - now) * 100) / 100);
     setAstSignal(document.tree);
-    setHtmlSignal(document.to_html());
+    setHtmlSignal(document.toHtml());
     const fm = document.frontmatter;
     // Convert Map to plain object for easier display
     if (fm instanceof Map) {

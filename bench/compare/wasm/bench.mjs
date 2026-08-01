@@ -14,7 +14,7 @@ import remarkGfm from "remark-gfm";
 
 const require = createRequire(import.meta.url);
 const root = join(dirname(fileURLToPath(import.meta.url)), "../../..");
-const wasm = require(join(root, "wasm-binding/pkg/markdown_binding.js"));
+const wasm = require(join(root, "wasm-binding/pkg"));
 
 const datasets = {
   _data: readFileSync(join(root, "bench/fixtures/curated/_data.md"), "utf8"),
@@ -37,44 +37,27 @@ const ops = {
   // 本库：解析（Document 留在 wasm 内，不跨边界）
   "local_wasm/parse": (text) => {
     const doc = wasm.parse(text);
-    doc.free();
+    doc.dispose();
   },
-  // 本库：解析 + 全树跨边界（产品路径：JS 侧拿到完整 AST）
+  // 本库：公开 JS API 的完整 AST 路径（惰性合成普通 JS Object）。
   "local_wasm/parse_tree": (text) => {
     const doc = wasm.parse(text);
     const tree = doc.tree;
-    doc.free();
-    return tree;
-  },
-  // 本库：解析 + JSON 串过边界 + V8 原生 JSON.parse（W1 边界策略）
-  "local_wasm/parse_tree_json": (text) => {
-    const doc = wasm.parse(text);
-    const tree = JSON.parse(doc.tree_json());
-    doc.free();
+    doc.dispose();
     return tree;
   },
   // 本库：目标寻址查询（W2——块相位 + 语义准备 + ref_text，无全树序列化）
-  "local_wasm/query_targets": (text) => wasm.query_semantic_targets(text),
-  // 解析 + 首次列式索引构建。TypedArray 仅是 WASM 内存视图，必须在释放
-  // Document 前读取；它适合 JS 全量遍历而不物化对象树。
-  "local_wasm/node_arrays": (text) => {
-    const doc = wasm.parse(text);
-    const view = doc.nodeArrays();
-    const nodeCount = view.node_count;
-    const rootKind = view.kind[view.root];
-    doc.free();
-    return nodeCount + rootKind;
-  },
+  "local_wasm/query_targets": (text) => wasm.querySemanticTargets(text),
   "local_wasm/query_headings": (text) => {
     const doc = wasm.parse(text);
-    const headings = doc.query_headings();
-    doc.free();
+    const headings = doc.queryHeadings();
+    doc.dispose();
     return headings;
   },
   "local_wasm/query_links": (text) => {
     const doc = wasm.parse(text);
-    const links = doc.query_links();
-    doc.free();
+    const links = doc.queryLinks();
+    doc.dispose();
     return links;
   },
   "markdown_it/tokens": (text) => md.parse(text, {}),
