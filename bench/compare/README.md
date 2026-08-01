@@ -17,6 +17,8 @@ Benchmark crates/folders:
   `parser-compare`：CommonMark、共享 GFM 和本地 OFM 产品通道的 Rust 解析器比较。
 - `polyglot`: cross-language scaffold (`markdown` / `goldmark` / `cmark`).\
   `polyglot`：跨语言脚手架（`markdown` / `goldmark` / `cmark`）。
+- `wasm`: Node.js delivery-surface comparison between the WASM binding and mainstream JS/TS Markdown libraries. See [`wasm/README.md`](wasm/README.md).\
+  `wasm`：WASM binding 与主流 JS/TS Markdown 库的 Node.js 交付面比较；详见 [`wasm/README.md`](wasm/README.md)。
 
 Shared third-party corpus:
 共享第三方语料：

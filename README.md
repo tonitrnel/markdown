@@ -62,9 +62,9 @@ match parser.parse_checked() {
 ### WASM API (Browser/Bundler)
 
 ```ts
-import { parse_with_options } from "@ptdgrp/markdown-wasm";
+import { parseWithOptions } from "@ptdgrp/markdown-wasm";
 
-const doc = parse_with_options("# Hello", {
+const doc = parseWithOptions("# Hello", {
   github_flavored: true,
   obsidian_flavored: true,
   cjk_autocorrect: true,
@@ -73,11 +73,11 @@ const doc = parse_with_options("# Hello", {
 const tree = doc.tree;
 const tags = doc.tags; // unsorted string[]
 const frontmatter = doc.frontmatter;
-const html = doc.to_html(); // debug/testing
+const html = doc.toHtml();
 
 // Two-phase parse
 // phase 1: parse frontmatter only
-const deferred = parse_with_options(content, {
+const deferred = parseWithOptions(content, {
   parse_mode: "frontmatter_only",
 });
 const phase1Ast = deferred.tree; // Document + FrontMatter
@@ -85,7 +85,7 @@ if (deferred.frontmatter?.draft) {
   // skip
 } else {
   // phase 2: continue parsing body/inlines
-  deferred.continue_parse();
+  deferred.continueParse();
   const phase2Ast = deferred.tree; // Document + FrontMatter + ...
 }
 ```
@@ -93,7 +93,7 @@ if (deferred.frontmatter?.draft) {
 `parse_mode` supports:
 
 - `"full"` (default): one-shot full parse
-- `"frontmatter_only"`: run phase 1 only, then call `continue_parse()` to enter phase 2
+- `"frontmatter_only"`: run phase 1 only, then call `continueParse()` to enter phase 2
 
 `tags` is returned as an unsorted array. Do not rely on ordering.
 
@@ -103,8 +103,9 @@ if (deferred.frontmatter?.draft) {
 import { parse } from "@ptdgrp/markdown-wasm-node";
 
 const doc = parse("This is $e^{i\\pi}+1=0$");
-console.log(doc.total_nodes);
-console.log(doc.to_html()); // debug/testing
+console.log(doc.totalNodes);
+console.log(doc.toHtml());
+doc.dispose();
 ```
 
 ### Frontmatter

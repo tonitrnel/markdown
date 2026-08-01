@@ -2,10 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.1.0] - 2026-07-29
 
 ### Added
 - Added a design specification for selective inline parsing and Rust-only block/semantic events, including filtered traversal, early-stop behavior, and inline selection semantics.
+- Added a Node.js benchmark that compares the WASM binding with mainstream JS/TS Markdown libraries.
+- Added a TypeScript package facade that exposes lazy `Document.tree`, `toHtml()`, and direct heading/link queries while keeping the compact WASM AST transport private.
 
 ### Changed
 - Extended the allocation-count benchmark to report minimum, midpoint, and maximum parse elapsed times alongside allocation metrics.
