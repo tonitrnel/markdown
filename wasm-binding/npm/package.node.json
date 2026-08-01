@@ -1,0 +1,30 @@
+{
+  "name": "@ptdgrp/markdown-wasm-node",
+  "description": "markdown wasm binding (nodejs)",
+  "version": "__VERSION__",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tonitrnel/markdown"
+  },
+  "files": [
+    "markdown_binding_bg.wasm",
+    "markdown_binding.js",
+    "markdown_binding.d.ts",
+    "index.js",
+    "index.d.ts",
+    "facade.js",
+    "facade.d.ts"
+  ],
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

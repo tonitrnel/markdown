@@ -1,0 +1,7 @@
+{
+  "name": "markdown-wasm-wrapper-build",
+  "private": true,
+  "devDependencies": {
+    "typescript": "~5.7.3"
+  }
+}

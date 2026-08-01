@@ -3,6 +3,8 @@
 WASM_BINDING_DIR := wasm-binding
 WASM_WEB_PKG_DIR := $(WASM_BINDING_DIR)/pkg-web
 WASM_NODE_PKG_DIR := $(WASM_BINDING_DIR)/pkg-node
+WASM_WRAPPER_DIR := $(WASM_BINDING_DIR)/npm
+WASM_WRAPPER_TSC := $(WASM_WRAPPER_DIR)/node_modules/.bin/tsc
 NPM_CACHE_DIR := /tmp/npm-cache-codex
 WASM_VERSION := $(shell sed -n "s/^version = \"\(.*\)\"/\1/p" $(WASM_BINDING_DIR)/Cargo.toml | head -n 1)
 
@@ -12,21 +14,41 @@ test:
 build-release:
 	cargo build --release
 
-wasm-build-web:
-	wasm-pack build $(WASM_BINDING_DIR) --release --target bundler --out-dir pkg-web
-	cd $(WASM_WEB_PKG_DIR)
-	npm pkg set name=@ptdgrp/markdown-wasm version=$(WASM_VERSION)
-	npm pkg set description="markdown wasm binding (browser/bundler)"
-	npm pkg set publishConfig.access=public
+$(WASM_WRAPPER_TSC): $(WASM_WRAPPER_DIR)/package.json $(WASM_WRAPPER_DIR)/package-lock.json
+	cd $(WASM_WRAPPER_DIR)
+	npm ci
 
-wasm-build-node:
+wasm-build-web: $(WASM_WRAPPER_TSC)
+	set -e
+	wasm-pack build $(WASM_BINDING_DIR) --release --target bundler --out-dir pkg-web
+	cp $(WASM_WRAPPER_DIR)/facade.ts $(WASM_WEB_PKG_DIR)/facade.ts
+	cp $(WASM_WRAPPER_DIR)/index.ts $(WASM_WEB_PKG_DIR)/index.ts
+	cp $(WASM_WRAPPER_DIR)/tsconfig.web.json $(WASM_WEB_PKG_DIR)/tsconfig.json
+	$(WASM_WRAPPER_TSC) -p $(WASM_WEB_PKG_DIR)/tsconfig.json
+	sed 's/__VERSION__/$(WASM_VERSION)/g' $(WASM_BINDING_DIR)/npm/package.web.json > $(WASM_WEB_PKG_DIR)/package.json
+
+wasm-build-node: $(WASM_WRAPPER_TSC)
+	set -e
 	wasm-pack build $(WASM_BINDING_DIR) --release --target nodejs --out-dir pkg-node
-	cd $(WASM_NODE_PKG_DIR)
-	npm pkg set name=@ptdgrp/markdown-wasm-node version=$(WASM_VERSION)
-	npm pkg set description="markdown wasm binding (nodejs)"
-	npm pkg set publishConfig.access=public
+	cp $(WASM_WRAPPER_DIR)/facade.ts $(WASM_NODE_PKG_DIR)/facade.ts
+	cp $(WASM_WRAPPER_DIR)/index.ts $(WASM_NODE_PKG_DIR)/index.ts
+	cp $(WASM_WRAPPER_DIR)/tsconfig.node.json $(WASM_NODE_PKG_DIR)/tsconfig.json
+	$(WASM_WRAPPER_TSC) -p $(WASM_NODE_PKG_DIR)/tsconfig.json
+	sed 's/__VERSION__/$(WASM_VERSION)/g' $(WASM_BINDING_DIR)/npm/package.node.json > $(WASM_NODE_PKG_DIR)/package.json
 
 wasm-build-all: wasm-build-web wasm-build-node
+
+wasm-bench: $(WASM_WRAPPER_TSC)
+	set -e
+	RUSTFLAGS='-C target-feature=+simd128' wasm-pack build $(WASM_BINDING_DIR) --release --target nodejs --out-dir pkg
+	cp $(WASM_WRAPPER_DIR)/facade.ts $(WASM_BINDING_DIR)/pkg/facade.ts
+	cp $(WASM_WRAPPER_DIR)/index.ts $(WASM_BINDING_DIR)/pkg/index.ts
+	cp $(WASM_WRAPPER_DIR)/tsconfig.node.json $(WASM_BINDING_DIR)/pkg/tsconfig.json
+	$(WASM_WRAPPER_TSC) -p $(WASM_BINDING_DIR)/pkg/tsconfig.json
+	sed 's/__VERSION__/$(WASM_VERSION)/g' $(WASM_BINDING_DIR)/npm/package.node.json > $(WASM_BINDING_DIR)/pkg/package.json
+	cd bench/compare/wasm
+	npm ci
+	npm run bench
 
 wasm-pack-web: wasm-build-web
 	mkdir -p $(NPM_CACHE_DIR)

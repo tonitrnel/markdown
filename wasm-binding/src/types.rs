@@ -52,11 +52,10 @@ export interface SemanticTarget {
 }
 
 /**
- * Compact, read-only AST topology exported as views into WASM memory.
- * The arrays remain valid until the document is freed or WASM memory grows;
- * obtain a fresh view after either event.
+ * Private, compact AST transport used by the package's JS wrapper.
+ * This is not exported from the public npm package.
  */
-export interface NodeArrays {
+export interface AstData {
   /** Stable layout version for this columnar export. */
   readonly abi_version: 1;
   /** Packed root-node index, currently always zero. */
@@ -74,6 +73,8 @@ export interface NodeArrays {
   readonly end: Uint32Array;
   /** Small static table mapping values in `kind` to node-kind names. */
   readonly kind_names: readonly string[];
+  /** JSON payloads aligned with the packed node indices. */
+  readonly payloads_json: string;
 }
 
 /** A heading found without serializing the complete AST. */

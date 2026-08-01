@@ -3,9 +3,8 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use markdown::ast::link::Link;
-use markdown::ast::text::TextRef;
 use markdown::{
-    Document as MarkdownDocument, Location, MarkdownNode, Node, ParseError, Parser, ParserOptions,
+    Document as MarkdownDocument, MarkdownNode, Node, ParseError, Parser, ParserOptions,
     ParserPhaseSnapshot,
 };
 
@@ -39,43 +38,6 @@ extern "C" {
 
     #[wasm_bindgen(typescript_type = "LinkMatch[]")]
     pub type TLinkMatches;
-}
-
-pub(crate) fn kind(node: &MarkdownNode) -> &'static str {
-    match node {
-        MarkdownNode::Document => "document",
-        MarkdownNode::FrontMatter(..) => "frontmatter",
-        MarkdownNode::Paragraph => "paragraph",
-        MarkdownNode::SoftBreak => "soft-break",
-        MarkdownNode::HardBreak => "hard-break",
-        MarkdownNode::Text(..) => "text",
-        MarkdownNode::Embed(..) => "embed",
-        MarkdownNode::Heading(..) => "heading",
-        MarkdownNode::Strong => "strong",
-        MarkdownNode::Emphasis => "emphasis",
-        MarkdownNode::List(..) => "list",
-        MarkdownNode::ListItem(..) => "list-item",
-        MarkdownNode::Image(..) => "image",
-        MarkdownNode::Link(..) => "link",
-        MarkdownNode::Tag(..) => "tag",
-        MarkdownNode::Emoji(..) => "emoji",
-        MarkdownNode::BlockQuote => "block-quote",
-        MarkdownNode::Code(..) => "code",
-        MarkdownNode::Table(..) => "table",
-        MarkdownNode::TableHead => "table-head",
-        MarkdownNode::TableHeadCol => "table-head-col",
-        MarkdownNode::TableBody => "table-body",
-        MarkdownNode::TableRow => "table-row",
-        MarkdownNode::TableDataCol => "table-data-col",
-        MarkdownNode::Strikethrough => "strikethrough",
-        MarkdownNode::Highlighting => "highlighting",
-        MarkdownNode::ThematicBreak => "thematic-break",
-        MarkdownNode::Footnote(..) => "footnote",
-        MarkdownNode::FootnoteList => "footnote-list",
-        MarkdownNode::Math(..) => "math",
-        MarkdownNode::Callout(..) => "callout",
-        MarkdownNode::Html(..) => "html",
-    }
 }
 
 /// Parsed markdown document with AST and metadata
@@ -375,10 +337,7 @@ impl Document {
         if self.ast_data.is_none() {
             self.ast_data = Some(NodeArrays::from_document(&self.inner));
         }
-        let arrays = self
-            .ast_data
-            .as_ref()
-            .expect("AST data cache initialized");
+        let arrays = self.ast_data.as_ref().expect("AST data cache initialized");
         let object = Object::new();
         let kind_names = serde_wasm_bindgen::to_value(&NODE_KIND_NAMES)
             .expect("node kind names are serializable");
@@ -691,9 +650,9 @@ pub fn version() -> String {
 mod tests {
     use super::*;
 
-    /// W1：直写 JSON 与内部树逐节点一致（可解析、计数相等、形状抽查）。
+    /// Private AST payloads are valid JSON and align with packed topology.
     #[test]
-    fn tree_json_is_valid_and_complete() {
+    fn ast_payloads_are_valid_and_complete() {
         let src = "# T ^h1\n\npara [a](https://e.com/x \"t\") ![i](img) `c`\n\n- item ^b1\n";
         let doc = Parser::parse_string(
             src.to_string(),
@@ -702,33 +661,16 @@ mod tests {
         let wrapped = Document {
             inner: doc,
             snapshot: None,
-            node_arrays: None,
+            ast_data: None,
         };
-        let json = wrapped.tree_json();
+        let json = json_tree::node_payloads_to_json(&wrapped.inner);
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
-        fn count(v: &serde_json::Value) -> usize {
-            1 + v["children"]
-                .as_array()
-                .map(|c| c.iter().map(count).sum())
-                .unwrap_or(0)
-        }
-        fn tree_count(doc: &MarkdownDocument, id: usize) -> usize {
-            let mut n = 1;
-            let mut child = doc.tree.get_first_child(id);
-            while let Some(c) = child {
-                n += tree_count(doc, c);
-                child = doc.tree.get_next(c);
-            }
-            n
-        }
-        assert_eq!(count(&value), tree_count(&wrapped.inner, 0));
-        assert_eq!(value["kind"], "document");
-        let h = &value["children"][0];
-        assert_eq!(h["kind"], "heading");
+        let payloads = value.as_array().expect("payload array");
+        assert_eq!(payloads.len(), wrapped.inner.tree.len());
+        let h = &payloads[1];
         assert_eq!(h["id"], "h1");
-        assert!(h["start"].is_u64() && h["end"].is_u64());
         assert!(json.contains("\"content\":{\"variant\":\"default\",\"url\":\"https://e.com/x\""));
-        assert!(!json.contains("\"content\":null"));
+        assert!(!json.contains("\"id\":\"\""));
     }
 
     #[test]
@@ -749,6 +691,14 @@ mod tests {
         assert_eq!(arrays.next_sibling.len(), arrays.kind.len());
         assert_eq!(arrays.start.len(), arrays.kind.len());
         assert_eq!(arrays.end.len(), arrays.kind.len());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&arrays.payloads_json)
+                .expect("valid payload JSON")
+                .as_array()
+                .expect("payload array")
+                .len(),
+            arrays.kind.len()
+        );
         assert!(
             arrays.kind.iter().any(|&kind| kind == 13),
             "link is included"
