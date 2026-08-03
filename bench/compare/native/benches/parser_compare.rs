@@ -87,7 +87,7 @@ fn bench_parse_only(c: &mut Criterion) {
                 |b, input| {
                     b.iter(|| {
                         let parser = Parser::new_with_options(input, options.clone());
-                        black_box(parser.parse());
+                        black_box(parser.parse().unwrap());
                     })
                 },
             );
@@ -161,7 +161,7 @@ fn bench_parse_and_html(c: &mut Criterion) {
                 |b, input| {
                     b.iter(|| {
                         let parser = Parser::new_with_options(input, options.clone());
-                        let document = black_box(parser.parse());
+                        let document = black_box(parser.parse().unwrap());
                         black_box(document.to_html());
                     })
                 },
