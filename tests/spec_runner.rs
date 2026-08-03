@@ -100,10 +100,12 @@ fn run_example(testfile: &Path, testcase: &Example, options: ParserOptions) -> R
     }
 }
 
+#[allow(dead_code)]
 pub fn spec_suite(root: &str, options: ParserOptions, fail_fast: bool) {
     run_suite(root, fail_fast, move |_| options.clone());
 }
 
+#[allow(dead_code)]
 pub fn spec_suite_with_flavor(root: &str, flavor: Flavor, fail_fast: bool) {
     run_suite(root, fail_fast, move |file| options_for(flavor, file));
 }
@@ -202,6 +204,7 @@ pub fn fail_fast_from_env() -> bool {
         .unwrap_or(false)
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub enum Flavor {
     CommonMark,

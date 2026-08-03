@@ -1,163 +1,18 @@
 use crate::ast::MarkdownNode;
 use crate::ast::text::TextRef;
 use crate::blocks::{BlockMatching, BlockProcessing};
+use crate::document::{Document, SourceText};
 use crate::exts;
+use crate::node::Node;
 use crate::scanner::{Scanner, ScannerSnapshot};
 use crate::selective::{BlockPhase, BlockScanStatus, TopLevelBlockEvent, VisitControl};
 use crate::span::Span;
 use crate::tree::Tree;
 use crate::{blocks, inlines};
 use rustc_hash::{FxHashMap, FxHashSet};
-use serde::Serialize;
 use smallvec::SmallVec;
 use std::collections::VecDeque;
-use std::fmt::{Debug, Formatter};
-use std::ops::Deref;
-
-/// Location in the source text (line and column numbers, both starting from 1)
-#[derive(Serialize, Eq, PartialEq, Clone, Copy)]
-pub struct Location {
-    /// Line number, starting from 1
-    pub line: u64,
-    /// Line column, starting from 1
-    pub column: u64,
-}
-
-impl Debug for Location {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.line, self.column)
-    }
-}
-
-impl Default for Location {
-    fn default() -> Self {
-        Self { line: 1, column: 1 }
-    }
-}
-
-impl Location {
-    pub fn new(line: u64, column: u64) -> Self {
-        Self { line, column }
-    }
-}
-
-#[derive(Serialize)]
-pub struct Node {
-    pub body: MarkdownNode,
-    /// 源码字节区间（主表示，M2）；行列 `Location` 经 `Document::location_at` 按需换算。
-    pub span: crate::ast::text::SourceSpan,
-    pub(crate) processing: bool,
-    pub id: Option<Box<String>>,
-}
-impl Debug for Node {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.body)
-    }
-}
-impl Node {
-    pub(crate) fn new(body: MarkdownNode, offset: u32) -> Self {
-        Self {
-            body,
-            span: crate::ast::text::SourceSpan {
-                start: offset,
-                end: offset,
-            },
-            processing: true,
-            id: None,
-        }
-    }
-}
-
-/// Document 持有或借用唯一一份源码（ADR 0001 / map ticket 07）。
-pub enum SourceText<'source> {
-    Borrowed(&'source str),
-    Owned(String),
-}
-
-impl SourceText<'_> {
-    #[inline]
-    pub fn as_str(&self) -> &str {
-        match self {
-            SourceText::Borrowed(source) => source,
-            SourceText::Owned(source) => source.as_str(),
-        }
-    }
-}
-
-impl Default for SourceText<'_> {
-    fn default() -> Self {
-        SourceText::Borrowed("")
-    }
-}
-
-impl Debug for SourceText<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SourceText::Borrowed(source) => write!(f, "Borrowed({} bytes)", source.len()),
-            SourceText::Owned(source) => write!(f, "Owned({} bytes)", source.len()),
-        }
-    }
-}
-
-/// 构建行起点索引：`line_starts[i]` = 第 `i+1` 行首字节偏移（首行恒为 0）。
-///
-/// 与 Scanner 行号语义构造性一致：行号仅在 `\n` 之后递增（孤立 `\r` 不增行）。
-fn build_line_starts(source: &str) -> Vec<u32> {
-    let bytes = source.as_bytes();
-    let mut starts = Vec::with_capacity(bytes.len() / 32 + 2);
-    starts.push(0u32);
-    for i in memchr::memchr_iter(b'\n', bytes) {
-        starts.push((i + 1) as u32);
-    }
-    starts
-}
-
-#[derive(Default)]
-pub struct Document<'source> {
-    source: SourceText<'source>,
-    pub tree: Tree<Node>,
-    pub tags: FxHashSet<String>,
-    line_starts: std::sync::OnceLock<Vec<u32>>,
-}
-impl<'source> Document<'source> {
-    /// 原始源码。`TextRef::Source` 区间对其解析。
-    #[inline]
-    pub fn source(&self) -> &str {
-        self.source.as_str()
-    }
-    /// 位置读取缝：按需把字节偏移换算为 1 基 `Location`。
-    ///
-    /// 列按 Unicode 标量计数（tab = 1）；`offset` 超出源码长度时按末尾处理，
-    /// 落在多字节字符中间时按该字符起点计列。行索引在首次调用时惰性构建
-    /// （parse-only 路径零成本）。
-    pub fn location_at(&self, offset: usize) -> Location {
-        let src = self.source.as_str();
-        let starts = self.line_starts.get_or_init(|| build_line_starts(src));
-        let offset = offset.min(src.len());
-        let line_idx = starts
-            .partition_point(|&s| (s as usize) <= offset)
-            .saturating_sub(1);
-        let line_start = starts.get(line_idx).copied().unwrap_or(0) as usize;
-        let column = 1 + crate::span::count_chars(src.as_bytes(), line_start, offset) as u64;
-        Location::new(line_idx as u64 + 1, column)
-    }
-    /// 唯一文本读取缝：解析 Text 载荷为显示文本。
-    #[inline]
-    pub fn text<'doc>(&'doc self, text: &'doc crate::ast::text::TextRef) -> &'doc str {
-        text.resolve(self.source.as_str())
-    }
-}
-impl Deref for Document<'_> {
-    type Target = Tree<Node>;
-    fn deref(&self) -> &Self::Target {
-        &self.tree
-    }
-}
-impl Debug for Document<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.tree.fmt(f)
-    }
-}
+use std::fmt::Debug;
 
 pub struct ParserPhaseSnapshot {
     pub(crate) scanner_snapshot: ScannerSnapshot,

@@ -4,7 +4,8 @@ use std::fmt;
 use std::fmt::Write;
 
 use crate::ast::{MarkdownNode, callout, html, image, link, list, table};
-use crate::parser::{Document, Node};
+use crate::document::Document;
+use crate::node::Node;
 use crate::tree::Tree;
 use crate::{ast, utils};
 

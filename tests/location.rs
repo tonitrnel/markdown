@@ -1,7 +1,7 @@
 use markdown::ast::{MarkdownNode, math};
-use markdown::parser::Document;
-use markdown::parser::{Location, Parser, ParserOptions};
+use markdown::parser::{Parser, ParserOptions};
 use markdown::tree::Tree;
+use markdown::{Document, Location};
 
 fn loc_le(a: Location, b: Location) -> bool {
     (a.line, a.column) <= (b.line, b.column)
@@ -179,7 +179,7 @@ const MATRIX: &[(&str, &str)] = &[
     ("mixed_eol", "α\r\nβ\nγ\rδ"),
 ];
 
-fn matrix_parse(source: &str) -> markdown::parser::Document<'_> {
+fn matrix_parse(source: &str) -> markdown::Document<'_> {
     Parser::new_with_options(source, ParserOptions::default().enabled_gfm().enabled_ofm()).parse()
 }
 

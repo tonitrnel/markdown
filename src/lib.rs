@@ -1,7 +1,10 @@
 pub mod ast;
 mod blocks;
+mod document;
 mod exts;
 mod inlines;
+mod location;
+mod node;
 pub mod parser;
 mod pending;
 mod render;
@@ -13,6 +16,9 @@ pub mod tree;
 mod utils;
 
 pub use ast::*;
+pub use document::*;
+pub use location::*;
+pub use node::*;
 pub use parser::*;
 pub use selective::*;
 pub use tree::*;

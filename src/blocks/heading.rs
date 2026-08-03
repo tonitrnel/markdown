@@ -177,7 +177,7 @@ impl BlockStrategy for heading::SetextHeading {
 #[cfg(test)]
 mod tests {
     use crate::ast::{MarkdownNode, heading};
-    use crate::parser::Location;
+    use crate::location::Location;
     use crate::parser::Parser;
 
     #[test]

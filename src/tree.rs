@@ -517,9 +517,9 @@ mod tests {
     #[test]
     fn tree_node_slot_is_compact() {
         assert!(
-            std::mem::size_of::<TreeNode<crate::parser::Node>>() <= 120,
+            std::mem::size_of::<TreeNode<crate::node::Node>>() <= 120,
             "TreeNode<Node> = {} bytes",
-            std::mem::size_of::<TreeNode<crate::parser::Node>>()
+            std::mem::size_of::<TreeNode<crate::node::Node>>()
         );
     }
 }

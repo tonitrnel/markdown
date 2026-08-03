@@ -5,7 +5,9 @@
 
 use crate::ast::MarkdownNode;
 use crate::ast::heading::Heading;
-use crate::parser::{Document, Node, ParseError, Parser};
+use crate::document::Document;
+use crate::node::Node;
+use crate::parser::{ParseError, Parser};
 use crate::tree::Tree;
 use rustc_hash::FxHashSet;
 
