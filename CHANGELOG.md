@@ -2,15 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.1.0] - 2026-07-29
+## [Unreleased]
 
 ### Added
+- Added `Parser::parse_blocks()` and the inspectable `BlockDocument` result for parsing Block structure without eagerly materializing Inline nodes.
 - Added a design specification for selective inline parsing and Rust-only block/semantic events, including filtered traversal, early-stop behavior, and inline selection semantics.
 - Added a Node.js benchmark that compares the WASM binding with mainstream JS/TS Markdown libraries.
 - Added a TypeScript package facade that exposes lazy `Document.tree`, `toHtml()`, and direct heading/link queries while keeping the compact WASM AST transport private.
 
 ### Changed
 - Extended the allocation-count benchmark to report minimum, midpoint, and maximum parse elapsed times alongside allocation metrics.
+- Renamed the public Block-stage result from `BlockPhase` to `BlockDocument`.
 
 ## [1.0.5] - 2026-06-10
 

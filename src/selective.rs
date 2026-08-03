@@ -49,36 +49,37 @@ impl<'event> TopLevelBlockEvent<'event> {
     }
 }
 
-/// Block 扫描完成后的阶段状态。持有全部解析器状态；
-/// 不提供任何恢复扫描的方法——`Stop` 之后只能继续后续阶段或丢弃。
-pub struct BlockPhase<'input> {
+/// 已完成 Block 扫描的 Source document。
+///
+/// Block 结构可以直接检查，Pending Inline 尚未物化。该值拥有继续解析所需的
+/// 全部状态；`Stop` 之后只能物化已接受的前缀或丢弃，不能恢复扫描。
+pub struct BlockDocument<'input> {
     pub(crate) parser: Parser<'input>,
     pub(crate) status: BlockScanStatus,
 }
 
-impl<'input> BlockPhase<'input> {
+impl<'input> BlockDocument<'input> {
+    /// 原始 Source document。
+    pub fn source(&self) -> &'input str {
+        self.parser.scanner.source_str()
+    }
+
+    /// 已完成的 Block tree。Inline-capable 节点可能仍没有 Inline 子节点。
+    pub fn tree(&self) -> &Tree<Node> {
+        &self.parser.tree
+    }
+
     pub fn block_status(&self) -> BlockScanStatus {
         self.status
     }
-    /// 对已接受的 Block 前缀执行完整 Inline 物化并返回 `Document`。
-    ///
-    /// 与 `Parser::parse` 的后半段共用同一实现；对 `Stopped` 前缀的结果
-    /// 等价于直接解析对应的源码前缀。
-    pub fn finish(self) -> Document<'input> {
-        self.finish_checked()
-            .expect("parse failed: input exceeds parser limits")
-    }
-    pub fn finish_checked(self) -> Result<Document<'input>, ParseError> {
+
+    /// 物化全部 Pending Inline，返回完整 [`Document`]。
+    pub fn materialize_all(self) -> Result<Document<'input>, ParseError> {
         self.parser.finish_inline_phase_checked()
     }
-    /// 语义准备（F2/C3）：对已接受前缀执行 BlockId 发现（引用定义提取惰性至首次物化），
-    /// 并建立文档前序的语义目标索引。Heading Inline **不在此物化**（C3 惰性化）：
-    /// 目标文本经 `SemanticTarget::ref_text` 按需物化，`finish` 仍按文档序补齐。
-    pub fn prepare_semantic_targets(self) -> SemanticPhase<'input> {
-        self.prepare_semantic_targets_checked()
-            .expect("parse failed: input exceeds parser limits")
-    }
-    pub fn prepare_semantic_targets_checked(mut self) -> Result<SemanticPhase<'input>, ParseError> {
+
+    /// 发现 BlockId 并建立文档前序的 Semantic target 索引。
+    pub fn prepare_semantics(mut self) -> Result<SemanticPhase<'input>, ParseError> {
         self.parser.discover_block_ids();
         if let Some(err) = self.parser.parse_error.take() {
             self.parser.tree.pop();
@@ -90,6 +91,28 @@ impl<'input> BlockPhase<'input> {
             status: self.status,
             targets,
         })
+    }
+
+    /// 对已接受的 Block 前缀执行完整 Inline 物化并返回 `Document`。
+    ///
+    /// 与 `Parser::parse` 的后半段共用同一实现；对 `Stopped` 前缀的结果
+    /// 等价于直接解析对应的源码前缀。
+    pub fn finish(self) -> Document<'input> {
+        self.finish_checked()
+            .expect("parse failed: input exceeds parser limits")
+    }
+    pub fn finish_checked(self) -> Result<Document<'input>, ParseError> {
+        self.materialize_all()
+    }
+    /// 语义准备（F2/C3）：对已接受前缀执行 BlockId 发现（引用定义提取惰性至首次物化），
+    /// 并建立文档前序的语义目标索引。Heading Inline **不在此物化**（C3 惰性化）：
+    /// 目标文本经 `SemanticTarget::ref_text` 按需物化，`finish` 仍按文档序补齐。
+    pub fn prepare_semantic_targets(self) -> SemanticPhase<'input> {
+        self.prepare_semantic_targets_checked()
+            .expect("parse failed: input exceeds parser limits")
+    }
+    pub fn prepare_semantic_targets_checked(self) -> Result<SemanticPhase<'input>, ParseError> {
+        self.prepare_semantics()
     }
 }
 
@@ -290,13 +313,18 @@ pub struct SelectiveParseOutput<'source> {
 }
 
 impl<'input> Parser<'input> {
+    /// Parse the complete Block structure without materializing Inline nodes.
+    pub fn parse_blocks(self) -> Result<BlockDocument<'input>, ParseError> {
+        self.run_block_phase_checked(None)
+    }
+
     /// Block 扫描阶段：对每个已 finalized 的 `Document` 直接子节点派发事件。
     ///
     /// `filter` 拒绝的事件等同于 `Continue`，不会停止遍历；`visitor` 返回
     /// [`VisitControl::Stop`] 时终态停止：停止消费源码、丢弃剩余输入，
     /// 返回的前缀树中不含任何未接受的节点。frontmatter 与 `Document`
     /// 自身不产生事件。
-    pub fn parse_blocks_with<F, V>(self, filter: F, visitor: V) -> BlockPhase<'input>
+    pub fn parse_blocks_with<F, V>(self, filter: F, visitor: V) -> BlockDocument<'input>
     where
         F: FnMut(&TopLevelBlockEvent<'_>) -> bool,
         V: FnMut(&TopLevelBlockEvent<'_>) -> VisitControl,
@@ -308,7 +336,7 @@ impl<'input> Parser<'input> {
         self,
         mut filter: F,
         mut visitor: V,
-    ) -> Result<BlockPhase<'input>, ParseError>
+    ) -> Result<BlockDocument<'input>, ParseError>
     where
         F: FnMut(&TopLevelBlockEvent<'_>) -> bool,
         V: FnMut(&TopLevelBlockEvent<'_>) -> VisitControl,

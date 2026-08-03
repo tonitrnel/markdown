@@ -2,7 +2,7 @@
 
 > **执行状态（2026-07-26）：** 本文仍是选择性解析的行为来源；具体实施顺序正在 [Wayfinder 决策地图](../../.scratch/markdown-parser-incremental-iteration/map.md) 中收敛，现有渐进式计划仅为工作假设。顶层 Block 事件只提供回调期的只读视图，不承诺可在回调后保存的 `NodeId`；语义准备完成后才可在同一内存会话内使用节点 ID。`Stop` 是终态，不支持序列化、磁盘 checkpoint、跨进程或源码变更后的恢复；选择性结果使用独立输出包装，不伪装为完整解析结果。
 >
-> **F1 实施注（2026-07-26）：** 顶层 Block 事件在稳定的行边界派发。当同一行既关闭上一个顶层 Block 又开启下一个时（如段落后紧跟 `# 标题`），事件回调看到的树视图可能已包含下一个顶层节点的起始行——这弱化了下文"下一个顶层节点的内容还没有提交"的原始表述；`Stop` 的保证不变：返回的前缀树不含任何未接受节点，且与直接解析对应源码前缀逐字节一致（含 `doc.end` 位置语义）。API 形态（`parse_blocks_with[_checked]`、`BlockPhase::finish[_checked]`、`BlockScanStatus`）以 map ticket 06 的 Answer 为准。
+> **F1 实施注（2026-07-26，2026-08-03 更新命名）：** 顶层 Block 事件在稳定的行边界派发。当同一行既关闭上一个顶层 Block 又开启下一个时（如段落后紧跟 `# 标题`），事件回调看到的树视图可能已包含下一个顶层节点的起始行——这弱化了下文"下一个顶层节点的内容还没有提交"的原始表述；`Stop` 的保证不变：返回的前缀树不含任何未接受节点，且与直接解析对应源码前缀逐字节一致（含 `doc.end` 位置语义）。无观察者的公开入口为 `Parser::parse_blocks() -> Result<BlockDocument, ParseError>`；观察者入口仍为 `parse_blocks_with[_checked]`。原 `BlockPhase` 名称已由 `BlockDocument` 直接替换。
 > **(2026-07-27)修订注：** 该文档已经过时，沿用现有的执行状态作为基准。
 
 > **C3 修订注（2026-07-27，行为来源以此为准）：** v2C ticket 22（维护者决策）与 ticket 24 对本文四处做出修订：
@@ -95,7 +95,7 @@ pub struct SelectiveParseOutput {
 let mut parsed = Parser::new(source)
     .parse_blocks_with_checked(block_filter, block_visitor)?;
 
-parsed.prepare_semantic_targets_checked()?;
+let mut parsed = parsed.prepare_semantics()?;
 
 let mut selection = InlineSelection::default();
 parsed.visit_semantic_targets(

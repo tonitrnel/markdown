@@ -5,7 +5,7 @@ use crate::document::{Document, SourceText};
 use crate::exts;
 use crate::node::Node;
 use crate::scanner::{Scanner, ScannerSnapshot};
-use crate::selective::{BlockPhase, BlockScanStatus, TopLevelBlockEvent, VisitControl};
+use crate::selective::{BlockDocument, BlockScanStatus, TopLevelBlockEvent, VisitControl};
 use crate::span::Span;
 use crate::tree::Tree;
 use crate::{blocks, inlines};
@@ -395,7 +395,7 @@ impl<'input> Parser<'input> {
     }
     pub fn continue_parse_checked(mut self) -> Result<Document<'input>, ParseError> {
         self.tree.push();
-        self.parse_blocks();
+        self.parse_block_lines();
         if let Some(err) = self.parse_error.take() {
             self.tree.pop();
             return Err(err);
@@ -403,11 +403,11 @@ impl<'input> Parser<'input> {
         self.finish_inline_phase_checked()
     }
     /// Block 阶段入口（F1）：`ensure_limits` + frontmatter 后运行带观察者的
-    /// Block 扫描，返回持有全部解析器状态的 [`BlockPhase`]。
+    /// Block 扫描，返回持有全部解析器状态的 [`BlockDocument`]。
     pub(crate) fn run_block_phase_checked(
         mut self,
         observer: Option<&mut dyn FnMut(&TopLevelBlockEvent<'_>) -> VisitControl>,
-    ) -> Result<BlockPhase<'input>, ParseError> {
+    ) -> Result<BlockDocument<'input>, ParseError> {
         self.ensure_limits()?;
         self.parse_frontmatter()?;
         self.tree.push();
@@ -416,13 +416,13 @@ impl<'input> Parser<'input> {
             self.tree.pop();
             return Err(err);
         }
-        Ok(BlockPhase {
+        Ok(BlockDocument {
             parser: self,
             status,
         })
     }
     /// Inline 阶段与收尾（`continue_parse_checked` 的后半段；
-    /// `BlockPhase::finish_checked` 复用同一实现）。
+    /// `BlockDocument::materialize_all` 复用同一实现）。
     pub(crate) fn finish_inline_phase_checked(mut self) -> Result<Document<'input>, ParseError> {
         self.parse_inlines();
         if let Some(err) = self.parse_error.take() {
@@ -535,7 +535,7 @@ impl<'input> Parser<'input> {
     //     while            +4.6833ms
     //     incorporate_line +4.4858ms
     //     ...              +1ms
-    fn parse_blocks(&mut self) {
+    fn parse_block_lines(&mut self) {
         self.parse_blocks_observed(None);
     }
     /// Block 扫描主循环。`observer` 存在时，在每个稳定行边界对新近

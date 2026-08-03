@@ -1,0 +1,173 @@
+# JSX-like components
+
+Simple component
+
+```````````````````````````````` example
+<Button>Click</Button>
+.
+<p><Button>Click</Button></p>
+````````````````````````````````
+
+Self-closing component
+
+```````````````````````````````` example
+<UI.Button />
+.
+<p><UI.Button/></p>
+````````````````````````````````
+
+Markdown children
+
+```````````````````````````````` example
+<Panel>
+**bold**
+</Panel>
+.
+<Panel>
+<strong>bold</strong>
+</Panel>
+````````````````````````````````
+
+Expression child
+
+```````````````````````````````` example
+<Button>{user.name}</Button>
+.
+<p><Button>{user.name}</Button></p>
+````````````````````````````````
+
+JS comment child
+
+```````````````````````````````` example
+<Button>{/* editor note */}</Button>
+.
+<p><Button>{/* editor note */}</Button></p>
+````````````````````````````````
+
+Nested expression attribute
+
+```````````````````````````````` example
+<Chart data={{ values: [1, 2] }} />
+.
+<Chart data={{ values: [1, 2] }}/>
+````````````````````````````````
+
+Expression scanner quotes and comments
+
+```````````````````````````````` example
+<Button>{fn("}", '{', `}` /* } */)}</Button>
+.
+<p><Button>{fn("}", '{', `}` /* } */)}</Button></p>
+````````````````````````````````
+
+Inline HTML constructs remain supported
+
+```````````````````````````````` example
+before <?pi?> after
+before <![CDATA[x]]> after
+before <!-- comment --> after
+.
+<p>before <?pi?> after
+before <![CDATA[x]]> after
+before <!-- comment --> after</p>
+````````````````````````````````
+
+Literal and boolean attributes
+
+```````````````````````````````` example
+<Widget enabled value=plain />
+.
+<Widget enabled value="plain"/>
+````````````````````````````````
+
+Expression escapes
+
+```````````````````````````````` example
+<Button>{["a\\\"}", 'b\\\'}', `c\\\`}`]}</Button>
+.
+<p><Button>{["a\\\"}", 'b\\\'}', `c\\\`}`]}</Button></p>
+````````````````````````````````
+
+Unterminated expression falls back to text
+
+```````````````````````````````` example
+<Button>{unclosed</Button>
+.
+<p><Button>{unclosed</Button></p>
+````````````````````````````````
+
+Unterminated JSX comment falls back to text
+
+```````````````````````````````` example
+<Button>{/* unclosed</Button>
+.
+<p><Button>{/* unclosed</Button></p>
+````````````````````````````````
+
+Multiline component tag
+
+```````````````````````````````` example
+before <Widget
+title="x"> after
+.
+<p>before <Widget
+title="x"> after</p>
+````````````````````````````````
+
+Self-closing raw HTML in inline content
+
+```````````````````````````````` example
+before <script/> <div/> after
+.
+<p>before <script/> <div/> after</p>
+````````````````````````````````
+
+Closing component tag with whitespace
+
+```````````````````````````````` example
+before </Button > after
+.
+<p>before </Button > after</p>
+````````````````````````````````
+
+Incomplete inline HTML constructs fall back to text
+
+```````````````````````````````` example
+before <?unfinished
+before <![CDATA[unfinished
+before <!-- unfinished
+.
+<p>before <?unfinished
+before &lt;![CDATA[unfinished
+before &lt;!-- unfinished</p>
+````````````````````````````````
+
+Attribute expression quoted states
+
+```````````````````````````````` example
+<Chart double={"a\"}"} single={'b\'}'} template={`c\`}`} />
+.
+<Chart double={"a\"}"} single={'b\'}'} template={`c\`}`}/>
+````````````````````````````````
+
+Expression line comment
+
+```````````````````````````````` example
+<Panel>
+{value // }
++ 1}
+</Panel>
+.
+<Panel>
+{value // }
++ 1}
+</Panel>
+````````````````````````````````
+
+Unterminated attribute expression falls back to text
+
+```````````````````````````````` example
+<Chart data={{ unclosed } />
+.
+<p>&lt;Chart data={{unclosed} /&gt;</p>
+````````````````````````````````

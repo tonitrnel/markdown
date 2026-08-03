@@ -77,10 +77,25 @@ fn extract_spec_tests(testfile: &Path) -> Vec<Example> {
     examples
 }
 
-fn run_example(testfile: &Path, testcase: &Example, options: ParserOptions) -> Result<(), String> {
+#[derive(Clone, Copy)]
+enum Comparison {
+    Normalized,
+    Exact,
+}
+
+fn run_example_with_comparison(
+    testfile: &Path,
+    testcase: &Example,
+    options: ParserOptions,
+    comparison: Comparison,
+) -> Result<(), String> {
     let ast = Parser::new_with_options(&testcase.markdown, options).parse();
     let html = ast.to_html();
-    if html.replace('\n', "") != testcase.html.replace('\n', "") {
+    let matches = match comparison {
+        Comparison::Normalized => html.replace('\n', "") == testcase.html.replace('\n', ""),
+        Comparison::Exact => html == testcase.html,
+    };
+    if !matches {
         Err(format!(
             "{}\n[FILE]: {}:{}\n[EXPECT]: {}:{}\n[AST]:\n {:?}\n[RAW]:\n {:?}\n{}\n left: {:?}\nright: {:?}\n{}",
             "⌈------------------------DEBUG INFO--------------------------".bright_black(),
@@ -102,15 +117,30 @@ fn run_example(testfile: &Path, testcase: &Example, options: ParserOptions) -> R
 
 #[allow(dead_code)]
 pub fn spec_suite(root: &str, options: ParserOptions, fail_fast: bool) {
-    run_suite(root, fail_fast, move |_| options.clone());
+    run_suite(
+        root,
+        fail_fast,
+        move |_| options.clone(),
+        Comparison::Normalized,
+    );
+}
+
+#[allow(dead_code)]
+pub fn spec_suite_exact(root: &str, options: ParserOptions, fail_fast: bool) {
+    run_suite(root, fail_fast, move |_| options.clone(), Comparison::Exact);
 }
 
 #[allow(dead_code)]
 pub fn spec_suite_with_flavor(root: &str, flavor: Flavor, fail_fast: bool) {
-    run_suite(root, fail_fast, move |file| options_for(flavor, file));
+    run_suite(
+        root,
+        fail_fast,
+        move |file| options_for(flavor, file),
+        Comparison::Normalized,
+    );
 }
 
-fn run_suite<F>(root: &str, fail_fast: bool, options_for_file: F)
+fn run_suite<F>(root: &str, fail_fast: bool, options_for_file: F, comparison: Comparison)
 where
     F: Fn(&Path) -> ParserOptions,
 {
@@ -123,7 +153,9 @@ where
         let options = options_for_file(&file);
         println!("running {} tests from {}", cases.len(), file.display());
         for testcase in &cases {
-            let panics = std::panic::catch_unwind(|| run_example(&file, testcase, options.clone()));
+            let panics = std::panic::catch_unwind(|| {
+                run_example_with_comparison(&file, testcase, options.clone(), comparison)
+            });
             match panics {
                 Ok(Ok(())) => {
                     println!(

@@ -31,6 +31,35 @@ fn kind_name(node: &MarkdownNode) -> &'static str {
 }
 
 #[test]
+fn parse_blocks_returns_an_inspectable_block_document() {
+    let source = source();
+    let blocks: markdown::BlockDocument<'_> = Parser::new(&source)
+        .parse_blocks()
+        .expect("block parse should succeed");
+
+    assert_eq!(blocks.block_status(), BlockScanStatus::Complete);
+    assert_eq!(blocks.source(), source);
+    assert!(blocks.tree().get_first_child(0).is_some());
+
+    let document = blocks
+        .materialize_all()
+        .expect("inline materialization should succeed");
+    assert_eq!(document.to_html(), Parser::new(&source).parse().to_html());
+}
+
+#[test]
+fn block_document_can_prepare_semantics() {
+    let source = "# Heading\n\nParagraph ^paragraph\n";
+    let semantic = Parser::new_with_options(source, ParserOptions::default().enabled_ofm())
+        .parse_blocks()
+        .expect("block parse should succeed")
+        .prepare_semantics()
+        .expect("semantic preparation should succeed");
+
+    assert_eq!(semantic.target_count(), 2);
+}
+
+#[test]
 fn dispatches_only_document_direct_children() {
     let source = source();
     let mut kinds = Vec::new();

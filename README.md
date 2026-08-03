@@ -59,6 +59,31 @@ match parser.parse_checked() {
 }
 ```
 
+### 仅解析 Block 结构
+
+需要先检查 Block 结构、稍后再决定如何物化 Inline 时，使用
+`BlockDocument`。它不是解析会话：Block 扫描已经结束，结果只能继续物化或丢弃。
+
+```rust
+use markdown::{Parser, ParserOptions};
+
+let blocks = Parser::new_with_options(
+    input,
+    ParserOptions::default().enabled_ofm(),
+)
+.parse_blocks()?;
+
+if let Some(first_block) = blocks.tree().get_first_child(0) {
+    let node = &blocks.tree()[first_block];
+    // 检查已经完成的顶层 Block
+}
+
+let document = blocks.materialize_all()?;
+```
+
+需要查询 Heading 或 OFM BlockId 等语义目标时，可在物化前调用
+`blocks.prepare_semantics()`。
+
 ### WASM API (Browser/Bundler)
 
 ```ts
