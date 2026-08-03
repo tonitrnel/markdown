@@ -3,23 +3,22 @@ use std::borrow::Cow::{Borrowed, Owned};
 use std::fmt;
 use std::fmt::Write;
 
+use memchr::{memchr, memchr3};
+
 use crate::ast::{MarkdownNode, callout, html, image, link, list, table};
 use crate::document::Document;
 use crate::node::Node;
 use crate::tree::Tree;
 use crate::{ast, utils};
 
-struct HtmlRender<'input, W> {
-    writer: &'input mut W,
+struct HtmlRender<'input> {
+    writer: &'input mut String,
     tree: &'input Tree<Node>,
     source: &'input str,
 }
 
-impl<'input, W> HtmlRender<'input, W>
-where
-    W: Write,
-{
-    fn new(tree: &'input Tree<Node>, source: &'input str, writer: &'input mut W) -> Self {
+impl<'input> HtmlRender<'input> {
+    fn new(tree: &'input Tree<Node>, source: &'input str, writer: &'input mut String) -> Self {
         Self {
             tree,
             source,
@@ -27,104 +26,120 @@ where
         }
     }
     fn render(&mut self, idx: usize) -> fmt::Result {
-        let pair = match &self.tree[idx].body {
-            MarkdownNode::Document => Some((Borrowed(""), Borrowed(""))),
+        match &self.tree[idx].body {
+            MarkdownNode::Document => self.render_wrapped(idx, "", "")?,
             MarkdownNode::Paragraph => {
-                let id_attr = Self::format_id_attr(&self.tree[idx].id);
-                if self.tree.get_first_child(idx).is_none() && id_attr.is_empty() {
-                    None
-                } else if self.try_write_split_paragraph(idx, &id_attr)? {
-                    None
-                } else {
-                    Some((Owned(format!("<p{id_attr}>")), Borrowed("</p>")))
+                let id = self.tree[idx].id.as_deref().map(String::as_str);
+                if self.tree.get_first_child(idx).is_some() || id.is_some() {
+                    if !self.try_write_split_paragraph(idx, id)? {
+                        self.prepare_open(idx);
+                        self.writer.push_str("<p");
+                        Self::push_attr(self.writer, "id", id);
+                        self.writer.push('>');
+                        self.write_children(idx)?;
+                        self.write_close("</p>", idx);
+                    }
                 }
             }
-            MarkdownNode::Heading(heading) => Some(match heading.level() {
-                ast::heading::HeadingLevel::H1 => (
-                    Owned(format!("<h1{}>", Self::format_id_attr(&self.tree[idx].id))),
-                    Borrowed("</h1>"),
-                ),
-                ast::heading::HeadingLevel::H2 => (
-                    Owned(format!("<h2{}>", Self::format_id_attr(&self.tree[idx].id))),
-                    Borrowed("</h2>"),
-                ),
-                ast::heading::HeadingLevel::H3 => (
-                    Owned(format!("<h3{}>", Self::format_id_attr(&self.tree[idx].id))),
-                    Borrowed("</h3>"),
-                ),
-                ast::heading::HeadingLevel::H4 => (
-                    Owned(format!("<h4{}>", Self::format_id_attr(&self.tree[idx].id))),
-                    Borrowed("</h4>"),
-                ),
-                ast::heading::HeadingLevel::H5 => (
-                    Owned(format!("<h5{}>", Self::format_id_attr(&self.tree[idx].id))),
-                    Borrowed("</h5>"),
-                ),
-                ast::heading::HeadingLevel::H6 => (
-                    Owned(format!("<h6{}>", Self::format_id_attr(&self.tree[idx].id))),
-                    Borrowed("</h6>"),
-                ),
-            }),
-            MarkdownNode::Code(code) => Some(match code.as_ref() {
-                ast::code::Code::Inline(_) => (Borrowed("<code>"), Borrowed("</code>")),
+            MarkdownNode::Heading(heading) => {
+                let tag = match heading.level() {
+                    ast::heading::HeadingLevel::H1 => "h1",
+                    ast::heading::HeadingLevel::H2 => "h2",
+                    ast::heading::HeadingLevel::H3 => "h3",
+                    ast::heading::HeadingLevel::H4 => "h4",
+                    ast::heading::HeadingLevel::H5 => "h5",
+                    ast::heading::HeadingLevel::H6 => "h6",
+                };
+                self.prepare_open(idx);
+                self.writer.push('<');
+                self.writer.push_str(tag);
+                Self::push_attr(
+                    self.writer,
+                    "id",
+                    self.tree[idx].id.as_deref().map(String::as_str),
+                );
+                self.writer.push('>');
+                self.write_children(idx)?;
+                self.writer.push_str("</");
+                self.writer.push_str(tag);
+                self.writer.push('>');
+                self.finish_close(idx, false, false);
+            }
+            MarkdownNode::Code(code) => match code.as_ref() {
+                ast::code::Code::Inline(_) => self.render_wrapped(idx, "<code>", "</code>")?,
                 ast::code::Code::Indented(_) => {
-                    (Borrowed("<pre><code>"), Borrowed("</code></pre>"))
+                    self.render_wrapped(idx, "<pre><code>", "</code></pre>")?
                 }
-                ast::code::Code::Fenced(code) => (
+                ast::code::Code::Fenced(code) => {
+                    self.prepare_open(idx);
+                    self.writer.push_str("<pre><code");
                     if let Some(language) = &code.language {
-                        Owned(format!(
-                            "<pre><code class=\"language-{}\">",
-                            language.split(' ').nth(0).unwrap_or("")
-                        ))
+                        self.writer.push_str(" class=\"language-");
+                        self.writer
+                            .push_str(language.split(' ').next().unwrap_or(""));
+                        self.writer.push('"');
                     } else {
-                        Borrowed("<pre><code>")
-                    },
-                    Borrowed("</code></pre>"),
-                ),
-            }),
-            MarkdownNode::Emphasis => Some((Borrowed("<em>"), Borrowed("</em>"))),
-            MarkdownNode::Strong => Some((Borrowed("<strong>"), Borrowed("</strong>"))),
-            MarkdownNode::Strikethrough => Some((Borrowed("<del>"), Borrowed("</del>"))),
-            MarkdownNode::Highlighting => Some((Borrowed("<mark>"), Borrowed("</mark>"))),
+                    }
+                    self.writer.push('>');
+                    self.write_children(idx)?;
+                    self.write_close("</code></pre>", idx);
+                }
+            },
+            MarkdownNode::Emphasis => self.render_wrapped(idx, "<em>", "</em>")?,
+            MarkdownNode::Strong => self.render_wrapped(idx, "<strong>", "</strong>")?,
+            MarkdownNode::Strikethrough => self.render_wrapped(idx, "<del>", "</del>")?,
+            MarkdownNode::Highlighting => self.render_wrapped(idx, "<mark>", "</mark>")?,
             MarkdownNode::Link(link_box) => match link_box.as_ref() {
                 link::Link::Default(link) => {
-                    let title = Self::format_title_attr(
-                        link.title.as_ref().map(|t| t.resolve(self.source)),
+                    self.prepare_open(idx);
+                    self.writer.push_str("<a href=\"");
+                    Self::push_escaped(self.writer, link.url.resolve(self.source));
+                    self.writer.push('"');
+                    Self::push_attr(
+                        self.writer,
+                        "title",
+                        link.title.as_ref().map(|title| title.resolve(self.source)),
                     );
-                    Some((
-                        Owned(format!(
-                            "<a href=\"{}\"{title}>",
-                            utils::escape_xml(link.url.resolve(self.source))
-                        )),
-                        Borrowed("</a>"),
-                    ))
+                    self.writer.push('>');
+                    self.write_children(idx)?;
+                    self.write_close("</a>", idx);
                 }
                 link::Link::Wikilink(link) => {
                     use ast::reference::Reference;
-                    let mut href = link.path.clone();
+                    self.writer.push_str("<a href=\"");
+                    Self::push_escaped(self.writer, &link.path);
                     if let Some(reference) = &link.reference {
-                        let suffix = match reference {
-                            Reference::Heading(value) => format!("#{value}"),
-                            Reference::MultiHeading(values) => format!("#{}", values.join("#")),
-                            Reference::BlockId(value) => format!("#^{value}"),
-                        };
-                        href.push_str(&suffix);
+                        self.writer.push('#');
+                        match reference {
+                            Reference::Heading(value) => Self::push_escaped(self.writer, value),
+                            Reference::MultiHeading(values) => {
+                                for (index, value) in values.iter().enumerate() {
+                                    if index != 0 {
+                                        self.writer.push('#');
+                                    }
+                                    Self::push_escaped(self.writer, value);
+                                }
+                            }
+                            Reference::BlockId(value) => {
+                                self.writer.push('^');
+                                Self::push_escaped(self.writer, value);
+                            }
+                        }
                     }
-                    let label = if let Some(text) = &link.text {
-                        text.clone()
+                    self.writer.push_str("\" class=\"internal-link\">");
+                    if let Some(text) = &link.text {
+                        Self::push_escaped(self.writer, text);
                     } else {
                         match &link.reference {
-                            Some(Reference::Heading(value)) => format!("{} > {value}", link.path),
-                            _ => link.path.clone(),
+                            Some(Reference::Heading(value)) => {
+                                Self::push_escaped(self.writer, &link.path);
+                                self.writer.push_str(" &gt; ");
+                                Self::push_escaped(self.writer, value);
+                            }
+                            _ => Self::push_escaped(self.writer, &link.path),
                         }
-                    };
-                    write!(
-                        self.writer,
-                        "<a href=\"{}\" class=\"internal-link\">{}</a>",
-                        utils::escape_xml(&href),
-                        utils::escape_xml(&label)
-                    )?;
-                    None
+                    }
+                    self.writer.push_str("</a>");
                 }
                 link::Link::Footnote(link) => {
                     let ref_count = if link.ref_count == 1 {
@@ -139,7 +154,6 @@ where
                         "<a href={href:?} id={id:?}>[{}]</a>",
                         link.index
                     )?;
-                    None
                 }
                 link::Link::FootnoteBackref(backref) => {
                     let index = if backref.index == 1 {
@@ -154,17 +168,20 @@ where
                     };
                     let href = format!("#cont-fn-ref-{}{index}", backref.footnote_label);
                     write!(self.writer, "<a href={href:?}>↩{sup}</a>")?;
-                    None
                 }
             },
             MarkdownNode::Footnote(footnote) => {
                 let id = format!("cont-fn-{}", footnote.label);
-                Some((Owned(format!("<li id={id:?}>\n")), Borrowed("\n</li>")))
+                self.prepare_open(idx);
+                write!(self.writer, "<li id={id:?}>\n")?;
+                self.write_children(idx)?;
+                self.write_close("\n</li>", idx);
             }
-            MarkdownNode::FootnoteList => Some((
-                Borrowed("<section>\n<h2>Footnotes</h2>\n<ol>\n"),
-                Borrowed("\n</ol>\n</section>"),
-            )),
+            MarkdownNode::FootnoteList => self.render_wrapped(
+                idx,
+                "<section>\n<h2>Footnotes</h2>\n<ol>\n",
+                "\n</ol>\n</section>",
+            )?,
             MarkdownNode::Image(img) => {
                 let image::Image { url, title, size } = img.as_ref();
                 let url = url.resolve(self.source);
@@ -172,26 +189,24 @@ where
                 if let Some(child_idx) = self.tree.get_first_child(idx) {
                     self.write_text(child_idx, true, true)?;
                 }
-                let size_attr = if let Some((w, h)) = size {
-                    if let Some(h) = h {
-                        format!(" width=\"{w}\" height=\"{h}\"")
-                    } else {
-                        format!(" width=\"{w}\"")
-                    }
-                } else {
-                    String::new()
-                };
-                write!(
+                self.writer.push('"');
+                Self::push_attr(
                     self.writer,
-                    "\"{}{} />",
-                    Self::format_title_attr(title.as_ref().map(|t| t.resolve(self.source))),
-                    size_attr
-                )?;
-                None
+                    "title",
+                    title.as_ref().map(|title| title.resolve(self.source)),
+                );
+                if let Some((width, height)) = size {
+                    write!(self.writer, " width=\"{width}\"")?;
+                    if let Some(height) = height {
+                        write!(self.writer, " height=\"{height}\"")?;
+                    }
+                }
+                self.writer.push_str(" />");
             }
             MarkdownNode::Emoji(emoji) => {
-                write!(self.writer, ":{}:", emoji)?;
-                None
+                self.writer.push(':');
+                self.writer.push_str(emoji);
+                self.writer.push(':');
             }
             MarkdownNode::Tag(tag) => {
                 write!(
@@ -199,121 +214,23 @@ where
                     "<a href=\"#{}\">#{tag}</a>",
                     utils::percent_encode::encode(tag, false)
                 )?;
-                None
             }
             MarkdownNode::SoftBreak => {
-                writeln!(self.writer)?;
-                None
+                self.writer.push('\n');
             }
             MarkdownNode::HardBreak => {
-                writeln!(self.writer, "<br />")?;
-                None
+                self.writer.push_str("<br />\n");
             }
             MarkdownNode::Html(html_box) => {
-                let _type = match html_box.as_ref() {
-                    html::Html::Block(t) | html::Html::Inline(t) => t,
-                };
-                match _type {
-                    html::HtmlType::JSComment(value) => {
-                        write!(self.writer, "{{/*{value}*/}}")?;
-                        None
-                    }
-                    html::HtmlType::JSExpression(value) => {
-                        write!(self.writer, "{{{value}}}")?;
-                        None
-                    }
-                    html::HtmlType::RawTextContainer(element, flag)
-                    | html::HtmlType::CanonicalBlockTag(element, flag)
-                    | html::HtmlType::GenericTag(element, flag)
-                    | html::HtmlType::Component(element, flag) => {
-                        let is_inline = self.tree[idx].body.is_inline_level();
-                        let has_raw_opening = !is_inline && self.html_block_has_raw_opening(idx);
-                        let has_raw_closing =
-                            !is_inline && self.html_block_has_raw_closing(idx, &element.name);
-                        let wrap_full = !is_inline && self.should_wrap_html_full_with_newline(idx);
-                        let open_newline = if wrap_full && !has_raw_opening {
-                            "\n"
-                        } else {
-                            ""
-                        };
-                        let close_newline = if wrap_full
-                            && !self.html_block_last_child_has_newline(idx)
-                            && !self.html_block_last_child_is_whitespace_text(idx)
-                        {
-                            "\n"
-                        } else {
-                            ""
-                        };
-                        match flag {
-                            html::Flag::Full => Some((
-                                if has_raw_opening {
-                                    Borrowed("")
-                                } else {
-                                    Owned(format!(
-                                        "<{}{}>{open_newline}",
-                                        element.name,
-                                        element.attr_str()
-                                    ))
-                                },
-                                if has_raw_closing {
-                                    Borrowed("")
-                                } else {
-                                    Owned(format!("{close_newline}</{}>", element.name))
-                                },
-                            )),
-                            html::Flag::Begin => Some(if is_inline {
-                                (
-                                    Owned(format!("<{}{}>", element.name, element.attr_str())),
-                                    Borrowed(""),
-                                )
-                            } else if has_raw_opening {
-                                (Borrowed(""), Borrowed(""))
-                            } else {
-                                let trailing_newline = if self.tree.get_first_child(idx).is_some() {
-                                    "\n"
-                                } else {
-                                    ""
-                                };
-                                (
-                                    Owned(format!(
-                                        "<{}{}>{}",
-                                        element.name,
-                                        element.attr_str(),
-                                        trailing_newline
-                                    )),
-                                    Borrowed(""),
-                                )
-                            }),
-                            html::Flag::End => Some(if is_inline {
-                                (Borrowed(""), Owned(format!("</{}>", element.name)))
-                            } else {
-                                let end_newline = if self.tree.get_first_child(idx).is_some() {
-                                    "\n"
-                                } else {
-                                    ""
-                                };
-                                (
-                                    Owned(format!("</{}>{end_newline}", element.name)),
-                                    Borrowed(""),
-                                )
-                            }),
-                            html::Flag::SelfClose => {
-                                write!(self.writer, "<{}{}/>", element.name, element.attr_str())?;
-                                None
-                            }
-                        }
-                    }
-                    _ => Some((Borrowed(""), Borrowed(""))),
+                self.render_html_node(idx, html_box)?;
+            }
+            MarkdownNode::BlockQuote => {
+                if self.tree.get_first_child(idx).is_some() {
+                    self.render_wrapped(idx, "<blockquote>\n", "\n</blockquote>")?
+                } else {
+                    self.render_wrapped(idx, "<blockquote>\n", "</blockquote>")?
                 }
             }
-            MarkdownNode::BlockQuote => Some((
-                Borrowed("<blockquote>\n"),
-                if self.tree.get_first_child(idx).is_some() {
-                    Borrowed("\n</blockquote>")
-                } else {
-                    Borrowed("</blockquote>")
-                },
-            )),
             MarkdownNode::Text(_) => {
                 let parent = self.tree.get_parent(idx);
                 let xml_escape = if let MarkdownNode::Html(h) = &self.tree[parent].body {
@@ -326,16 +243,13 @@ where
                     self.tree[parent].body.xml_escape()
                 };
                 self.write_text(idx, false, xml_escape)?;
-                None
             }
             MarkdownNode::List(list) => {
                 self.write_list(list, idx)?;
-                None
             }
             MarkdownNode::ListItem(_) => unreachable!(),
             MarkdownNode::Table(table) => {
                 self.write_table(table, idx)?;
-                None
             }
             MarkdownNode::TableHead => unreachable!(),
             MarkdownNode::TableHeadCol => unreachable!(),
@@ -353,38 +267,198 @@ where
                 } else {
                     ""
                 };
-                write!(self.writer, "{before}<hr />{after}")?;
-                None
+                self.writer.push_str(before);
+                self.writer.push_str("<hr />");
+                self.writer.push_str(after);
             }
-            MarkdownNode::FrontMatter(..) => None,
+            MarkdownNode::FrontMatter(..) => {}
             MarkdownNode::Math(math) => {
                 self.write_math(math, idx)?;
-                None
             }
             MarkdownNode::Callout(callout) => {
                 self.write_callout(callout, idx)?;
-                None
             }
             MarkdownNode::Embed(embed) => {
                 self.write_embed(embed)?;
-                None
             }
-        };
-        if let Some((open, close)) = pair {
-            self.write_open(open, idx)?;
-            if let Some(child_idx) = self.tree.get_first_child(idx) {
-                if matches!(
-                    self.tree[idx].body,
-                    MarkdownNode::Html(ref h) if matches!(h.as_ref(), html::Html::Block(..))
-                ) {
-                    self.write_html_block_children(child_idx)?;
-                } else {
-                    self.write_html(child_idx)?;
-                }
-            }
-            self.write_close(close, idx)?;
         }
         Ok(())
+    }
+    fn render_wrapped(&mut self, idx: usize, open: &str, close: &str) -> fmt::Result {
+        self.write_open(open, idx);
+        self.write_children(idx)?;
+        self.write_close(close, idx);
+        Ok(())
+    }
+    fn write_children(&mut self, idx: usize) -> fmt::Result {
+        if let Some(child_idx) = self.tree.get_first_child(idx) {
+            if matches!(
+                self.tree[idx].body,
+                MarkdownNode::Html(ref html) if matches!(html.as_ref(), html::Html::Block(..))
+            ) {
+                self.write_html_block_children(child_idx)
+            } else {
+                self.write_html(child_idx)
+            }
+        } else {
+            Ok(())
+        }
+    }
+    fn render_html_node(&mut self, idx: usize, html_node: &html::Html) -> fmt::Result {
+        let html_type = match html_node {
+            html::Html::Block(html_type) | html::Html::Inline(html_type) => html_type,
+        };
+        match html_type {
+            html::HtmlType::JSComment(value) => {
+                self.writer.push_str("{/*");
+                self.writer.push_str(value);
+                self.writer.push_str("*/}");
+            }
+            html::HtmlType::JSExpression(value) => {
+                self.writer.push('{');
+                self.writer.push_str(value);
+                self.writer.push('}');
+            }
+            html::HtmlType::RawTextContainer(element, flag)
+            | html::HtmlType::CanonicalBlockTag(element, flag)
+            | html::HtmlType::GenericTag(element, flag)
+            | html::HtmlType::Component(element, flag) => {
+                let is_inline = self.tree[idx].body.is_inline_level();
+                let has_raw_opening = !is_inline && self.html_block_has_raw_opening(idx);
+                let has_raw_closing =
+                    !is_inline && self.html_block_has_raw_closing(idx, &element.name);
+                let wrap_full = !is_inline && self.should_wrap_html_full_with_newline(idx);
+                let open_newline = wrap_full && !has_raw_opening;
+                let close_newline = wrap_full
+                    && !self.html_block_last_child_has_newline(idx)
+                    && !self.html_block_last_child_is_whitespace_text(idx);
+
+                match flag {
+                    html::Flag::Full => {
+                        self.prepare_open(idx);
+                        if !has_raw_opening {
+                            Self::push_element_open(self.writer, element);
+                            if open_newline {
+                                self.writer.push('\n');
+                            }
+                        }
+                        self.write_children(idx)?;
+                        if has_raw_closing {
+                            self.write_close("", idx);
+                        } else {
+                            if close_newline {
+                                self.writer.push('\n');
+                            }
+                            Self::push_element_close(self.writer, &element.name);
+                            self.finish_close(idx, false, false);
+                        }
+                    }
+                    html::Flag::Begin => {
+                        self.prepare_open(idx);
+                        if is_inline {
+                            Self::push_element_open(self.writer, element);
+                        } else if !has_raw_opening {
+                            Self::push_element_open(self.writer, element);
+                            if self.tree.get_first_child(idx).is_some() {
+                                self.writer.push('\n');
+                            }
+                        }
+                        self.write_children(idx)?;
+                        self.write_close("", idx);
+                    }
+                    html::Flag::End => {
+                        self.prepare_open(idx);
+                        if is_inline {
+                            self.write_children(idx)?;
+                            Self::push_element_close(self.writer, &element.name);
+                            self.finish_close(idx, false, false);
+                        } else {
+                            Self::push_element_close(self.writer, &element.name);
+                            if self.tree.get_first_child(idx).is_some() {
+                                self.writer.push('\n');
+                            }
+                            self.write_children(idx)?;
+                            self.write_close("", idx);
+                        }
+                    }
+                    html::Flag::SelfClose => {
+                        self.writer.push('<');
+                        self.writer.push_str(&element.name);
+                        Self::push_element_attrs(self.writer, element);
+                        self.writer.push_str("/>");
+                    }
+                }
+            }
+            _ => self.render_wrapped(idx, "", "")?,
+        }
+        Ok(())
+    }
+    fn push_escaped(output: &mut String, value: &str) {
+        let bytes = value.as_bytes();
+        let mut written = 0;
+        while written < bytes.len() {
+            let remaining = &bytes[written..];
+            let index = match (
+                memchr3(b'&', b'<', b'>', remaining),
+                memchr(b'"', remaining),
+            ) {
+                (Some(left), Some(right)) => written + left.min(right),
+                (Some(index), None) | (None, Some(index)) => written + index,
+                (None, None) => break,
+            };
+            output.push_str(&value[written..index]);
+            output.push_str(match bytes[index] {
+                b'&' => "&amp;",
+                b'<' => "&lt;",
+                b'>' => "&gt;",
+                b'\"' => "&quot;",
+                _ => unreachable!(),
+            });
+            written = index + 1;
+        }
+        output.push_str(&value[written..]);
+    }
+    fn push_attr(output: &mut String, name: &str, value: Option<&str>) {
+        if let Some(value) = value {
+            output.push(' ');
+            output.push_str(name);
+            output.push_str("=\"");
+            Self::push_escaped(output, value);
+            output.push('"');
+        }
+    }
+    fn push_element_attrs(output: &mut String, element: &html::Element) {
+        if let Some(props) = &element.props {
+            for (name, value) in props {
+                output.push(' ');
+                output.push_str(name);
+                if !value.is_empty() {
+                    match value {
+                        html::PropValue::Literal(value) => {
+                            output.push_str("=\"");
+                            output.push_str(value);
+                            output.push('"');
+                        }
+                        html::PropValue::Expr(value) => {
+                            output.push_str("={");
+                            output.push_str(value);
+                            output.push('}');
+                        }
+                    }
+                }
+            }
+        }
+    }
+    fn push_element_open(output: &mut String, element: &html::Element) {
+        output.push('<');
+        output.push_str(&element.name);
+        Self::push_element_attrs(output, element);
+        output.push('>');
+    }
+    fn push_element_close(output: &mut String, name: &str) {
+        output.push_str("</");
+        output.push_str(name);
+        output.push('>');
     }
     fn write_html(&mut self, idx: usize) -> fmt::Result {
         let mut next = Some(idx);
@@ -438,7 +512,7 @@ where
     fn try_write_split_paragraph(
         &mut self,
         paragraph_idx: usize,
-        id_attr: &str,
+        id: Option<&str>,
     ) -> Result<bool, fmt::Error> {
         let Some(split) = self.paragraph_split_child(paragraph_idx) else {
             return Ok(false);
@@ -457,13 +531,16 @@ where
             }
             return Ok(false);
         }
-        self.write_open(Owned(format!("<p{id_attr}>")), paragraph_idx)?;
+        self.prepare_open(paragraph_idx);
+        self.writer.push_str("<p");
+        Self::push_attr(self.writer, "id", id);
+        self.writer.push('>');
         self.write_html_until(first, split)?;
-        self.write_close(Borrowed("</p>"), paragraph_idx)?;
+        self.write_close("</p>", paragraph_idx);
         self.write_html(split)?;
         Ok(true)
     }
-    fn write_open(&mut self, open: Cow<str>, idx: usize) -> fmt::Result {
+    fn prepare_open(&mut self, idx: usize) {
         if self.tree[idx].body.is_block_level()
             && self
                 .tree
@@ -471,17 +548,26 @@ where
                 .map(|idx| self.tree[idx].body.is_inline_level())
                 .unwrap_or(false)
         {
-            writeln!(self.writer)?;
+            self.writer.push('\n');
         }
-        write!(self.writer, "{}", open)
     }
-    fn write_close(&mut self, close: Cow<str>, idx: usize) -> fmt::Result {
+    fn write_open(&mut self, open: &str, idx: usize) {
+        self.prepare_open(idx);
+        self.writer.push_str(open);
+    }
+    fn write_close(&mut self, close: &str, idx: usize) {
         let is_block = self.tree[idx].body.is_block_level();
         let non_final_block = Some(idx) != self.tree.get_last_child(self.tree.get_parent(idx));
         if close == "\n" && is_block && !non_final_block {
-            return Ok(());
+            return;
         }
-        if close.is_empty()
+        self.writer.push_str(close);
+        self.finish_close(idx, close.is_empty(), close.ends_with('\n'));
+    }
+    fn finish_close(&mut self, idx: usize, close_is_empty: bool, close_ends_with_newline: bool) {
+        let is_block = self.tree[idx].body.is_block_level();
+        let non_final_block = Some(idx) != self.tree.get_last_child(self.tree.get_parent(idx));
+        if close_is_empty
             && is_block
             && non_final_block
             && matches!(
@@ -489,15 +575,9 @@ where
                 MarkdownNode::Html(ref h) if matches!(h.as_ref(), html::Html::Block(..))
             )
         {
-            writeln!(self.writer)
-        } else if !close.is_empty() && is_block && non_final_block {
-            if close.ends_with('\n') {
-                write!(self.writer, "{}", close)
-            } else {
-                writeln!(self.writer, "{}", close)
-            }
-        } else {
-            write!(self.writer, "{}", close)
+            self.writer.push('\n');
+        } else if !close_is_empty && is_block && non_final_block && !close_ends_with_newline {
+            self.writer.push('\n');
         }
     }
     fn write_html_block_children(&mut self, first_idx: usize) -> fmt::Result {
@@ -563,11 +643,12 @@ where
     }
     fn html_block_has_raw_closing(&self, idx: usize, name: &str) -> bool {
         let mut next = self.tree.get_first_child(idx);
-        let needle = format!("</{}", name.to_ascii_lowercase());
         while let Some(child) = next {
             if let MarkdownNode::Text(text) = &self.tree[child].body {
-                let lower = text.resolve(self.source).to_ascii_lowercase();
-                if lower.contains(&needle) {
+                let text = text.resolve(self.source).as_bytes();
+                if text.windows(name.len() + 2).any(|window| {
+                    window.starts_with(b"</") && window[2..].eq_ignore_ascii_case(name.as_bytes())
+                }) {
                     return true;
                 }
             }
@@ -603,10 +684,10 @@ where
     ) -> fmt::Result {
         if let MarkdownNode::Text(text) = &self.tree[idx].body {
             let str = text.resolve(self.source);
-            if xml_escape && str.contains(['&', '<', '>', '"']) {
-                write!(self.writer, "{}", utils::escape_xml(str))?;
+            if xml_escape {
+                Self::push_escaped(self.writer, str);
             } else {
-                write!(self.writer, "{str}")?;
+                self.writer.push_str(str);
             }
         } else if let Some(child_idx) = self.tree.get_first_child(idx) {
             self.write_text(child_idx, true, self.tree[idx].body.xml_escape())?;
@@ -619,36 +700,34 @@ where
     fn write_list(&mut self, list: &list::List, idx: usize) -> fmt::Result {
         match list {
             list::List::Bullet(bullet) => {
-                self.write_open("<ul>\n".into(), idx)?;
+                self.write_open("<ul>\n", idx);
                 if let Some(child_idx) = self.tree.get_first_child(idx) {
                     self.writer_list_item(child_idx, bullet.tight, None)?;
                 }
-                self.write_close("\n</ul>".into(), idx)?;
+                self.write_close("\n</ul>", idx);
             }
             list::List::Ordered(ordered) => {
-                self.write_open(
-                    if ordered.start == 1 {
-                        Borrowed("<ol>\n")
-                    } else {
-                        Owned(format!("<ol start=\"{}\">\n", ordered.start))
-                    },
-                    idx,
-                )?;
+                self.prepare_open(idx);
+                if ordered.start == 1 {
+                    self.writer.push_str("<ol>\n");
+                } else {
+                    write!(self.writer, "<ol start=\"{}\">\n", ordered.start)?;
+                }
                 if let Some(child_idx) = self.tree.get_first_child(idx) {
                     self.writer_list_item(child_idx, ordered.tight, None)?;
                 }
-                self.write_close("\n</ol>".into(), idx)?;
+                self.write_close("\n</ol>", idx);
             }
             list::List::Task(task) => {
                 if task.obsidian {
-                    self.write_open("<ul class=\"contains-task-list\">".into(), idx)?;
+                    self.write_open("<ul class=\"contains-task-list\">", idx);
                 } else {
-                    self.write_open("<ul>\n".into(), idx)?;
+                    self.write_open("<ul>\n", idx);
                 }
                 if let Some(child_idx) = self.tree.get_first_child(idx) {
                     self.writer_list_item(child_idx, task.tight, Some(task.obsidian))?;
                 }
-                self.write_close("\n</ul>".into(), idx)?;
+                self.write_close("\n</ul>", idx);
             }
         }
         Ok(())
@@ -659,6 +738,24 @@ where
         tight: bool,
         task_list: Option<bool>,
     ) -> fmt::Result {
+        let mut next = Some(idx);
+        while let Some(idx) = next {
+            let newline = self.write_list_item_contents(idx, tight, task_list)?;
+            next = self.tree.get_next(idx);
+            if next.is_some() {
+                writeln!(self.writer, "{newline}</li>")?;
+            } else {
+                write!(self.writer, "{newline}</li>")?;
+            }
+        }
+        Ok(())
+    }
+    fn write_list_item_contents(
+        &mut self,
+        idx: usize,
+        tight: bool,
+        task_list: Option<bool>,
+    ) -> Result<&'static str, fmt::Error> {
         let newline = if !tight
             || self
                 .tree
@@ -740,13 +837,7 @@ where
                 self.write_html(first_child)?;
             }
         }
-        if let Some(next_idx) = self.tree.get_next(idx) {
-            writeln!(self.writer, "{newline}</li>")?;
-            self.writer_list_item(next_idx, tight, task_list)?;
-        } else {
-            write!(self.writer, "{newline}</li>")?;
-        }
-        Ok(())
+        Ok(newline)
     }
     fn write_table(&mut self, table: &table::Table, idx: usize) -> fmt::Result {
         writeln!(self.writer, "<table>")?;
@@ -776,7 +867,7 @@ where
             }
             writeln!(self.writer, "</tbody>")?;
         };
-        self.write_close("</table>".into(), idx)?;
+        self.write_close("</table>", idx);
         Ok(())
     }
     fn write_table_row(
@@ -822,61 +913,47 @@ where
         writeln!(self.writer, "</tr>")?;
         Ok(())
     }
-    fn format_title_attr(title: Option<&str>) -> String {
-        if let Some(title) = title {
-            format!(" title=\"{}\"", utils::escape_xml(title))
-        } else {
-            String::new()
-        }
-    }
-    fn format_id_attr(id: &Option<Box<String>>) -> String {
-        if let Some(id) = id {
-            format!(" id=\"{}\"", utils::escape_xml(id.as_str()))
-        } else {
-            String::new()
-        }
-    }
-    fn callout_type_name(callout: &callout::Callout) -> String {
+    fn callout_type_name(callout: &callout::Callout) -> &str {
         match &callout._type {
-            callout::CalloutType::Note => "note".to_string(),
-            callout::CalloutType::Abstract => "abstract".to_string(),
-            callout::CalloutType::Info => "info".to_string(),
-            callout::CalloutType::Todo => "todo".to_string(),
-            callout::CalloutType::Tip => "tip".to_string(),
-            callout::CalloutType::Success => "success".to_string(),
-            callout::CalloutType::Question => "question".to_string(),
-            callout::CalloutType::Warning => "warning".to_string(),
-            callout::CalloutType::Failure => "failure".to_string(),
-            callout::CalloutType::Danger => "danger".to_string(),
-            callout::CalloutType::Bug => "bug".to_string(),
-            callout::CalloutType::Example => "example".to_string(),
-            callout::CalloutType::Quote => "quote".to_string(),
-            callout::CalloutType::Custom(v) => v.to_string(),
+            callout::CalloutType::Note => "note",
+            callout::CalloutType::Abstract => "abstract",
+            callout::CalloutType::Info => "info",
+            callout::CalloutType::Todo => "todo",
+            callout::CalloutType::Tip => "tip",
+            callout::CalloutType::Success => "success",
+            callout::CalloutType::Question => "question",
+            callout::CalloutType::Warning => "warning",
+            callout::CalloutType::Failure => "failure",
+            callout::CalloutType::Danger => "danger",
+            callout::CalloutType::Bug => "bug",
+            callout::CalloutType::Example => "example",
+            callout::CalloutType::Quote => "quote",
+            callout::CalloutType::Custom(value) => value,
         }
     }
-    fn callout_default_title(callout: &callout::Callout) -> String {
+    fn callout_default_title(callout: &callout::Callout) -> Cow<'_, str> {
         match &callout._type {
-            callout::CalloutType::Note => "Note".to_string(),
-            callout::CalloutType::Abstract => "Abstract".to_string(),
-            callout::CalloutType::Info => "Info".to_string(),
-            callout::CalloutType::Todo => "Todo".to_string(),
-            callout::CalloutType::Tip => "Tip".to_string(),
-            callout::CalloutType::Success => "Success".to_string(),
-            callout::CalloutType::Question => "Question".to_string(),
-            callout::CalloutType::Warning => "Warning".to_string(),
-            callout::CalloutType::Failure => "Failure".to_string(),
-            callout::CalloutType::Danger => "Danger".to_string(),
-            callout::CalloutType::Bug => "Bug".to_string(),
-            callout::CalloutType::Example => "Example".to_string(),
-            callout::CalloutType::Quote => "Quote".to_string(),
+            callout::CalloutType::Note => Borrowed("Note"),
+            callout::CalloutType::Abstract => Borrowed("Abstract"),
+            callout::CalloutType::Info => Borrowed("Info"),
+            callout::CalloutType::Todo => Borrowed("Todo"),
+            callout::CalloutType::Tip => Borrowed("Tip"),
+            callout::CalloutType::Success => Borrowed("Success"),
+            callout::CalloutType::Question => Borrowed("Question"),
+            callout::CalloutType::Warning => Borrowed("Warning"),
+            callout::CalloutType::Failure => Borrowed("Failure"),
+            callout::CalloutType::Danger => Borrowed("Danger"),
+            callout::CalloutType::Bug => Borrowed("Bug"),
+            callout::CalloutType::Example => Borrowed("Example"),
+            callout::CalloutType::Quote => Borrowed("Quote"),
             callout::CalloutType::Custom(v) => {
                 let mut chars = v.chars();
                 if let Some(first) = chars.next() {
                     let mut title = first.to_uppercase().to_string();
                     title.push_str(chars.as_str());
-                    title
+                    Owned(title)
                 } else {
-                    String::new()
+                    Borrowed("")
                 }
             }
         }
@@ -902,108 +979,108 @@ where
         Ok(())
     }
     fn write_callout(&mut self, callout: &callout::Callout, idx: usize) -> fmt::Result {
-        let mut class = String::from("callout");
-        if let Some(foldable) = callout.foldable {
-            class.push_str(" is-collapsible");
-            if !foldable {
-                class.push_str(" is-collapsed");
-            }
-        }
+        let class = match callout.foldable {
+            None => "callout",
+            Some(true) => "callout is-collapsible",
+            Some(false) => "callout is-collapsible is-collapsed",
+        };
         let typ = Self::callout_type_name(callout);
-        let title = callout
-            .title
-            .clone()
-            .unwrap_or_else(|| Self::callout_default_title(callout));
-        writeln!(
-            self.writer,
-            "<div class=\"{}\" data-callout=\"{}\">",
-            class,
-            utils::escape_xml(&typ)
-        )?;
-        writeln!(
-            self.writer,
-            "<div class=\"callout-title\">{}</div>",
-            utils::escape_xml(&title)
-        )?;
-        writeln!(self.writer, "<div class=\"callout-content\">")?;
+        let title = match callout.title.as_deref() {
+            Some(title) => Borrowed(title),
+            None => Self::callout_default_title(callout),
+        };
+        self.writer.push_str("<div class=\"");
+        self.writer.push_str(class);
+        self.writer.push_str("\" data-callout=\"");
+        Self::push_escaped(self.writer, typ);
+        self.writer.push_str("\">\n<div class=\"callout-title\">");
+        Self::push_escaped(self.writer, &title);
+        self.writer
+            .push_str("</div>\n<div class=\"callout-content\">\n");
         if let Some(child_idx) = self.tree.get_first_child(idx) {
             self.write_html(child_idx)?;
         }
-        write!(self.writer, "\n</div>\n</div>")?;
+        self.writer.push_str("\n</div>\n</div>");
         Ok(())
     }
     fn write_embed(&mut self, embed: &ast::embed::Embed) -> fmt::Result {
         let mut src = embed.path.clone();
         if let Some(reference) = &embed.reference {
             use ast::reference::Reference;
-            let suffix = match reference {
-                Reference::Heading(v) => format!("#{v}"),
-                Reference::MultiHeading(vs) => format!("#{}", vs.join("#")),
-                Reference::BlockId(v) => format!("#^{v}"),
-            };
-            src.push_str(&suffix);
+            src.push('#');
+            match reference {
+                Reference::Heading(value) => src.push_str(value),
+                Reference::MultiHeading(values) => {
+                    for (index, value) in values.iter().enumerate() {
+                        if index != 0 {
+                            src.push('#');
+                        }
+                        src.push_str(value);
+                    }
+                }
+                Reference::BlockId(value) => {
+                    src.push('^');
+                    src.push_str(value);
+                }
+            }
         }
         if let Some(attrs) = &embed.attrs {
-            let attrs = attrs
-                .iter()
-                .map(|(k, v)| {
-                    if v.is_empty() {
-                        k.clone()
-                    } else {
-                        format!("{k}={v}")
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("&");
             if !attrs.is_empty() {
                 if src.contains('#') {
                     src.push('&');
                 } else {
                     src.push('#');
                 }
-                src.push_str(&attrs);
+                for (index, (key, value)) in attrs.iter().enumerate() {
+                    if index != 0 {
+                        src.push('&');
+                    }
+                    src.push_str(key);
+                    if !value.is_empty() {
+                        src.push('=');
+                        src.push_str(value);
+                    }
+                }
             }
         }
-        let src_escaped = utils::escape_xml(&src);
-        let path_escaped = utils::escape_xml(&embed.path);
-        let ext = embed
-            .path
-            .rsplit('.')
-            .next()
-            .map(|s| s.to_ascii_lowercase())
-            .unwrap_or_default();
-        if matches!(
-            ext.as_str(),
-            "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp"
-        ) {
-            let size_attr = if let Some((w, h)) = embed.size {
-                if let Some(h) = h {
-                    format!(" width=\"{w}\" height=\"{h}\"")
-                } else {
-                    format!(" width=\"{w}\"")
+        let ext = embed.path.rsplit('.').next().unwrap_or_default();
+        let is_ext = |candidate: &str| ext.eq_ignore_ascii_case(candidate);
+        if ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"]
+            .iter()
+            .any(|candidate| is_ext(candidate))
+        {
+            self.writer.push_str("<img src=\"");
+            Self::push_escaped(self.writer, &src);
+            self.writer.push_str("\" alt=\"");
+            Self::push_escaped(self.writer, &embed.path);
+            self.writer.push('"');
+            if let Some((width, height)) = embed.size {
+                write!(self.writer, " width=\"{width}\"")?;
+                if let Some(height) = height {
+                    write!(self.writer, " height=\"{height}\"")?;
                 }
-            } else {
-                String::new()
-            };
-            write!(
-                self.writer,
-                "<img src=\"{}\" alt=\"{}\"{} />",
-                src_escaped, path_escaped, size_attr
-            )
-        } else if matches!(ext.as_str(), "mp3" | "wav" | "ogg" | "m4a" | "flac") {
-            write!(
-                self.writer,
-                "<audio controls src=\"{}\"></audio>",
-                src_escaped
-            )
-        } else if ext == "pdf" {
-            write!(self.writer, "<iframe src=\"{}\"></iframe>", src_escaped)
+            }
+            self.writer.push_str(" />");
+            Ok(())
+        } else if ["mp3", "wav", "ogg", "m4a", "flac"]
+            .iter()
+            .any(|candidate| is_ext(candidate))
+        {
+            self.writer.push_str("<audio controls src=\"");
+            Self::push_escaped(self.writer, &src);
+            self.writer.push_str("\"></audio>");
+            Ok(())
+        } else if is_ext("pdf") {
+            self.writer.push_str("<iframe src=\"");
+            Self::push_escaped(self.writer, &src);
+            self.writer.push_str("\"></iframe>");
+            Ok(())
         } else {
-            write!(
-                self.writer,
-                "<span class=\"internal-embed\" src=\"{}\"></span>",
-                src_escaped
-            )
+            self.writer
+                .push_str("<span class=\"internal-embed\" src=\"");
+            Self::push_escaped(self.writer, &src);
+            self.writer.push_str("\"></span>");
+            Ok(())
         }
     }
     fn is_first_layer(&self, idx: usize) -> bool {

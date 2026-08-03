@@ -266,21 +266,4 @@ impl Element {
             }),
         }
     }
-    #[cfg_attr(not(test), cfg(feature = "html"))]
-    pub(crate) fn attr_str(&self) -> String {
-        let mut str = String::new();
-        if let Some(props) = &self.props {
-            for (name, value) in props.iter() {
-                if value.is_empty() {
-                    str.push_str(&format!(" {name}"))
-                } else {
-                    match value {
-                        PropValue::Literal(v) => str.push_str(&format!(" {name}=\"{v}\"")),
-                        PropValue::Expr(v) => str.push_str(&format!(" {name}={{{v}}}")),
-                    }
-                }
-            }
-        }
-        str
-    }
 }
