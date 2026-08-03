@@ -220,8 +220,8 @@ struct WasmParserOptions {
     gfm_extended_autolink: bool,
     /// Enable Obsidian Flavored Markdown mode.
     obsidian_flavored: bool,
-    /// Enable MDX component parsing behavior.
-    mdx_component: bool,
+    /// Enable JSX Like component parsing behavior.
+    jsx_like_component: bool,
     /// Enable CJK autocorrect.
     cjk_autocorrect: bool,
     /// Enable smart punctuation transforms.
@@ -254,8 +254,8 @@ fn build_parser_options(input: Option<WasmParserOptions>) -> (ParserOptions, Par
     if input.obsidian_flavored {
         options = options.enabled_ofm();
     }
-    if input.mdx_component {
-        options = options.enabled_mdx_component();
+    if input.jsx_like_component {
+        options = options.enabled_jsx_like_component();
     }
     if input.cjk_autocorrect {
         options = options.enabled_cjk_autocorrect();

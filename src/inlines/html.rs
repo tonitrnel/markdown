@@ -207,7 +207,7 @@ fn scan_js_expression(ctx: &ProcessCtx) -> Option<(usize, String)> {
 }
 
 pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
-    if ctx.parser.options.mdx_component {
+    if ctx.parser.options.jsx_like_component {
         if let Some((len, value)) = scan_js_comment(ctx) {
             let start_location = ctx.line.cursor_or_end() as u32;
             ctx.line.skip(len);
@@ -326,9 +326,11 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
                     let probe_raw = raw.replace(['\n', '\r'], " ");
                     let mut scanner = crate::scanner::Scanner::new(&probe_raw);
                     if let Some(mut probe_span) = crate::span::Span::extract(&mut scanner) {
-                        if let Some((_, len, _)) =
-                            scan_html_type(&mut probe_span, true, ctx.parser.options.mdx_component)
-                        {
+                        if let Some((_, len, _)) = scan_html_type(
+                            &mut probe_span,
+                            true,
+                            ctx.parser.options.jsx_like_component,
+                        ) {
                             if len == probe_raw.len() {
                                 let start_location = ctx.line.cursor_or_end() as u32;
                                 ctx.line.skip(probe_len);
@@ -363,12 +365,13 @@ pub(super) fn process(ctx: &mut ProcessCtx) -> bool {
         None => return false,
     };
     let start_location = current_span.cursor_or_end() as u32;
-    let (_, len, html_type) =
-        if let Some(html_type) = scan_html_type(current_span, true, parser.options.mdx_component) {
-            html_type
-        } else {
-            return false;
-        };
+    let (_, len, html_type) = if let Some(html_type) =
+        scan_html_type(current_span, true, parser.options.jsx_like_component)
+    {
+        html_type
+    } else {
+        return false;
+    };
     // Inline comments should only be accepted when fully matched by
     // `scan_html_comment_len`; avoid treating bare `<!--` as raw HTML.
     if matches!(html_type, html::HtmlType::HtmlComment) && len <= 4 {

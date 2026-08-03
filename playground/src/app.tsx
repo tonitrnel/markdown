@@ -59,9 +59,9 @@ const OPTIONS: OptionConfig[] = [
     description: 'Enable OFM extensions',
   },
   {
-    key: 'mdx_component',
-    label: 'MDX Component',
-    description: 'Support MDX components',
+    key: 'jsx_like_component',
+    label: 'JSX Like Component',
+    description: 'Support JSX Like components',
   },
   {
     key: 'cjk_autocorrect',

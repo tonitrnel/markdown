@@ -1692,7 +1692,7 @@ git commit -m "feat!: switch public parser and bindings to compact v2 engine"
 
 - [ ] **步骤 1：添加分派等价性测试**
 
-对于每个特殊首字节（`#`、反引号、`~`、`-`、`*`、`_`、`+`、`=`、`<`、`>`、`|`、`:`、`[`、数字），在默认、GFM、OFM 和 MDX 选项，以及 Paragraph/非 Paragraph 上下文中，将优化后的分派器与仅供测试使用的穷举分派器进行比较。
+对于每个特殊首字节（`#`、反引号、`~`、`-`、`*`、`_`、`+`、`=`、`<`、`>`、`|`、`:`、`[`、数字），在默认、GFM、OFM 和 JSXLike 选项，以及 Paragraph/非 Paragraph 上下文中，将优化后的分派器与仅供测试使用的穷举分派器进行比较。
 
 - [ ] **步骤 2：实现 `LineHead`**
 

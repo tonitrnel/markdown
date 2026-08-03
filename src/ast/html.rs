@@ -78,7 +78,7 @@ pub enum HtmlType {
     /// 用途：处理 `pre/script/style/textarea` 这类 raw-text 容器标签。
     /// 对应：CommonMark HTML block type 1。
     ///
-    /// - Start condition: line begins with the string`<pre`,`<script`,`<style`, or`<textarea`(case-insensitive), followed by a space, a tab, the string`>`, or the end of the line.  
+    /// - Start condition: line begins with the string`<pre`,`<script`,`<style`, or`<textarea`(case-insensitive), followed by a space, a tab, the string`>`, or the end of the line.
     /// - End condition: line contains an end tag`</pre>`,`</script>`,`</style>`, or`</textarea>`(case-insensitive; it need not match the start tag).
     RawTextContainer(Element, Flag),
 
@@ -114,7 +114,7 @@ pub enum HtmlType {
     /// 对应：CommonMark HTML block type 6。
     /// 语义：支持 `Begin/End/Full/SelfClose`，用于在块级容器中做配对与闭合管理。
     ///
-    /// - Start condition: line begins with the string `<` or `</` followed by one of the strings (case-insensitive):  
+    /// - Start condition: line begins with the string `<` or `</` followed by one of the strings (case-insensitive):
     ///     `address`,`article`,`aside`,`base`,
     ///     `basefont`,`blockquote`,`body`,
     ///     `caption`,`center`,`col`,`colgroup`,
@@ -144,7 +144,7 @@ pub enum HtmlType {
     GenericTag(Element, Flag),
     /// 用途: 自定义组件标签
     /// 对应: JSX 组件, 扩展了“同容器配对闭合”规则
-    /// 语义：常用于最小 MDX 场景（例如 `<Button>...</Button>`）的 Begin/Full 标记。
+    /// 语义：常用于最小 JSX Like 场景（例如 `<Button>...</Button>`）的 Begin/Full 标记。
     Component(Element, Flag),
     /// 用途: JS 风格的注释（`{/* ... */}`）
     JSComment(String),

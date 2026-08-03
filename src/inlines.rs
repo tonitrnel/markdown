@@ -79,7 +79,7 @@ pub(super) fn process<'input>(
         special_table[b'\'' as usize] = true;
         special_table[b'"' as usize] = true;
     }
-    if ctx.parser.options.mdx_component {
+    if ctx.parser.options.jsx_like_component {
         special_table[b'{' as usize] = true;
     }
 
@@ -186,7 +186,7 @@ pub(super) fn process<'input>(
             {
                 link::process_gfm_autolink(&mut ctx)
             }
-            b'{' if ctx.parser.options.mdx_component => html::process(&mut ctx),
+            b'{' if ctx.parser.options.jsx_like_component => html::process(&mut ctx),
             // Math ($)
             0x24 if !ctx.parser.options.default_flavored => {
                 if let Some(current_span) = ctx.line.current_span() {

@@ -117,8 +117,8 @@ export interface ParserOptions {
     readonly gfm_extended_autolink?: boolean
     /** 启用 Obsidian Flavored Markdown 模式 / Enable Obsidian Flavored Markdown mode */
     readonly obsidian_flavored?: boolean
-    /** 启用 MDX 组件解析（解析 HTML 时支持 JSX 语法）/ Enable MDX component parsing (support JSX syntax when parsing HTML) */
-    readonly mdx_component?: boolean
+    /** 启用 JSX Like 组件解析（解析 HTML 时支持 JSX 语法）/ Enable JSX Like component parsing (support JSX syntax when parsing HTML) */
+    readonly jsx_like_component?: boolean
     /** 启用 CJK 自动纠正 / Enable CJK autocorrect */
     readonly cjk_autocorrect?: boolean
     /** 启用智能标点转换 / Enable smart punctuation transforms */
@@ -165,7 +165,7 @@ export interface Node{
     /**
      * 块标识符，仅 block 节点有此属性
      * Block identifier, only block nodes have this property
-     * 
+     *
      * @see https://help.obsidian.md/Linking+notes+and+files/Internal+links#Link+to+a+block+in+a+note
      */
     readonly id: string | undefined

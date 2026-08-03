@@ -52,7 +52,7 @@ npm run preview
 - **GitHub Flavored**: Enable GFM extensions (tables, strikethrough, task lists)
 - **GFM Autolink**: Extended autolink support
 - **Obsidian Flavored**: Enable OFM extensions (wikilinks, callouts, embeds)
-- **MDX Component**: Support MDX components
+- **JSX Like Component**: Support like JSX components
 - **CJK Autocorrect**: Auto-correct CJK spacing
 - **Smart Punctuation**: Convert quotes and dashes to typographic variants
 - **Normalize Chinese Punctuation**: Normalize Chinese punctuation marks

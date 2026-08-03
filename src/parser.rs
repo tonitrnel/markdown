@@ -47,7 +47,7 @@ pub struct ParserOptions {
     pub(crate) github_flavored: bool,
     pub(crate) gfm_extended_autolink: bool,
     pub(crate) obsidian_flavored: bool,
-    pub(crate) mdx_component: bool,
+    pub(crate) jsx_like_component: bool,
     pub(crate) cjk_autocorrect: bool,
     pub(crate) smart_punctuation: bool,
     pub(crate) normalize_chinese_punctuation: bool,
@@ -80,9 +80,9 @@ impl ParserOptions {
             ..self
         }
     }
-    pub fn enabled_mdx_component(self) -> Self {
+    pub fn enabled_jsx_like_component(self) -> Self {
         Self {
-            mdx_component: true,
+            jsx_like_component: true,
             ..self
         }
     }
@@ -116,7 +116,7 @@ impl ParserOptions {
             github_flavored: true,
             gfm_extended_autolink: true,
             obsidian_flavored: true,
-            mdx_component: true,
+            jsx_like_component: true,
             cjk_autocorrect: true,
             smart_punctuation: true,
             normalize_chinese_punctuation: true,
@@ -1009,7 +1009,7 @@ impl<'input> Parser<'input> {
                             crate::blocks::html::scan_html_type(
                                 &mut scan_line,
                                 false,
-                                self.options.mdx_component
+                                self.options.jsx_like_component
                             ),
                             Some((
                                 _,

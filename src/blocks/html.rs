@@ -9,7 +9,7 @@ const HTML_TAGS: [&str; 62] = [
     "base", "basefont", "blockquote", "body",
     "caption", "center", "col", "colgroup",
     "dd", "details", "dialog", "dir", "div", "dl", "dt",
-    "fieldset", "figcaption", "figure", "footer", "form", "frame", "frameset", 
+    "fieldset", "figcaption", "figure", "footer", "form", "frame", "frameset",
     "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hr", "html",
     "iframe",
     "legend", "li", "link",
@@ -65,7 +65,7 @@ fn is_html_tag(tag: &[u8]) -> bool {
 pub(crate) fn scan_html_type(
     span: &mut Span,
     is_inline: bool,
-    mdx_components: bool,
+    jsx_like_components: bool,
 ) -> Option<(usize, usize, html::HtmlType)> {
     let offset = 0;
     let get = |i: usize| -> Option<u8> { span.get(offset + i) };
@@ -173,7 +173,7 @@ pub(crate) fn scan_html_type(
 
                 if let Some((element, end, self_close)) = scanners::scan_html_start(span) {
                     if element.name.contains('.')
-                        && !(mdx_components && is_component_name(&element.name))
+                        && !(jsx_like_components && is_component_name(&element.name))
                     {
                         return None;
                     }
@@ -181,13 +181,13 @@ pub(crate) fn scan_html_type(
                         return None;
                     }
                     let is_component = is_component_name(&element.name);
-                    if mdx_components && !is_component {
+                    if jsx_like_components && !is_component {
                         return None;
                     }
                     return Some((
                         0,
                         end,
-                        if mdx_components && is_component {
+                        if jsx_like_components && is_component {
                             html::HtmlType::Component(
                                 element,
                                 if self_close {
@@ -244,18 +244,18 @@ pub(crate) fn scan_html_type(
                     )
                 } else if let Some((element, end, self_close)) = result {
                     if element.name.contains('.')
-                        && !(mdx_components && is_component_name(&element.name))
+                        && !(jsx_like_components && is_component_name(&element.name))
                     {
                         return None;
                     }
                     let is_component = is_component_name(&element.name);
-                    if mdx_components && !is_component {
+                    if jsx_like_components && !is_component {
                         return None;
                     }
                     (
                         0,
                         end,
-                        if mdx_components && is_component {
+                        if jsx_like_components && is_component {
                             html::HtmlType::Component(
                                 element,
                                 if self_close {
@@ -297,17 +297,19 @@ pub(crate) fn scan_html_type(
                         ),
                     ))
                 } else {
-                    if result.0.contains('.') && !(mdx_components && is_component_name(&result.0)) {
+                    if result.0.contains('.')
+                        && !(jsx_like_components && is_component_name(&result.0))
+                    {
                         return None;
                     }
                     let is_component = is_component_name(&result.0);
-                    if mdx_components && !is_component {
+                    if jsx_like_components && !is_component {
                         return None;
                     }
                     Some((
                         0,
                         result.1,
-                        if mdx_components && is_component {
+                        if jsx_like_components && is_component {
                             html::HtmlType::Component(html::Element::new(result.0), html::Flag::End)
                         } else {
                             html::HtmlType::GenericTag(
@@ -345,17 +347,17 @@ pub(crate) fn scan_html_type(
                     html::HtmlType::CanonicalBlockTag(html::Element::new(name), html::Flag::End),
                 ))
             } else if let Some((name, end)) = result {
-                if name.contains('.') && !(mdx_components && is_component_name(&name)) {
+                if name.contains('.') && !(jsx_like_components && is_component_name(&name)) {
                     return None;
                 }
                 let is_component = is_component_name(&name);
-                if mdx_components && !is_component {
+                if jsx_like_components && !is_component {
                     return None;
                 }
                 Some((
                     last,
                     end,
-                    if mdx_components && is_component {
+                    if jsx_like_components && is_component {
                         html::HtmlType::Component(html::Element::new(name), html::Flag::End)
                     } else {
                         html::HtmlType::GenericTag(html::Element::new(name), html::Flag::End)
@@ -561,7 +563,7 @@ impl BlockStrategy for html::Html {
         }
         let mut scan_line = line.slice(indent_len, line.len());
         let (start, len, block_type) = if let Some(block_type) =
-            scan_html_type(&mut scan_line, false, parser.options.mdx_component)
+            scan_html_type(&mut scan_line, false, parser.options.jsx_like_component)
         {
             block_type
         } else {
@@ -1291,8 +1293,9 @@ return 0;
     #[test]
     fn case_7() {
         let text = r#"<Button>Click Me 1</Button>"#.trim();
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_mdx_component())
-            .parse();
+        let ast =
+            Parser::new_with_options(text, ParserOptions::default().enabled_jsx_like_component())
+                .parse();
         println!("AST:\n{ast:?}");
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(ast[1].body, MarkdownNode::Paragraph);
@@ -1315,7 +1318,7 @@ return 0;
     }
 
     #[test]
-    fn mdx_components_mode_does_not_change_default_type7_behavior() {
+    fn jsx_like_components_mode_does_not_change_default_type7_behavior() {
         let text = "<foo-bar>\ntext\n</foo-bar>";
         let ast = Parser::new(text).parse();
         assert!(if let MarkdownNode::Html(h) = &ast[1].body {
@@ -1329,10 +1332,11 @@ return 0;
     }
 
     #[test]
-    fn mdx_components_mode_limits_block_type7_to_component_names() {
+    fn jsx_like_components_mode_limits_block_type7_to_component_names() {
         let text = "<foo-bar>\ntext\n</foo-bar>";
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_mdx_component())
-            .parse();
+        let ast =
+            Parser::new_with_options(text, ParserOptions::default().enabled_jsx_like_component())
+                .parse();
         assert_eq!(ast[1].body, MarkdownNode::Paragraph);
     }
     #[test]
@@ -1388,15 +1392,15 @@ _world_.
             ))))
         );
 
-        let component_mdx = Parser::new_with_options(
+        let component_jsx_like = Parser::new_with_options(
             "<Button>Click</Button>",
-            ParserOptions::default().enabled_mdx_component(),
+            ParserOptions::default().enabled_jsx_like_component(),
         )
         .parse();
-        assert_eq!(component_mdx[0].body, MarkdownNode::Document);
-        assert_eq!(component_mdx[1].body, MarkdownNode::Paragraph);
+        assert_eq!(component_jsx_like[0].body, MarkdownNode::Document);
+        assert_eq!(component_jsx_like[1].body, MarkdownNode::Paragraph);
         assert_eq!(
-            component_mdx[2].body,
+            component_jsx_like[2].body,
             MarkdownNode::Html(Box::new(html::Html::Inline(html::HtmlType::Component(
                 html::Element {
                     name: "Button".to_string(),
@@ -1423,7 +1427,7 @@ _world_.
   <CommentsComposer/>      <!-- 输入框 -->
 </Comments>
 "#,
-            ParserOptions::default().enabled_mdx_component(),
+            ParserOptions::default().enabled_jsx_like_component(),
         )
         .parse();
         println!("AST:\n{ast:?}");
@@ -1513,10 +1517,10 @@ _world_.
     }
 
     #[test]
-    fn mdx_js_expression_in_component() {
+    fn jsx_like_js_expression_in_component() {
         let ast = Parser::new_with_options(
             "<Button>{(x: Foo) => ({ value: x })}</Button>",
-            ParserOptions::default().enabled_mdx_component(),
+            ParserOptions::default().enabled_jsx_like_component(),
         )
         .parse();
         println!("AST:\n{ast:?}");
@@ -1541,10 +1545,10 @@ _world_.
     }
 
     #[test]
-    fn mdx_js_comment_in_component() {
+    fn jsx_like_js_comment_in_component() {
         let ast = Parser::new_with_options(
             "<Button>{/* comment */}</Button>",
-            ParserOptions::default().enabled_mdx_component(),
+            ParserOptions::default().enabled_jsx_like_component(),
         )
         .parse();
         println!("AST:\n{ast:?}");
@@ -1572,7 +1576,7 @@ _world_.
     fn attrs_js_expression() {
         let ast = Parser::new_with_options(
             "<NestedList items={['A', ['B', 'C'], 'D']} />",
-            ParserOptions::default().enabled_mdx_component(),
+            ParserOptions::default().enabled_jsx_like_component(),
         )
         .parse();
         println!("AST:\n{ast:?}");
@@ -1596,7 +1600,7 @@ _world_.
     fn component_name_with_dot() {
         let ast = Parser::new_with_options(
             "<UI.Button>Click</UI.Button>",
-            ParserOptions::default().enabled_mdx_component(),
+            ParserOptions::default().enabled_jsx_like_component(),
         )
         .parse();
         println!("AST:\n{ast:?}");
