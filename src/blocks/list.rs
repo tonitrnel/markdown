@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn test_nested_blockquote_list_continuation() {
         let input = "   > > 1.  one\n>>\n>>     two";
-        let html = Parser::new(input).parse().to_html();
+        let html = Parser::new(input).parse().unwrap().to_html();
         assert_eq!(
             html,
             "<blockquote>\n<blockquote>\n<ol>\n<li>\n<p>one</p>\n<p>two</p>\n</li>\n</ol>\n</blockquote>\n</blockquote>"
@@ -465,7 +465,7 @@ mod tests {
     #[test]
     fn test_case_326_loose_list() {
         let input = "* foo\n  * bar\n\n  baz";
-        let html = Parser::new(input).parse().to_html();
+        let html = Parser::new(input).parse().unwrap().to_html();
         assert_eq!(
             html,
             "<ul>\n<li>\n<p>foo</p>\n<ul>\n<li>bar</li>\n</ul>\n<p>baz</p>\n</li>\n</ul>"

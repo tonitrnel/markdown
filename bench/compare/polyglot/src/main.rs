@@ -37,7 +37,7 @@ fn main() {
         || {
             let parser = Parser::new_with_options(&text, ParserOptions::default().enabled_ofm());
             let ast = parser.parse();
-            black_box(ast);
+            black_box(ast).expect("unexpected error: parsing failed.");
         },
     );
 
@@ -46,7 +46,7 @@ fn main() {
         iterations,
         || {
             let parser = Parser::new_with_options(&text, ParserOptions::default().enabled_ofm());
-            let ast = parser.parse();
+            let ast = parser.parse().expect("parsing failed");
             let html = ast.to_html();
             black_box(html);
         },

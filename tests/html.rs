@@ -16,7 +16,7 @@ _world_.
 <p><em>world</em>.
 </pre></p>
 </td></tr></table>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -39,7 +39,7 @@ okay."#;
   </tr>
 </table>
 <p>okay.</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -51,7 +51,7 @@ fn case_150() {
     let output = r#" <div>
   *hello*
          <foo><a>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -61,7 +61,7 @@ fn case_151() {
 *foo*"#;
     let output = r#"</div>
 *foo*"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -75,7 +75,7 @@ fn case_152() {
     let output = r#"<DIV CLASS="foo">
 <p><em>Markdown</em></p>
 </DIV>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -87,7 +87,7 @@ fn case_153() {
     let output = r#"<div id="foo"
   class="bar">
 </div>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -99,7 +99,7 @@ fn case_154() {
     let output = r#"<div id="foo" class="bar
   baz">
 </div>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -112,7 +112,7 @@ fn case_155() {
     let output = r#"<div>
 *foo*
 <p><em>bar</em></p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -122,7 +122,7 @@ fn case_156() {
 *hi*"#;
     let output = r#"<div id="foo"
 *hi*"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -132,7 +132,7 @@ fn case_157() {
 foo"#;
     let output = r#"<div class
 foo"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -142,7 +142,7 @@ fn case_158() {
 *foo*"#;
     let output = r#"<div *???-&&&-<---
 *foo*"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -150,7 +150,7 @@ fn case_158() {
 fn case_159() {
     let input = r#"<div><a href="bar">*foo*</a></div>"#;
     let output = r#"<div><a href="bar">*foo*</a></div>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -162,7 +162,7 @@ foo
     let output = r#"<table><tr><td>
 foo
 </td></tr></table>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -176,7 +176,7 @@ int x = 33;
 ``` c
 int x = 33;
 ```"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -188,7 +188,7 @@ fn case_162() {
     let output = r#"<a href="foo">
 *bar*
 </a>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -200,7 +200,7 @@ fn case_163() {
     let output = r#"<Warning>
 *bar*
 </Warning>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -212,7 +212,7 @@ fn case_164() {
     let output = r#"<i class="foo">
 *bar*
 </i>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -222,7 +222,7 @@ fn case_165() {
 *bar*"#;
     let output = r#"</ins>
 *bar*"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -234,7 +234,7 @@ fn case_166() {
     let output = r#"<del>
 *foo*
 </del>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -248,7 +248,7 @@ fn case_167() {
     let output = r#"<del>
 <p><em>foo</em></p>
 </del>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -256,7 +256,7 @@ fn case_167() {
 fn case_168() {
     let input = r#"<del>*foo*</del>"#;
     let output = r#"<p><del><em>foo</em></del></p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -276,7 +276,7 @@ main :: IO ()
 main = print $ parseTags tags
 </code></pre>
 <p>okay</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -294,7 +294,7 @@ okay"#;
 document.getElementById("demo").innerHTML = "Hello JavaScript!";
 </script>
 <p>okay</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -314,7 +314,7 @@ _bar_
 _bar_
 
 </textarea>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -334,7 +334,7 @@ h1 {color:red;}
 p {color:blue;}
 </style>
 <p>okay</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -348,7 +348,7 @@ foo"#;
   type="text/css">
 
 foo"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -363,7 +363,7 @@ bar"#;
 foo
 </blockquote>
 <p>bar</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -377,7 +377,7 @@ fn case_175() {
 </li>
 <li>foo</li>
 </ul>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -387,7 +387,7 @@ fn case_176() {
 *foo*"#;
     let output = r#"<style>p{color:red;}</style>
 <p><em>foo</em></p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -397,7 +397,7 @@ fn case_177() {
 *baz*"#;
     let output = r#"<!-- foo -->*bar*
 <p><em>baz</em></p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -409,7 +409,7 @@ foo
     let output = r#"<script>
 foo
 </script>1. *bar*"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -425,7 +425,7 @@ okay"#;
 bar
    baz -->
 <p>okay</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -443,7 +443,7 @@ okay"#;
 
 ?>
 <p>okay</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -451,7 +451,7 @@ okay"#;
 fn case_181() {
     let input = r#"<!DOCTYPE html>"#;
     let output = r#"<!DOCTYPE html>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -483,7 +483,7 @@ function matchwo(a,b)
 }
 ]]>
 <p>okay</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -495,7 +495,7 @@ fn case_183() {
     let output = r#"  <!-- foo -->
 <pre><code>&lt;!-- foo --&gt;
 </code></pre>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -507,7 +507,7 @@ fn case_184() {
     let output = r#"  <div>
 <pre><code>&lt;div&gt;
 </code></pre>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -521,7 +521,7 @@ bar
 <div>
 bar
 </div>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -535,7 +535,7 @@ bar
 bar
 </div>
 *foo*"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -547,7 +547,7 @@ baz"#;
     let output = r#"<p>Foo
 <a href="bar">
 baz</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -561,7 +561,7 @@ fn case_188() {
     let output = r#"<div>
 <p><em>Emphasized</em> text.</p>
 </div>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -573,7 +573,7 @@ fn case_189() {
     let output = r#"<div>
 *Emphasized* text.
 </div>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -597,7 +597,7 @@ Hi
 </td>
 </tr>
 </table>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -622,7 +622,7 @@ fn case_191() {
 </code></pre>
   </tr>
 </table>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }

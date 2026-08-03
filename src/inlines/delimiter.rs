@@ -662,68 +662,68 @@ mod tests {
     #[test]
     fn case_350() {
         let text = r#"*foo bar*"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><em>foo bar</em></p>")
     }
     #[test]
     fn case_351() {
         let text = r#"a * foo bar*"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p>a * foo bar*</p>")
     }
     #[test]
     fn case_357() {
         let text = r#"_foo bar_"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><em>foo bar</em></p>")
     }
 
     #[test]
     fn case_354_nbsp_not_emphasis() {
         let text = "*\u{a0}a\u{a0}*";
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p>*\u{a0}a\u{a0}*</p>");
     }
     #[test]
     fn case_378() {
         let text = r#"**foo bar**"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><strong>foo bar</strong></p>")
     }
     #[test]
     fn case_409() {
         let text = r#"*foo *bar**"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><em>foo <em>bar</em></em></p>")
     }
     #[test]
     fn case_411() {
         let text = r#"*foo**bar**baz*"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><em>foo<strong>bar</strong>baz</em></p>")
     }
     #[test]
     fn case_412() {
         let text = r#"*foo**bar*"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><em>foo**bar</em></p>")
     }
     #[test]
     fn case_413() {
         let text = r#"***foo** bar*"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><em><strong>foo</strong> bar</em></p>")
     }
     #[test]
     fn case_416() {
         let text = r#"foo***bar***baz"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p>foo<em><strong>bar</strong></em>baz</p>")
     }
     #[test]
     fn case_417() {
         let text = r#"foo******bar*********baz"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             "<p>foo<strong><strong><strong>bar</strong></strong></strong>***baz</p>"
@@ -732,7 +732,7 @@ mod tests {
     #[test]
     fn case_418() {
         let text = r#"*foo **bar *baz* bim** bop*"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             "<p><em>foo <strong>bar <em>baz</em> bim</strong> bop</em></p>"
@@ -741,13 +741,13 @@ mod tests {
     #[test]
     fn case_420() {
         let text = r#"** is not an empty emphasis"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p>** is not an empty emphasis</p>")
     }
     #[test]
     fn case_425() {
         let text = r#"__foo __bar__ baz__"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             "<p><strong>foo <strong>bar</strong> baz</strong></p>"
@@ -756,38 +756,40 @@ mod tests {
     #[test]
     fn case_442() {
         let text = r#"**foo*"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p>*<em>foo</em></p>")
     }
     #[test]
     fn case_443() {
         let text = r#"*foo**"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><em>foo</em>*</p>")
     }
     #[test]
     fn case_444() {
         let text = r#"***foo**"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p>*<strong>foo</strong></p>")
     }
     #[test]
     fn case_445() {
         let text = r#"****foo*"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p>***<em>foo</em></p>")
     }
     #[test]
     fn case_449() {
         let text = r#"foo _\__"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p>foo <em>_</em></p>")
     }
 
     #[test]
     fn gfm_case_491() {
         let text = r#"~~Hi~~ Hello, ~there~ world!"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast.to_html(),
             "<p><del>Hi</del> Hello, <del>there</del> world!</p>"
@@ -798,7 +800,9 @@ mod tests {
         let text = r#"This ~~has a
 
 new paragraph~~."#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p>This ~~has a</p>
@@ -808,21 +812,25 @@ new paragraph~~."#;
     #[test]
     fn gfm_case_493() {
         let text = r#"This will ~~~not~~~ strike."#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm())
+            .parse()
+            .unwrap();
         assert_eq!(ast.to_html(), "<p>This will ~~~not~~~ strike.</p>")
     }
 
     #[test]
     fn ofm_case_1() {
         let text = r#"==Highlighted text=="#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(ast.to_html(), "<p><mark>Highlighted text</mark></p>")
     }
 
     #[test]
     fn test_crisscross() {
         let text = r#"**bold _italic** ending_"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         println!("{ast:?}");
         assert_eq!(
             ast.to_html(),
@@ -833,28 +841,30 @@ new paragraph~~."#;
     #[test]
     fn cjk_friendly_star_open_with_cjk_punct_after() {
         let text = "A*。B*";
-        let ast_default = Parser::new(text).parse();
+        let ast_default = Parser::new(text).parse().unwrap();
         assert_eq!(ast_default.to_html(), "<p>A*。B*</p>");
 
         let ast_cjk = Parser::new_with_options(
             text,
             ParserOptions::default().enabled_cjk_friendly_delimiters(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(ast_cjk.to_html(), "<p>A<em>。B</em></p>");
     }
 
     #[test]
     fn cjk_friendly_star_close_with_cjk_punct_before() {
         let text = "*A。*B";
-        let ast_default = Parser::new(text).parse();
+        let ast_default = Parser::new(text).parse().unwrap();
         assert_eq!(ast_default.to_html(), "<p>*A。*B</p>");
 
         let ast_cjk = Parser::new_with_options(
             text,
             ParserOptions::default().enabled_cjk_friendly_delimiters(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(ast_cjk.to_html(), "<p><em>A。</em>B</p>");
     }
 }

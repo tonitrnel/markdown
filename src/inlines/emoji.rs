@@ -75,21 +75,23 @@ mod tests {
             ":狗头: :привет: :مرحبا: :ñ:",
             ParserOptions::default().enabled_gfm(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast.to_html(), "<p>:狗头: :привет: :مرحبا: :ñ:</p>");
     }
 
     #[test]
     fn rejects_symbol_inside_emoji_name() {
-        let ast =
-            Parser::new_with_options(":dog!: ok", ParserOptions::default().enabled_gfm()).parse();
+        let ast = Parser::new_with_options(":dog!: ok", ParserOptions::default().enabled_gfm())
+            .parse()
+            .unwrap();
         assert_eq!(ast.to_html(), "<p>:dog!: ok</p>");
     }
 
     #[test]
     fn default_mode_keeps_plain_text() {
-        let ast = Parser::new(":狗头:").parse();
+        let ast = Parser::new(":狗头:").parse().unwrap();
         assert_eq!(ast.to_html(), "<p>:狗头:</p>");
     }
 }

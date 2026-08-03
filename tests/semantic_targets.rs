@@ -17,7 +17,9 @@ fn targets_visited_in_preorder_with_ids() {
     let mut selection = InlineSelection::default();
     let mut phase = Parser::new_with_options(SOURCE, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     phase.visit_semantic_targets(
         |_| true,
         &mut selection,
@@ -51,7 +53,9 @@ fn heading_inline_materializes_lazily_on_ref_text() {
     let mut ref_texts: Vec<String> = Vec::new();
     let mut phase = Parser::new_with_options(source, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     phase.visit_semantic_targets(
         |target| target.heading().is_some(),
         &mut selection,
@@ -126,7 +130,7 @@ fn ref_text_matches_full_parse_projection_on_curated() {
         }
     }
     let text = std::fs::read_to_string("bench/fixtures/curated/_data.md").unwrap();
-    let full = Parser::new_with_options(&text, ofm()).parse();
+    let full = Parser::new_with_options(&text, ofm()).parse().unwrap();
     let mut expected: Vec<String> = Vec::new();
     {
         let mut stack: Vec<usize> = Vec::new();
@@ -155,7 +159,9 @@ fn ref_text_matches_full_parse_projection_on_curated() {
     let mut selection = InlineSelection::default();
     let mut phase = Parser::new_with_options(&text, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     phase.visit_semantic_targets(
         |t| t.heading().is_some(),
         &mut selection,
@@ -172,9 +178,12 @@ fn ref_text_matches_full_parse_projection_on_curated() {
 fn prepare_then_finish_equals_plain_parse_on_synthetic_source() {
     let document = Parser::new_with_options(SOURCE, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
+        .unwrap()
         .prepare_semantic_targets()
-        .finish();
-    let plain = Parser::new_with_options(SOURCE, ofm()).parse();
+        .unwrap()
+        .finish()
+        .unwrap();
+    let plain = Parser::new_with_options(SOURCE, ofm()).parse().unwrap();
     assert_eq!(semantic_digest(&document), semantic_digest(&plain));
     assert_eq!(document.to_html(), plain.to_html());
 }
@@ -185,9 +194,12 @@ fn prepare_then_finish_keeps_footnote_numbering_with_heading_refs() {
     let source = "Intro[^a].\n\n## Head[^b]\n\nTail[^b] again[^a].\n\n[^a]: A\n[^b]: B\n";
     let document = Parser::new_with_options(source, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
+        .unwrap()
         .prepare_semantic_targets()
-        .finish();
-    let plain = Parser::new_with_options(source, ofm()).parse();
+        .unwrap()
+        .finish()
+        .unwrap();
+    let plain = Parser::new_with_options(source, ofm()).parse().unwrap();
     assert_eq!(document.to_html(), plain.to_html());
     assert_eq!(semantic_digest(&document), semantic_digest(&plain));
     // 编号确实是文档顺序：a=1（正文首现先于 heading 的 b）
@@ -208,9 +220,12 @@ fn prepare_then_finish_equals_plain_parse_with_inline_footnotes() {
     let source = "P1 ^[first inline].\n\n## H ^[second inline]\n\nP2[^named].\n\n[^named]: N\n";
     let document = Parser::new_with_options(source, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
+        .unwrap()
         .prepare_semantic_targets()
-        .finish();
-    let plain = Parser::new_with_options(source, ofm()).parse();
+        .unwrap()
+        .finish()
+        .unwrap();
+    let plain = Parser::new_with_options(source, ofm()).parse().unwrap();
     assert_eq!(document.to_html(), plain.to_html());
     assert_eq!(semantic_digest(&document), semantic_digest(&plain));
 }
@@ -220,9 +235,12 @@ fn prepare_then_finish_equals_plain_parse_on_curated_corpus() {
     let source = include_str!("../bench/fixtures/curated/_data.md");
     let document = Parser::new_with_options(source, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
+        .unwrap()
         .prepare_semantic_targets()
-        .finish();
-    let plain = Parser::new_with_options(source, ofm()).parse();
+        .unwrap()
+        .finish()
+        .unwrap();
+    let plain = Parser::new_with_options(source, ofm()).parse().unwrap();
     assert_eq!(semantic_digest(&document), semantic_digest(&plain));
     assert_eq!(document.to_html(), plain.to_html());
 }
@@ -233,7 +251,9 @@ fn semantic_stop_only_stops_traversal() {
     let mut visited = 0usize;
     let mut phase = Parser::new_with_options(SOURCE, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     phase.visit_semantic_targets(
         |_| true,
         &mut selection,
@@ -244,8 +264,8 @@ fn semantic_stop_only_stops_traversal() {
     );
     assert_eq!(visited, 1);
     // Stop 不截断树：finish 仍是完整文档
-    let document = phase.finish();
-    let plain = Parser::new_with_options(SOURCE, ofm()).parse();
+    let document = phase.finish().unwrap();
+    let plain = Parser::new_with_options(SOURCE, ofm()).parse().unwrap();
     assert_eq!(semantic_digest(&document), semantic_digest(&plain));
 }
 
@@ -255,7 +275,9 @@ fn filter_rejection_continues_traversal() {
     let mut visited = Vec::new();
     let mut phase = Parser::new_with_options(SOURCE, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     phase.visit_semantic_targets(
         |target| target.heading().is_some(),
         &mut selection,
@@ -277,7 +299,9 @@ fn duplicate_block_ids_produce_distinct_targets() {
     let mut nodes = Vec::new();
     let mut phase = Parser::new_with_options(source, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     phase.visit_semantic_targets(
         |_| true,
         &mut selection,
@@ -295,6 +319,8 @@ fn duplicate_block_ids_produce_distinct_targets() {
 fn stopped_block_scan_status_survives_preparation() {
     let phase = Parser::new_with_options(SOURCE, ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Stop)
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     assert_eq!(phase.block_status(), BlockScanStatus::Stopped);
 }

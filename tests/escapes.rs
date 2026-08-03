@@ -4,7 +4,7 @@ use markdown::parser::Parser;
 fn case_12() {
     let input = r#"\!\"\#\$\%\&\'\(\)\*\+\,\-\.\/\:\;\<\=\>\?\@\[\\\]\^\_\`\{\|\}\~"#;
     let output = r#"<p>!&quot;#$%&amp;'()*+,-./:;&lt;=&gt;?@[\]^_`{|}~</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -12,7 +12,7 @@ fn case_12() {
 fn case_13() {
     let input = r#"\	\A\a\ \3\φ\«"#;
     let output = r#"<p>\	\A\a\ \3\φ\«</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -36,7 +36,7 @@ fn case_14() {
 # not a heading
 [foo]: /url &quot;not a reference&quot;
 &amp;ouml; not a character entity</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -44,7 +44,7 @@ fn case_14() {
 fn case_15() {
     let input = r#"\\*emphasis*"#;
     let output = r#"<p>\<em>emphasis</em></p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -54,7 +54,7 @@ fn case_16() {
 bar"#;
     let output = r#"<p>foo<br />
 bar</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -62,7 +62,7 @@ bar</p>"#;
 fn case_17() {
     let input = r#"`` \[\` ``"#;
     let output = r#"<p><code>\[\`</code></p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -73,7 +73,7 @@ fn case_19() {
 ~~~"#;
     let output = r#"<pre><code>\[\]
 </code></pre>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -82,7 +82,7 @@ fn case_20() {
     let input = r#"<https://example.com?find=\*>"#;
     let output =
         r#"<p><a href="https://example.com?find=%5C*">https://example.com?find=\*</a></p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -90,7 +90,7 @@ fn case_20() {
 fn case_21() {
     let input = r#"<a href="/bar\/)">"#;
     let output = r#"<a href="/bar\/)">"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -98,7 +98,7 @@ fn case_21() {
 fn case_22() {
     let input = r#"[foo](/bar\* "ti\*tle")"#;
     let output = r#"<p><a href="/bar*" title="ti*tle">foo</a></p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -108,7 +108,7 @@ fn case_23() {
 
 [foo]: /bar\* "ti\*tle""#;
     let output = r#"<p><a href="/bar*" title="ti*tle">foo</a></p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -119,7 +119,7 @@ foo
 ```"#;
     let output = r#"<pre><code class="language-foo+bar">foo
 </code></pre>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }

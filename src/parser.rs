@@ -253,14 +253,11 @@ impl<'input> Parser<'input> {
             parse_error: None,
         }
     }
-    pub fn parse(self) -> Document<'input> {
-        self.parse_checked()
-            .expect("parse failed: input exceeds parser limits")
-    }
-    pub fn parse_checked(mut self) -> Result<Document<'input>, ParseError> {
+
+    pub fn parse(mut self) -> Result<Document<'input>, ParseError> {
         self.ensure_limits()?;
         self.parse_frontmatter()?;
-        self.continue_parse_checked()
+        self.continue_parse()
     }
     /// owned-source 构造：解析完成后源码移交给返回的 `Document`（服务 WASM
     /// 与需要文档独立于输入缓冲的调用者，map ticket 07 / ADR 0001）。
@@ -268,16 +265,12 @@ impl<'input> Parser<'input> {
     /// 内部经临时借用解析，scanner 与 pending 状态在借用结束前全部释放；
     /// `TextRef::Source` 保存 byte range 而非 `&str`，因此移动 `String`
     /// 不产生自引用，无 unsafe。
-    pub fn parse_string(source: String, options: ParserOptions) -> Document<'static> {
-        Self::parse_string_checked(source, options)
-            .expect("parse failed: input exceeds parser limits")
-    }
-    pub fn parse_string_checked(
+    pub fn parse_string(
         source: String,
         options: ParserOptions,
     ) -> Result<Document<'static>, ParseError> {
         let (tree, tags, line_starts) = {
-            let document = Parser::new_with_options(&source, options).parse_checked()?;
+            let document = Parser::new_with_options(&source, options).parse()?;
             let Document {
                 tree,
                 tags,
@@ -297,20 +290,20 @@ impl<'input> Parser<'input> {
     /// `node_ids` 选择并物化（含后代展开与 footnote 依赖，F3 语义），
     /// 未选节点保留 Block 结构。`node_id` 契约：与同选项下对逐字节相同
     /// 源码的其它解析调用一致。无效 id 返回 `InvalidSelectionNode`。
-    pub fn parse_selected_string_checked(
+    pub fn parse_selected_string(
         source: String,
         options: ParserOptions,
         node_ids: &[usize],
     ) -> Result<Document<'static>, ParseError> {
         let (tree, tags, line_starts) = {
             let phase = Parser::new_with_options(&source, options)
-                .run_block_phase_checked(None)?
-                .prepare_semantic_targets_checked()?;
+                .run_block_phase(None)?
+                .prepare_semantic_targets()?;
             let mut selection = crate::selective::InlineSelection::default();
             for &id in node_ids {
                 selection.select(id);
             }
-            let output = phase.parse_selected_inlines_checked(selection)?;
+            let output = phase.parse_selected_inlines(selection)?;
             let Document {
                 tree,
                 tags,
@@ -367,7 +360,7 @@ impl<'input> Parser<'input> {
             SourceText::Owned(source) => {
                 let (tree, tags, line_starts) = {
                     let parser = Parser::from_phase_snapshot(&source, snapshot, tree, tags)?;
-                    let document = parser.continue_parse_checked()?;
+                    let document = parser.continue_parse()?;
                     let Document {
                         tree,
                         tags,
@@ -385,26 +378,22 @@ impl<'input> Parser<'input> {
             }
             SourceText::Borrowed(source) => {
                 let parser = Parser::from_phase_snapshot(source, snapshot, tree, tags)?;
-                parser.continue_parse_checked()
+                parser.continue_parse()
             }
         }
     }
-    pub fn continue_parse(self) -> Document<'input> {
-        self.continue_parse_checked()
-            .expect("parse failed: input exceeds parser limits")
-    }
-    pub fn continue_parse_checked(mut self) -> Result<Document<'input>, ParseError> {
+    pub fn continue_parse(mut self) -> Result<Document<'input>, ParseError> {
         self.tree.push();
-        self.parse_block_lines();
+        self.enter_block_parse();
         if let Some(err) = self.parse_error.take() {
             self.tree.pop();
             return Err(err);
         }
-        self.finish_inline_phase_checked()
+        self.finish_inline_phase()
     }
     /// Block 阶段入口（F1）：`ensure_limits` + frontmatter 后运行带观察者的
     /// Block 扫描，返回持有全部解析器状态的 [`BlockDocument`]。
-    pub(crate) fn run_block_phase_checked(
+    pub(crate) fn run_block_phase(
         mut self,
         observer: Option<&mut dyn FnMut(&TopLevelBlockEvent<'_>) -> VisitControl>,
     ) -> Result<BlockDocument<'input>, ParseError> {
@@ -421,10 +410,10 @@ impl<'input> Parser<'input> {
             status,
         })
     }
-    /// Inline 阶段与收尾（`continue_parse_checked` 的后半段；
+    /// Inline 阶段与收尾（`continue_parse` 的后半段；
     /// `BlockDocument::materialize_all` 复用同一实现）。
-    pub(crate) fn finish_inline_phase_checked(mut self) -> Result<Document<'input>, ParseError> {
-        self.parse_inlines();
+    pub(crate) fn finish_inline_phase(mut self) -> Result<Document<'input>, ParseError> {
+        self.enter_inlines_parse();
         if let Some(err) = self.parse_error.take() {
             self.tree.pop();
             return Err(err);
@@ -535,7 +524,7 @@ impl<'input> Parser<'input> {
     //     while            +4.6833ms
     //     incorporate_line +4.4858ms
     //     ...              +1ms
-    fn parse_block_lines(&mut self) {
+    fn enter_block_parse(&mut self) {
         self.parse_blocks_observed(None);
     }
     /// Block 扫描主循环。`observer` 存在时，在每个稳定行边界对新近
@@ -673,7 +662,7 @@ impl<'input> Parser<'input> {
     }
     // +9.5869ms
     //     inlines::process +8.729ms
-    fn parse_inlines(&mut self) {
+    fn enter_inlines_parse(&mut self) {
         if self.reach_node_limit() {
             return;
         }
@@ -1611,11 +1600,11 @@ mod tests {
     use super::{ParseError, Parser, ParserOptions};
 
     #[test]
-    fn parse_checked_rejects_oversized_input() {
+    fn parse_rejects_oversized_input() {
         let text = "abcd";
         let parser =
             Parser::new_with_options(text, ParserOptions::default().with_max_input_bytes(3));
-        let result = parser.parse_checked();
+        let result = parser.parse();
         assert!(matches!(
             result,
             Err(ParseError::InputTooLarge {
@@ -1626,10 +1615,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_checked_rejects_node_overflow() {
+    fn parse_rejects_node_overflow() {
         let text = "# hi";
         let parser = Parser::new_with_options(text, ParserOptions::default().with_max_nodes(1));
-        let result = parser.parse_checked();
+        let result = parser.parse();
         assert!(matches!(
             result,
             Err(ParseError::NodeLimitExceeded { limit: 1, .. })
@@ -1647,7 +1636,7 @@ Text
 "#;
         let options = ParserOptions::default().enabled_gfm();
         let full = Parser::new_with_options(text, options.clone())
-            .parse_checked()
+            .parse()
             .expect("full parse should succeed");
         let (deferred_doc, snapshot) = Parser::new_with_options(text, options)
             .parse_frontmatter_phase()
@@ -1655,7 +1644,7 @@ Text
         let resumed =
             Parser::from_phase_snapshot(text, snapshot, deferred_doc.tree, deferred_doc.tags)
                 .expect("snapshot restore should succeed")
-                .continue_parse_checked()
+                .continue_parse()
                 .expect("continue parse should succeed");
         assert_eq!(full.to_html(), resumed.to_html());
         assert_eq!(full.len(), resumed.len());

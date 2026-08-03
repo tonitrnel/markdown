@@ -119,9 +119,8 @@ mod tests {
 
     #[test]
     fn case_633() {
-        let text = r#"foo  
-baz"#;
-        let ast = Parser::new(text).parse();
+        let text = "foo  \nbaz";
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             "<p>foo<br />
@@ -133,7 +132,7 @@ baz</p>"
     fn case_634() {
         let text = r#"foo\
 baz"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             "<p>foo<br />
@@ -153,7 +152,8 @@ baz</p>"
 \[foo]: /url "not a reference""#;
         let ast =
             Parser::new_with_options(text, crate::parser::ParserOptions::default().enabled_gfm())
-                .parse();
+                .parse()
+                .unwrap();
         assert_eq!(
             ast.to_html(),
             "<p>*not emphasized*\n&lt;br/&gt; not a tag\n[not a link](/foo)\n`not code`\n1. not a list\n* not a list\n# not a heading\n[foo]: /url &quot;not a reference&quot;</p>"

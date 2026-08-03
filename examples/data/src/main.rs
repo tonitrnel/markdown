@@ -12,7 +12,7 @@ fn main() {
     let b = start.elapsed().as_micros() as f64 / 1000.0;
 
     let start = std::time::Instant::now();
-    let ast = parser.parse();
+    let ast = parser.parse().expect("parsing failed");
     let c = start.elapsed().as_micros() as f64 / 1000.0;
 
     let start = std::time::Instant::now();

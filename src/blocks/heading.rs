@@ -193,7 +193,7 @@ mod tests {
 #hashtag
 "#
         .trim();
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         let expected_locations = [
             (Location::new(1, 1), Location::new(1, 6)),
@@ -232,7 +232,7 @@ baz*
 ====
 "#
         .trim();
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         let expected_locations = [
             (Location::new(1, 1), Location::new(2, 10)),

@@ -115,13 +115,13 @@ mod tests {
     fn it_works() {
         let mut parser = Parser::new(
             r#"
---- 
+---
 external: false
 draft: true
 title: Hello World
 description: It's a beautiful world out there.
 date: 2022-11-05
----   
+---
 Hello world        "#
                 .trim_start(),
         );
@@ -143,7 +143,7 @@ Hello world        "#
             frontmatter.get("date"),
             Some(&YamlValue::String("2022-11-05".to_string()))
         );
-        let ast = parser.parse();
+        let ast = parser.parse().unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast.to_html(), "<p>Hello world</p>")
     }
@@ -230,7 +230,8 @@ nouns:
                 .with_cjk_nouns(["GitHub"])
                 .with_cjk_nouns_from_frontmatter("nouns"),
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(ast.to_html(), "<p>我在用GitHub和豆瓣FM</p>");
     }
 }

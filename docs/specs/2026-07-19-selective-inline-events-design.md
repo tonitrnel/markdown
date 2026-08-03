@@ -22,7 +22,7 @@
 
 两个事件阶段都支持 `Continue` 和 `Stop`。Inline 选择与事件控制流相互独立。语义目标遍历结束后，解析器只处理已选择节点及其全部后代的普通 Inline。为了让调用者在选择时检查完整标题，所有 Heading 的 Inline AST 都会在语义目标遍历前完成。
 
-现有 Rust `parse()` 和 `parse_checked()` API 保持完整文档解析语义。WASM API 不变。提前停止是终态；本设计不提供 checkpoint 或恢复能力。
+现有 Rust `parse()` API 保持完整文档解析语义。WASM API 不变。提前停止是终态；本设计不提供 checkpoint 或恢复能力。
 
 ## 目标
 
@@ -256,7 +256,7 @@ Reference definition 元数据始终全局处理。Footnote definition 不同，
 
 ## 兼容性
 
-- `Parser::parse()` 和 `Parser::parse_checked()` 继续完整解析所有 Inline，行为保持不变。
+- `Parser::parse()` 继续完整解析所有 Inline，行为保持不变。
 - 现有 frontmatter-only 解析保持不变。
 - 新工作流仅供 Rust 使用。
 - `wasm-binding` 类型和导出保持不变。

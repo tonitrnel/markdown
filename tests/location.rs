@@ -90,7 +90,8 @@ Paragraph with $x$ and **bold**.
 2. item
 "#;
     let doc = Parser::new_with_options(input, ParserOptions::default().enabled_gfm().enabled_ofm())
-        .parse();
+        .parse()
+        .unwrap();
 
     assert_location_invariants(&doc, 0);
 }
@@ -98,7 +99,9 @@ Paragraph with $x$ and **bold**.
 #[test]
 fn inline_math_location_is_precise() {
     let input = "A $x$ B";
-    let doc = Parser::new_with_options(input, ParserOptions::default().enabled_gfm()).parse();
+    let doc = Parser::new_with_options(input, ParserOptions::default().enabled_gfm())
+        .parse()
+        .unwrap();
     let math_idx = find_first_math_node(&doc.tree).expect("math node not found");
     let math_node = &doc.tree[math_idx];
     assert!(matches!(
@@ -132,7 +135,9 @@ fn inline_math_location_is_precise() {
 #[test]
 fn multiline_display_math_location_is_consistent() {
     let input = "$$\\begin{vmatrix}a & b\\\\\nc & d\n\\end{vmatrix}=ad-bc$$";
-    let doc = Parser::new_with_options(input, ParserOptions::default().enabled_gfm()).parse();
+    let doc = Parser::new_with_options(input, ParserOptions::default().enabled_gfm())
+        .parse()
+        .unwrap();
     let math_idx = find_first_math_node(&doc.tree).expect("math node not found");
     let math_node = &doc.tree[math_idx];
     assert!(matches!(
@@ -180,7 +185,9 @@ const MATRIX: &[(&str, &str)] = &[
 ];
 
 fn matrix_parse(source: &str) -> markdown::Document<'_> {
-    Parser::new_with_options(source, ParserOptions::default().enabled_gfm().enabled_ofm()).parse()
+    Parser::new_with_options(source, ParserOptions::default().enabled_gfm().enabled_ofm())
+        .parse()
+        .unwrap()
 }
 
 fn naive_location(source: &str, offset: usize) -> Location {

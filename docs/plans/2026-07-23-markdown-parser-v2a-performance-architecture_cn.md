@@ -1461,7 +1461,7 @@ fn break_resume_matches_uninterrupted_parse() {
         BlockScanOutcome::Complete(_) => panic!("expected interruption"),
     };
     let completed = interrupted.resume_with_checked(|_| true, |_| VisitControl::Continue).unwrap();
-    let document = completed.prepare_semantics_checked().unwrap().materialize_all_checked().unwrap();
+    let document = completed.prepare_semantics().unwrap().materialize_all().unwrap();
 
     assert_eq!(document.to_html(), expected);
 }

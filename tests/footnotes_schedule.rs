@@ -9,6 +9,7 @@ use markdown::{Parser, ParserOptions};
 fn html(src: &str) -> String {
     Parser::new_with_options(src, ParserOptions::default().enabled_ofm())
         .parse()
+        .unwrap()
         .to_html()
 }
 

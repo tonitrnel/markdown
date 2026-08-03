@@ -68,7 +68,7 @@ cargo check -p markdown-binding --target wasm32-unknown-unknown
 
 ## 功能迭代
 
-功能阶段先运行，因为它们能在现有 `Tree` 上端到端交付，不依赖 compact AST。它们均为 Rust-only；现有 `parse()`、`parse_checked()` 和 WASM 全解析行为不变。
+功能阶段先运行，因为它们能在现有 `Tree` 上端到端交付，不依赖 compact AST。它们均为 Rust-only；现有 `parse()` 和 WASM 全解析行为不变。
 
 ### F1: 顶层 Block 事件与终态停止
 

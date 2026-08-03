@@ -500,7 +500,7 @@ mod tests {
     #[test]
     fn case_626_comment_with_inner_double_dash() {
         let text = "foo <!-- this is a --\ncomment - with hyphens -->";
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             "<p>foo <!-- this is a --\ncomment - with hyphens --></p>"
@@ -510,7 +510,7 @@ mod tests {
     #[test]
     fn case_627_short_comment_openers() {
         let text = "foo <!--> foo -->\n\nfoo <!---> foo -->";
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             "<p>foo <!--> foo --&gt;</p>\n<p>foo <!---> foo --&gt;</p>"
@@ -521,7 +521,9 @@ mod tests {
     fn gfm_reject_invalid_comment_forms() {
         let text =
             "foo <!-- not a comment -- two hyphens -->\n\nfoo <!--> foo -->\n\nfoo <!-- foo--->";
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast.to_html(),
             "<p>foo &lt;!-- not a comment -- two hyphens --&gt;</p>\n<p>foo &lt;!--&gt; foo --&gt;</p>\n<p>foo &lt;!-- foo---&gt;</p>"

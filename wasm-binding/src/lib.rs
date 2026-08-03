@@ -480,7 +480,8 @@ pub fn parse(text: String) -> Document {
             .enabled_gfm()
             .enabled_ofm()
             .enabled_cjk_autocorrect(),
-    );
+    )
+    .expect("unexpected error: parsing failed.");
     Document::from(document)
 }
 
@@ -506,7 +507,9 @@ pub fn parse_with_options(text: String, options: TParserOptions) -> Document {
     let parsed_options = serde_wasm_bindgen::from_value::<WasmParserOptions>(raw).ok();
     let (options, parse_mode) = build_parser_options(parsed_options);
     match parse_mode {
-        ParseMode::Full => Document::from(Parser::parse_string(text, options)),
+        ParseMode::Full => Document::from(
+            Parser::parse_string(text, options).expect("unexpected error: parsing failed."),
+        ),
         ParseMode::FrontmatterOnly => {
             let (document, snapshot) = Parser::parse_frontmatter_phase_string(text, options)
                 .expect("parse failed: input exceeds parser limits");
@@ -554,7 +557,9 @@ fn query_targets_impl(text: &str, options: ParserOptions) -> Vec<SemanticTargetI
     let mut out = Vec::new();
     let mut phase = Parser::new_with_options(text, options)
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
-        .prepare_semantic_targets();
+        .expect("unexpected error: parsing failed.")
+        .prepare_semantic_targets()
+        .expect("unexpected error: parsing failed.");
     let mut selection = InlineSelection::default();
     phase.visit_semantic_targets(
         |_| true,
@@ -624,7 +629,7 @@ pub fn query_semantic_targets_with_options(
 pub fn parse_selected(text: String, node_ids: Vec<u32>) -> Result<Document, JsValue> {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let ids: Vec<usize> = node_ids.into_iter().map(|id| id as usize).collect();
-    let document = Parser::parse_selected_string_checked(
+    let document = Parser::parse_selected_string(
         text,
         ParserOptions::default()
             .enabled_gfm()

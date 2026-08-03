@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn case_482() {
         let text = r#"[link](/uri "title")"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/uri" title="title">link</a></p>"#
@@ -270,38 +270,38 @@ mod tests {
     #[test]
     fn case_483() {
         let text = r#"[link](/uri)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><a href="/uri">link</a></p>"#)
     }
     #[test]
     fn case_484() {
         let text = r#"[](./target.md)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><a href="./target.md"></a></p>"#)
     }
     #[test]
     fn case_487() {
         let text = r#"[]()"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><a href=""></a></p>"#)
     }
     #[test]
     fn case_488() {
         let text = r#"[link](/my uri)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p>[link](/my uri)</p>"#)
     }
     #[test]
     fn case_489() {
         let text = r#"[link](</my uri>)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><a href="/my%20uri">link</a></p>"#)
     }
     #[test]
     fn case_490() {
         let text = r#"[link](foo
 bar)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p>[link](foo
@@ -311,13 +311,13 @@ bar)</p>"#
     #[test]
     fn case_496() {
         let text = r#"[link](foo(and(bar)))"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><a href="foo(and(bar))">link</a></p>"#)
     }
     #[test]
     fn case_500() {
         let text = r#"[link](foo\)\:)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><a href="foo):">link</a></p>"#)
     }
     #[test]
@@ -327,7 +327,7 @@ bar)</p>"#
 [link](https://example.com#fragment)
 
 [link](https://example.com?foo=3#frag)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r##"<p><a href="#fragment">link</a></p>
@@ -338,19 +338,19 @@ bar)</p>"#
     #[test]
     fn case_502() {
         let text = r#"[link](foo\bar)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><a href="foo%5Cbar">link</a></p>"#)
     }
     #[test]
     fn case_503() {
         let text = r#"[link](foo%20b&auml;)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><a href="foo%20b%C3%A4">link</a></p>"#)
     }
     #[test]
     fn case_504() {
         let text = r#"[link]("title")"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><a href="%22title%22">link</a></p>"#)
     }
 
@@ -358,7 +358,7 @@ bar)</p>"#
     #[test]
     fn case_572() {
         let text = r#"![foo](/url "title")"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><img src="/url" alt="foo" title="title" /></p>"#
@@ -367,20 +367,20 @@ bar)</p>"#
     #[test]
     fn case_574() {
         let text = r#"![foo ![bar](/url)](/url2)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><img src="/url2" alt="foo bar" /></p>"#)
     }
     #[test]
     fn case_575() {
         let text = r#"![foo [bar](/url)](/url2)"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p><img src="/url2" alt="foo bar" /></p>"#)
     }
     #[test]
     fn case_579() {
         let input = r#"My ![foo bar](/path/to/train.jpg  "title"   )"#;
         let output = r#"<p>My <img src="/path/to/train.jpg" alt="foo bar" title="title" /></p>"#;
-        let ast = Parser::new(input).parse();
+        let ast = Parser::new(input).parse().unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast.to_html(), output);
     }

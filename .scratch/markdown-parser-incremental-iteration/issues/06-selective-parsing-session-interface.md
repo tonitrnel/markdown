@@ -100,7 +100,7 @@ pub struct SelectiveParseOutput<'source> {
 ### 决策点（需人工确认）
 
 - **D. `TopLevelBlockEvent::node_id()` 的去留**：spec 原文提供、map 决策 02 要求"无持久身份"。草案建议**保留**，文档写明"仅回调期有效；语义准备可能移除该节点（如纯引用定义段落）"——彻底不暴露会让调用者无法把顶层观察与后续语义阶段关联。
-- **E. 非 checked（panic）变体**：全套提供（与现有 `parse()`/`parse_checked()` 对称，草案推荐）vs 仅提供 checked。
+- **E. 非 checked（panic）变体**：全套提供（与现有 `parse()` 对称，草案推荐）vs 仅提供 checked。
 - **F. 阶段形态**：三段式类型状态（草案推荐）vs spec 原来的单一 `SelectiveParser` 可变状态机。
 
 ## Answer
@@ -108,7 +108,7 @@ pub struct SelectiveParseOutput<'source> {
 2026-07-26 解决。维护者对 D/E/F 无倾向、委托按草案推荐执行，故上文 Proposal 即接口结论，三个决策点取推荐项：
 
 - **D**：保留 `TopLevelBlockEvent::node_id()`，文档契约为"仅回调期有效；语义准备可能移除该节点（如纯引用定义段落）"，与 map 决策 02（无持久身份）一致。
-- **E**：checked 与非 checked（panic）变体全套提供，与现有 `parse()`/`parse_checked()` 对称。
+- **E**：checked 与非 checked（panic）变体全套提供，与现有 `parse()` 对称。
 - **F**：采用三段式类型状态 `Parser → BlockPhase → SemanticPhase → SelectiveParseOutput`，phase ownership 以移动语义表达，编译期阻止阶段误用；`Stop` 终态、无恢复方法。
 
 性质回执：事件借用无法逃逸回调；完整解析与选择性解析共用同一物化路径（`parse()` = 全选组合）；接口可全部实现在当前 Tree + pending map 上（文档顺序由 B1 入口保证），P4 只替换内部存储。F1 先落地 `Parser → BlockPhase`（含 `finish[_checked]() -> Document` 使其独立可用），F2 加 `SemanticPhase`，F3 加选择与 `SelectiveParseOutput`。实施归属 tracer tickets 09–11。

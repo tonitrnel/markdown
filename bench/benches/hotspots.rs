@@ -20,7 +20,9 @@ fn parse_selective_10pct(text: &str) {
                 VisitControl::Continue
             },
         )
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     let mut selection = InlineSelection::default();
     for id in top_level.iter().step_by(10) {
         selection.select(*id);

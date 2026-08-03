@@ -1254,14 +1254,18 @@ mod tests {
     #[test]
     fn ofm_case_block_id() {
         let text = r#""You do not rise to the level of your goals. You fall to the level of your systems." by James Clear ^quote-of-the-day"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(ast[1].id, Some(Box::new("quote-of-the-day".to_string())))
     }
 
     #[test]
     fn ofm_case_wikilink_1() {
         let text = r#"[[Three laws of motion]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(Box::new(
@@ -1277,7 +1281,9 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_2() {
         let text = r#"[[Three laws of motion#Second law]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(Box::new(
@@ -1293,7 +1299,9 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_3() {
         let text = r#"[[My note#Heading 1#Heading 2]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(Box::new(
@@ -1312,7 +1320,9 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_4() {
         let text = r#"[[2023-01-01#^quote-of-the-day]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(Box::new(
@@ -1328,7 +1338,9 @@ mod tests {
     #[test]
     fn ofm_case_wikilink_5() {
         let text = r#"[[Internal links|custom display text]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Link(Box::new(
@@ -1345,7 +1357,9 @@ mod tests {
     #[test]
     fn ofm_case_embed_1() {
         let text = r#"![[Internal links]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(Box::new(embed::Embed {
@@ -1359,7 +1373,9 @@ mod tests {
     #[test]
     fn ofm_case_embed_2() {
         let text = r#"![[Internal links#^b15695]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(Box::new(embed::Embed {
@@ -1373,7 +1389,9 @@ mod tests {
     #[test]
     fn ofm_case_embed_3() {
         let text = r#"![[Engelbart.jpg|100x145]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(Box::new(embed::Embed {
@@ -1387,7 +1405,9 @@ mod tests {
     #[test]
     fn ofm_case_embed_4() {
         let text = r#"![[Engelbart.jpg|100]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(Box::new(embed::Embed {
@@ -1401,7 +1421,9 @@ mod tests {
     #[test]
     fn ofm_case_embed_5() {
         let text = r#"![[Document.pdf#page=3]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(Box::new(embed::Embed {
@@ -1415,7 +1437,9 @@ mod tests {
     #[test]
     fn ofm_case_embed_6() {
         let text = r#"![[Document.pdf#page=3&theme=dark]]"#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast[2].body,
             MarkdownNode::Embed(Box::new(embed::Embed {
@@ -1433,7 +1457,7 @@ mod tests {
     #[test]
     fn case_594() {
         let text = r#"<http://foo.bar.baz>"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="http://foo.bar.baz">http://foo.bar.baz</a></p>"#
@@ -1442,7 +1466,7 @@ mod tests {
     #[test]
     fn case_595() {
         let text = r#"<https://foo.bar.baz/test?q=hello&id=22&boolean>"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(
             ast.to_html(),
@@ -1452,7 +1476,7 @@ mod tests {
     #[test]
     fn case_596() {
         let text = r#"<irc://foo.bar:2233/baz>"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="irc://foo.bar:2233/baz">irc://foo.bar:2233/baz</a></p>"#
@@ -1461,7 +1485,7 @@ mod tests {
     #[test]
     fn case_597() {
         let text = r#"<MAILTO:FOO@BAR.BAZ>"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="MAILTO:FOO@BAR.BAZ">MAILTO:FOO@BAR.BAZ</a></p>"#
@@ -1470,13 +1494,13 @@ mod tests {
     #[test]
     fn case_602() {
         let text = r#"<https://foo.bar/baz bim>"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p>&lt;https://foo.bar/baz bim&gt;</p>"#)
     }
     #[test]
     fn case_603() {
         let text = r#"<https://example.com/\[\>"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="https://example.com/%5C%5B%5C">https://example.com/\[\</a></p>"#
@@ -1485,7 +1509,7 @@ mod tests {
     #[test]
     fn case_604() {
         let text = r#"<foo@bar.example.com>"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="mailto:foo@bar.example.com">foo@bar.example.com</a></p>"#
@@ -1494,7 +1518,7 @@ mod tests {
     #[test]
     fn case_605() {
         let text = r#"<foo+special@Bar.baz-bar0.com>"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="mailto:foo+special@Bar.baz-bar0.com">foo+special@Bar.baz-bar0.com</a></p>"#
@@ -1503,7 +1527,7 @@ mod tests {
     #[test]
     fn case_606() {
         let text = r#"<foo\+@bar.example.com>"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p>&lt;foo+@bar.example.com&gt;</p>"#)
     }
     #[test]
@@ -1515,7 +1539,8 @@ mod tests {
                 .enabled_gfm()
                 .enabled_gfm_autolink(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p>see <a href="https://example.com/path?q=1">https://example.com/path?q=1</a></p>"#
@@ -1530,7 +1555,8 @@ mod tests {
                 .enabled_gfm()
                 .enabled_gfm_autolink(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="http://www.example.com/docs">www.example.com/docs</a></p>"#
@@ -1545,7 +1571,8 @@ mod tests {
                 .enabled_gfm()
                 .enabled_gfm_autolink(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p>visit <a href="https://example.com/test">https://example.com/test</a>).</p>"#
@@ -1559,7 +1586,7 @@ mod tests {
 [孤独な巡礼](https://music.163.com/#/song?id=448065)
 
 > 时境变迁，思绪万千"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         println!("{ast:?}");
     }
     #[test]
@@ -1567,9 +1594,11 @@ mod tests {
         let text = r#"
 |  顺序 | 值        |
 | --: | ------------ |
-|   3 |  阅读 [[01-参考文件\|参考内容]] |        
+|   3 |  阅读 [[01-参考文件\|参考内容]] |
         "#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         let ast_str = format!("{:#?}", ast);
         println!("{}", ast_str);
         assert!(ast_str.contains(r#"Link(Wikilink(Wikilink { path: "01-参考文件", text: Some("参考内容"), reference: None }))"#))
@@ -1583,7 +1612,9 @@ mod tests {
 
 [[note2#^block\|display]]
         "#;
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         let ast_str = format!("{:#?}", ast);
         println!("{}", ast_str);
         let lines = ast_str

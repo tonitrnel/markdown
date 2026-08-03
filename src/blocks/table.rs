@@ -323,7 +323,8 @@ mod tests {
 | --- | --- |
 | baz | bim |"#,
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<table>
@@ -350,7 +351,8 @@ mod tests {
 :-: | -----------:
 bar | baz"#,
         )
-        .parse();
+        .parse()
+        .unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(
             ast.to_html(),
@@ -379,7 +381,8 @@ bar | baz"#,
 | b `\|` az |
 | b **\|** im |"#,
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<table>
@@ -408,7 +411,8 @@ bar | baz"#,
 | bar | baz |
 > bar"#,
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<table>
@@ -441,7 +445,8 @@ bar
 
 bar"#,
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<table>
@@ -473,7 +478,8 @@ bar"#,
 | --- |
 | bar |"#,
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p>| abc | def |
@@ -490,7 +496,8 @@ bar"#,
 | bar |
 | bar | baz | boo |"#,
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<table>
@@ -520,7 +527,8 @@ bar"#,
             r#"| abc | def |
 | --- | --- |"#,
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<table>

@@ -5,7 +5,7 @@ use markdown::parser::Parser;
 fn test_inline_math() {
     let input = "This is inline math: $E = mc^2$";
     let options = ParserOptions::default().enabled_gfm();
-    let ast = Parser::new_with_options(input, options).parse();
+    let ast = Parser::new_with_options(input, options).parse().unwrap();
     let output = ast.to_html();
     assert!(output.contains("<span class=\"math math-inline\">"));
     assert!(output.contains("E = mc^2"));
@@ -15,7 +15,7 @@ fn test_inline_math() {
 fn test_display_math() {
     let input = "$$E = mc^2$$";
     let options = ParserOptions::default().enabled_gfm();
-    let ast = Parser::new_with_options(input, options).parse();
+    let ast = Parser::new_with_options(input, options).parse().unwrap();
     let output = ast.to_html();
     assert!(output.contains("<div class=\"math math-display\">"));
     assert!(output.contains("E = mc^2"));
@@ -25,7 +25,7 @@ fn test_display_math() {
 fn test_matrix_math() {
     let input = r#"$$\begin{vmatrix}a & b\\c & d\end{vmatrix}=ad-bc$$"#;
     let options = ParserOptions::default().enabled_gfm();
-    let ast = Parser::new_with_options(input, options).parse();
+    let ast = Parser::new_with_options(input, options).parse().unwrap();
     let output = ast.to_html();
     assert!(output.contains("<div class=\"math math-display\">"));
     assert!(output.contains(r"\begin{vmatrix}"));
@@ -37,7 +37,7 @@ fn test_matrix_math() {
 fn test_multiline_display_math() {
     let input = "$$\\begin{align}\nx &= a + b \\\\\ny &= c + d\n\\end{align}$$";
     let options = ParserOptions::default().enabled_gfm();
-    let ast = Parser::new_with_options(input, options).parse();
+    let ast = Parser::new_with_options(input, options).parse().unwrap();
     let output = ast.to_html();
     assert!(output.contains("<div class=\"math math-display\">"));
     assert!(output.contains(r"\begin{align}"));
@@ -48,7 +48,7 @@ fn test_multiline_display_math() {
 fn test_multiline_display_math_user_case() {
     let input = "$$\\begin{vmatrix}a & b\\\\\nc & d\n\\end{vmatrix}=ad-bc$$";
     let options = ParserOptions::default().enabled_gfm();
-    let ast = Parser::new_with_options(input, options).parse();
+    let ast = Parser::new_with_options(input, options).parse().unwrap();
     let output = ast.to_html();
     assert!(output.starts_with("<div class=\"math math-display\">"));
     assert!(output.contains(r"\begin{vmatrix}"));
@@ -61,7 +61,7 @@ fn test_multiline_display_math_user_case() {
 fn test_math_with_text() {
     let input = "The equation $x^2 + y^2 = r^2$ represents a circle.";
     let options = ParserOptions::default().enabled_gfm();
-    let ast = Parser::new_with_options(input, options).parse();
+    let ast = Parser::new_with_options(input, options).parse().unwrap();
     let output = ast.to_html();
     assert!(output.contains("The equation"));
     assert!(output.contains("<span class=\"math math-inline\">"));
@@ -73,7 +73,7 @@ fn test_math_with_text() {
 fn test_escaped_dollar() {
     let input = r"This is not math: \$100";
     let options = ParserOptions::default().enabled_gfm();
-    let ast = Parser::new_with_options(input, options).parse();
+    let ast = Parser::new_with_options(input, options).parse().unwrap();
     let output = ast.to_html();
     assert!(!output.contains("<span class=\"math"));
     assert!(output.contains("$100"));
@@ -83,7 +83,7 @@ fn test_escaped_dollar() {
 fn test_multiple_inline_math() {
     let input = "First: $a + b$, second: $c + d$";
     let options = ParserOptions::default().enabled_gfm();
-    let ast = Parser::new_with_options(input, options).parse();
+    let ast = Parser::new_with_options(input, options).parse().unwrap();
     let output = ast.to_html();
     let math_count = output.matches("<span class=\"math math-inline\">").count();
     assert_eq!(math_count, 2);

@@ -164,40 +164,41 @@ mod tests {
     #[test]
     fn case_328() {
         let text = r#"`foo`"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><code>foo</code></p>")
     }
     #[test]
     fn case_329() {
         let text = r#"`` foo ` bar ``"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><code>foo ` bar</code></p>")
     }
     #[test]
     fn case_3330() {
         let text = r#"` `` `"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><code>``</code></p>");
     }
     #[test]
     fn case_337() {
-        let text = r#"`foo   bar 
-baz`"#;
-        let ast = Parser::new(text).parse();
+        let text = "`foo   bar \nbaz`";
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><code>foo   bar  baz</code></p>");
     }
 
     #[test]
     fn case_137_space_only() {
         let text = "`` ``";
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), "<p><code> </code></p>");
     }
 
     #[test]
     fn gfm_case_106_space_only() {
         let text = "``` ```\naaa";
-        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm()).parse();
+        let ast = Parser::new_with_options(text, ParserOptions::default().enabled_gfm())
+            .parse()
+            .unwrap();
         assert_eq!(ast.to_html(), "<p><code></code>\naaa</p>");
     }
 }

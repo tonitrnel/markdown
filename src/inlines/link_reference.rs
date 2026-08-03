@@ -212,7 +212,7 @@ mod tests {
 
 [foo]"#,
         );
-        let ast = p.parse();
+        let ast = p.parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/url" title="title">foo</a></p>"#
@@ -221,13 +221,13 @@ mod tests {
     #[test]
     fn case_193() {
         let p = Parser::new(
-            r#"   [foo]: 
-      /url  
-           'the title'  
+            r#"   [foo]:
+      /url
+           'the title'
 
 [foo]"#,
         );
-        let ast = p.parse();
+        let ast = p.parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/url" title="the title">foo</a></p>"#
@@ -240,7 +240,7 @@ mod tests {
 
 [Foo*bar\]]"#,
         );
-        let ast = p.parse();
+        let ast = p.parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="my_(url)" title="title (with parens)">Foo*bar]</a></p>"#
@@ -255,7 +255,7 @@ mod tests {
 
 [Foo bar]"#,
         );
-        let ast = p.parse();
+        let ast = p.parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="my%20url" title="title">Foo bar</a></p>"#
@@ -272,7 +272,7 @@ line2
 
 [foo]"#,
         );
-        let ast = p.parse();
+        let ast = p.parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/url" title="
@@ -291,7 +291,7 @@ with blank line'
 
 [foo]"#,
         );
-        let ast = p.parse();
+        let ast = p.parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p>[foo]: /url 'title</p>
@@ -311,7 +311,7 @@ with blank line'
 [bar],
 [baz]"#,
         );
-        let ast = p.parse();
+        let ast = p.parse().unwrap();
         assert_eq!(
             ast.to_html(),
             r#"<p><a href="/foo-url" title="foo">foo</a>,
@@ -325,7 +325,7 @@ with blank line'
             r#"## 包装日期为2013年3月10日
 超过日期请勿使用"#,
         );
-        let ast = p.parse();
+        let ast = p.parse().unwrap();
         println!("{:?}", ast.to_html());
     }
 }

@@ -6,7 +6,7 @@ fn test_smart_punctuation_em_dash() {
         "em---em",
         ParserOptions::default().enabled_smart_punctuation(),
     );
-    let ast = parser.parse();
+    let ast = parser.parse().unwrap();
     let html = ast.to_html();
     assert_eq!(html, "<p>em—em</p>");
 }
@@ -17,7 +17,7 @@ fn test_smart_punctuation_en_dash() {
         "en--en",
         ParserOptions::default().enabled_smart_punctuation(),
     );
-    let ast = parser.parse();
+    let ast = parser.parse().unwrap();
     let html = ast.to_html();
     assert_eq!(html, "<p>en–en</p>");
 }
@@ -28,7 +28,7 @@ fn test_smart_punctuation_ellipsis() {
         "Ellipses...and...and....",
         ParserOptions::default().enabled_smart_punctuation(),
     );
-    let ast = parser.parse();
+    let ast = parser.parse().unwrap();
     let html = ast.to_html();
     assert_eq!(html, "<p>Ellipses…and…and….</p>");
 }
@@ -39,7 +39,7 @@ fn test_smart_punctuation_mixed() {
         "one-\ntwo--\nthree---",
         ParserOptions::default().enabled_smart_punctuation(),
     );
-    let ast = parser.parse();
+    let ast = parser.parse().unwrap();
     let html = ast.to_html();
     assert_eq!(html, "<p>one-\ntwo–\nthree—</p>");
 }
@@ -47,7 +47,7 @@ fn test_smart_punctuation_mixed() {
 #[test]
 fn test_smart_punctuation_disabled() {
     let parser = Parser::new("em---em and...");
-    let ast = parser.parse();
+    let ast = parser.parse().unwrap();
     let html = ast.to_html();
     assert_eq!(html, "<p>em---em and...</p>");
 }
@@ -60,7 +60,7 @@ fn test_chinese_punctuation_normalization() {
             .enabled_cjk_autocorrect()
             .enabled_normalize_chinese_punctuation(),
     );
-    let ast = parser.parse();
+    let ast = parser.parse().unwrap();
     let html = ast.to_html();
     assert_eq!(html, "<p>你好，世界！</p>");
 }
@@ -73,7 +73,7 @@ fn test_cjk_spacing_with_smart_punct() {
             .enabled_cjk_autocorrect()
             .enabled_smart_punctuation(),
     );
-    let ast = parser.parse();
+    let ast = parser.parse().unwrap();
     let html = ast.to_html();
     assert_eq!(html, "<p>Hello 世界—test</p>");
 }

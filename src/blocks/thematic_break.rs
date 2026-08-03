@@ -50,7 +50,7 @@ ___
  **  * ** * ** * **
 "#
         .trim();
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(ast[1].body, MarkdownNode::ThematicBreak);
         assert_eq!(ast[2].body, MarkdownNode::ThematicBreak);

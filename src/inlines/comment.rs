@@ -26,7 +26,8 @@ mod tests {
             "This is an %%inline%% comment.",
             ParserOptions::default().enabled_ofm(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(ast.to_html(), r##"<p>This is an  comment.</p>"##)
     }
     #[test]
@@ -38,7 +39,8 @@ Block comments can span multiple lines.
 %%",
             ParserOptions::default().enabled_ofm(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(ast[1].body, MarkdownNode::Paragraph);

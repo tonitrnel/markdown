@@ -285,9 +285,9 @@ mod tests {
    aaa
     aaa
   aaa
-   ````  
+   ````
 "#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,
@@ -312,14 +312,14 @@ aaa
         let text = r#"    a simple
       indented code block
       chunk1
-      
+
       chunk2
-      
-      
+
+
       chunk3
-      
+
 "#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,

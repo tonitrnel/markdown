@@ -75,7 +75,7 @@ impl<'input> BlockDocument<'input> {
 
     /// 物化全部 Pending Inline，返回完整 [`Document`]。
     pub fn materialize_all(self) -> Result<Document<'input>, ParseError> {
-        self.parser.finish_inline_phase_checked()
+        self.parser.finish_inline_phase()
     }
 
     /// 发现 BlockId 并建立文档前序的 Semantic target 索引。
@@ -97,21 +97,13 @@ impl<'input> BlockDocument<'input> {
     ///
     /// 与 `Parser::parse` 的后半段共用同一实现；对 `Stopped` 前缀的结果
     /// 等价于直接解析对应的源码前缀。
-    pub fn finish(self) -> Document<'input> {
-        self.finish_checked()
-            .expect("parse failed: input exceeds parser limits")
-    }
-    pub fn finish_checked(self) -> Result<Document<'input>, ParseError> {
+    pub fn finish(self) -> Result<Document<'input>, ParseError> {
         self.materialize_all()
     }
     /// 语义准备（F2/C3）：对已接受前缀执行 BlockId 发现（引用定义提取惰性至首次物化），
     /// 并建立文档前序的语义目标索引。Heading Inline **不在此物化**（C3 惰性化）：
     /// 目标文本经 `SemanticTarget::ref_text` 按需物化，`finish` 仍按文档序补齐。
-    pub fn prepare_semantic_targets(self) -> SemanticPhase<'input> {
-        self.prepare_semantic_targets_checked()
-            .expect("parse failed: input exceeds parser limits")
-    }
-    pub fn prepare_semantic_targets_checked(self) -> Result<SemanticPhase<'input>, ParseError> {
+    pub fn prepare_semantic_targets(self) -> Result<SemanticPhase<'input>, ParseError> {
         self.prepare_semantics()
     }
 }
@@ -246,24 +238,13 @@ impl<'input> SemanticPhase<'input> {
     }
     /// 物化剩余全部 pending Inline 并返回完整 `Document`
     /// （与 `Parser::parse` 尾段共用实现）。
-    pub fn finish(self) -> Document<'input> {
-        self.finish_checked()
-            .expect("parse failed: input exceeds parser limits")
-    }
-    pub fn finish_checked(self) -> Result<Document<'input>, ParseError> {
-        self.parser.finish_inline_phase_checked()
+    pub fn finish(self) -> Result<Document<'input>, ParseError> {
+        self.parser.finish_inline_phase()
     }
     /// 选择性物化（F3）：只物化所选节点及其全部可接收 Inline 的后代，
     /// 以及被引用 footnote definition 的必要内容；空选择跳过普通正文 Inline。
     /// 未选择的节点保留 Block 结构，不生成 Inline 子节点。
     pub fn parse_selected_inlines(
-        self,
-        selection: InlineSelection,
-    ) -> SelectiveParseOutput<'input> {
-        self.parse_selected_inlines_checked(selection)
-            .expect("parse failed: input exceeds parser limits or invalid selection")
-    }
-    pub fn parse_selected_inlines_checked(
         mut self,
         selection: InlineSelection,
     ) -> Result<SelectiveParseOutput<'input>, ParseError> {
@@ -315,7 +296,7 @@ pub struct SelectiveParseOutput<'source> {
 impl<'input> Parser<'input> {
     /// Parse the complete Block structure without materializing Inline nodes.
     pub fn parse_blocks(self) -> Result<BlockDocument<'input>, ParseError> {
-        self.run_block_phase_checked(None)
+        self.run_block_phase(None)
     }
 
     /// Block 扫描阶段：对每个已 finalized 的 `Document` 直接子节点派发事件。
@@ -324,15 +305,7 @@ impl<'input> Parser<'input> {
     /// [`VisitControl::Stop`] 时终态停止：停止消费源码、丢弃剩余输入，
     /// 返回的前缀树中不含任何未接受的节点。frontmatter 与 `Document`
     /// 自身不产生事件。
-    pub fn parse_blocks_with<F, V>(self, filter: F, visitor: V) -> BlockDocument<'input>
-    where
-        F: FnMut(&TopLevelBlockEvent<'_>) -> bool,
-        V: FnMut(&TopLevelBlockEvent<'_>) -> VisitControl,
-    {
-        self.parse_blocks_with_checked(filter, visitor)
-            .expect("parse failed: input exceeds parser limits")
-    }
-    pub fn parse_blocks_with_checked<F, V>(
+    pub fn parse_blocks_with<F, V>(
         self,
         mut filter: F,
         mut visitor: V,
@@ -348,6 +321,6 @@ impl<'input> Parser<'input> {
                 VisitControl::Continue
             }
         };
-        self.run_block_phase_checked(Some(&mut combined))
+        self.run_block_phase(Some(&mut combined))
     }
 }

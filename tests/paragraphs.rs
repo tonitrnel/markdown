@@ -7,7 +7,7 @@ fn case_219() {
 bbb"#;
     let output = r#"<p>aaa</p>
 <p>bbb</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -22,7 +22,7 @@ ddd"#;
 bbb</p>
 <p>ccc
 ddd</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -34,7 +34,7 @@ fn case_221() {
 bbb"#;
     let output = r#"<p>aaa</p>
 <p>bbb</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -44,7 +44,7 @@ fn case_222() {
  bbb"#;
     let output = r#"<p>aaa
 bbb</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -56,7 +56,7 @@ fn case_223() {
     let output = r#"<p>aaa
 bbb
 ccc</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -66,7 +66,7 @@ fn case_224() {
 bbb"#;
     let output = r#"<p>aaa
 bbb</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -77,17 +77,16 @@ bbb"#;
     let output = r#"<pre><code>aaa
 </code></pre>
 <p>bbb</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
 #[test]
 fn case_226() {
-    let input = r#"aaa     
-bbb"#;
+    let input = "aaa     \nbbb";
     let output = r#"<p>aaa<br />
 bbb</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }

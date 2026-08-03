@@ -1173,7 +1173,7 @@ mod tests {
 <script>console.log("hello world")</script>
         "#
         .trim();
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,
@@ -1196,7 +1196,7 @@ mod tests {
 h
 nts-->h"#
             .trim();
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,
@@ -1211,7 +1211,7 @@ echo "php is best programming language in the universe."
 ?>
         "#
         .trim();
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,
@@ -1226,7 +1226,7 @@ echo "php is best programming language in the universe."
 <!DOCTYPE html>
         "#
         .trim();
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,
@@ -1252,7 +1252,7 @@ return 0;
 ]]>
         "#
         .trim();
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast[1].body,
@@ -1267,7 +1267,7 @@ return 0;
 </p>
         "#
             .trim();
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
@@ -1295,7 +1295,8 @@ return 0;
         let text = r#"<Button>Click Me 1</Button>"#.trim();
         let ast =
             Parser::new_with_options(text, ParserOptions::default().enabled_jsx_like_component())
-                .parse();
+                .parse()
+                .unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(ast[1].body, MarkdownNode::Paragraph);
@@ -1320,7 +1321,7 @@ return 0;
     #[test]
     fn jsx_like_components_mode_does_not_change_default_type7_behavior() {
         let text = "<foo-bar>\ntext\n</foo-bar>";
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert!(if let MarkdownNode::Html(h) = &ast[1].body {
             matches!(
                 h.as_ref(),
@@ -1336,7 +1337,8 @@ return 0;
         let text = "<foo-bar>\ntext\n</foo-bar>";
         let ast =
             Parser::new_with_options(text, ParserOptions::default().enabled_jsx_like_component())
-                .parse();
+                .parse()
+                .unwrap();
         assert_eq!(ast[1].body, MarkdownNode::Paragraph);
     }
     #[test]
@@ -1349,7 +1351,7 @@ _world_.
 </pre>
 </td></tr></table>"#
             .trim();
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
             ast.to_html(),
@@ -1364,7 +1366,7 @@ _world_.
 
     #[test]
     fn generic_and_component_classification() {
-        let generic = Parser::new("<foo-bar>Click</foo-bar>").parse();
+        let generic = Parser::new("<foo-bar>Click</foo-bar>").parse().unwrap();
         assert_eq!(generic[0].body, MarkdownNode::Document);
         assert_eq!(generic[1].body, MarkdownNode::Paragraph);
         assert_eq!(
@@ -1378,7 +1380,7 @@ _world_.
             ))))
         );
 
-        let component = Parser::new("<Button>Click</Button>").parse();
+        let component = Parser::new("<Button>Click</Button>").parse().unwrap();
         assert_eq!(component[0].body, MarkdownNode::Document);
         assert_eq!(component[1].body, MarkdownNode::Paragraph);
         assert_eq!(
@@ -1396,7 +1398,8 @@ _world_.
             "<Button>Click</Button>",
             ParserOptions::default().enabled_jsx_like_component(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         assert_eq!(component_jsx_like[0].body, MarkdownNode::Document);
         assert_eq!(component_jsx_like[1].body, MarkdownNode::Paragraph);
         assert_eq!(
@@ -1429,7 +1432,8 @@ _world_.
 "#,
             ParserOptions::default().enabled_jsx_like_component(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast[0].body, MarkdownNode::Document);
         let root = ast.get_first_child(0).unwrap();
@@ -1522,7 +1526,8 @@ _world_.
             "<Button>{(x: Foo) => ({ value: x })}</Button>",
             ParserOptions::default().enabled_jsx_like_component(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(ast[1].body, MarkdownNode::Paragraph);
@@ -1550,7 +1555,8 @@ _world_.
             "<Button>{/* comment */}</Button>",
             ParserOptions::default().enabled_jsx_like_component(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(ast[1].body, MarkdownNode::Paragraph);
@@ -1578,7 +1584,8 @@ _world_.
             "<NestedList items={['A', ['B', 'C'], 'D']} />",
             ParserOptions::default().enabled_jsx_like_component(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(
@@ -1602,7 +1609,8 @@ _world_.
             "<UI.Button>Click</UI.Button>",
             ParserOptions::default().enabled_jsx_like_component(),
         )
-        .parse();
+        .parse()
+        .unwrap();
         println!("AST:\n{ast:?}");
         assert_eq!(ast[0].body, MarkdownNode::Document);
         assert_eq!(ast[1].body, MarkdownNode::Paragraph);

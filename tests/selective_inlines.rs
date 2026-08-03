@@ -41,7 +41,9 @@ fn prepared(source: &str) -> (SemanticPhase<'_>, Vec<usize>) {
                 VisitControl::Continue
             },
         )
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     (phase, top_level)
 }
 
@@ -50,8 +52,8 @@ fn full_selection_equals_plain_parse() {
     let (phase, _) = prepared(SOURCE);
     let mut selection = InlineSelection::default();
     selection.select(0); // Document 根 = 全选
-    let output = phase.parse_selected_inlines(selection);
-    let plain = Parser::new_with_options(SOURCE, ofm()).parse();
+    let output = phase.parse_selected_inlines(selection).unwrap();
+    let plain = Parser::new_with_options(SOURCE, ofm()).parse().unwrap();
     assert_eq!(output.block_status, BlockScanStatus::Complete);
     assert_eq!(semantic_digest(&output.document), semantic_digest(&plain));
     assert_eq!(output.document.to_html(), plain.to_html());
@@ -63,8 +65,8 @@ fn full_selection_equals_plain_parse_on_curated_corpus() {
     let (phase, _) = prepared(source);
     let mut selection = InlineSelection::default();
     selection.select(0);
-    let output = phase.parse_selected_inlines(selection);
-    let plain = Parser::new_with_options(source, ofm()).parse();
+    let output = phase.parse_selected_inlines(selection).unwrap();
+    let plain = Parser::new_with_options(source, ofm()).parse().unwrap();
     assert_eq!(semantic_digest(&output.document), semantic_digest(&plain));
     assert_eq!(output.document.to_html(), plain.to_html());
 }
@@ -72,7 +74,9 @@ fn full_selection_equals_plain_parse_on_curated_corpus() {
 #[test]
 fn empty_selection_skips_body_inlines_but_keeps_headings() {
     let (phase, top_level) = prepared(SOURCE);
-    let output = phase.parse_selected_inlines(InlineSelection::default());
+    let output = phase
+        .parse_selected_inlines(InlineSelection::default())
+        .unwrap();
     let doc = &output.document;
     // C3：Heading 惰性化后，空选择下同样保持 pending（要 AST 需 select 或 ref_text）
     assert!(doc.tree.get_first_child(top_level[0]).is_none());
@@ -93,7 +97,7 @@ fn leaf_selection_materializes_only_that_node() {
     let alpha = top_level[1];
     let mut selection = InlineSelection::default();
     selection.select(alpha);
-    let output = phase.parse_selected_inlines(selection);
+    let output = phase.parse_selected_inlines(selection).unwrap();
     let doc = &output.document;
     assert!(doc.tree.get_first_child(alpha).is_some());
     // Alpha 的链接已解析
@@ -119,7 +123,7 @@ fn container_selection_expands_inline_capable_descendants() {
     let quote = top_level[2];
     let mut selection = InlineSelection::default();
     selection.select(quote);
-    let output = phase.parse_selected_inlines(selection);
+    let output = phase.parse_selected_inlines(selection).unwrap();
     let doc = &output.document;
     // 引用内两个段落（Beta/Gamma）都应物化
     let mut materialized = 0;
@@ -140,7 +144,7 @@ fn ancestor_and_descendant_selection_deduplicates() {
     let quote = top_level[2];
     let mut selection = InlineSelection::default();
     selection.select(quote);
-    let ancestor_only = phase.parse_selected_inlines(selection);
+    let ancestor_only = phase.parse_selected_inlines(selection).unwrap();
 
     let (phase2, top_level2) = prepared(SOURCE);
     let quote2 = top_level2[2];
@@ -151,6 +155,7 @@ fn ancestor_and_descendant_selection_deduplicates() {
             // 同时选择其第一个后代段落
             s
         })
+        .unwrap()
         .document;
     // 两种选择方式结果一致（重复选择不产生重复节点/副作用）
     assert_eq!(
@@ -165,7 +170,7 @@ fn footnote_dependencies_expand_recursively() {
     let delta = top_level[3];
     let mut selection = InlineSelection::default();
     selection.select(delta);
-    let output = phase.parse_selected_inlines(selection);
+    let output = phase.parse_selected_inlines(selection).unwrap();
     let html = output.document.to_html();
     // x 被选中内容引用 → 物化并进列表；x 的正文引用 y → 递归物化
     assert!(html.contains(r#"<li id="cont-fn-x">"#), "{html}");
@@ -181,7 +186,7 @@ fn invalid_selection_node_is_rejected_before_materialization() {
     let (phase, _) = prepared(SOURCE);
     let mut selection = InlineSelection::default();
     selection.select(999_999);
-    match phase.parse_selected_inlines_checked(selection) {
+    match phase.parse_selected_inlines(selection) {
         Err(err) => assert_eq!(err, ParseError::InvalidSelectionNode { node_id: 999_999 }),
         Ok(_) => panic!("invalid selection should be rejected"),
     }
@@ -203,14 +208,16 @@ fn selection_on_stopped_prefix_carries_status() {
                 }
             },
         )
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     let mut selection = InlineSelection::default();
     selection.select(0);
-    let output = phase.parse_selected_inlines(selection);
+    let output = phase.parse_selected_inlines(selection).unwrap();
     assert_eq!(output.block_status, BlockScanStatus::Stopped);
     // 前缀 = Heading + Alpha；全选前缀与直接解析前缀一致
     let prefix = "# Title\n\nAlpha para [link](https://a).\n\n";
-    let plain = Parser::new_with_options(prefix, ofm()).parse();
+    let plain = Parser::new_with_options(prefix, ofm()).parse().unwrap();
     assert_eq!(semantic_digest(&output.document), semantic_digest(&plain));
 }
 
@@ -224,15 +231,14 @@ fn parse_selected_string_full_selection_equals_plain_parse() {
             .enabled_ofm()
     };
     let selected =
-        markdown::parser::Parser::parse_selected_string_checked(text.clone(), opts(), &[0])
-            .unwrap();
-    let plain = markdown::parser::Parser::parse_string(text, opts());
+        markdown::parser::Parser::parse_selected_string(text.clone(), opts(), &[0]).unwrap();
+    let plain = markdown::parser::Parser::parse_string(text, opts()).unwrap();
     assert_eq!(semantic_digest(&selected), semantic_digest(&plain));
 }
 
 #[test]
 fn parse_selected_string_rejects_invalid_node() {
-    let err = markdown::parser::Parser::parse_selected_string_checked(
+    let err = markdown::parser::Parser::parse_selected_string(
         "# t\n\npara\n".to_string(),
         markdown::parser::ParserOptions::default().enabled_ofm(),
         &[999_999],
@@ -253,7 +259,9 @@ fn node_ids_stable_across_calls_on_identical_source() {
         let mut selection = markdown::selective::InlineSelection::default();
         let mut phase = markdown::parser::Parser::new_with_options(text, opts())
             .parse_blocks_with(|_| true, |_| markdown::selective::VisitControl::Continue)
-            .prepare_semantic_targets();
+            .unwrap()
+            .prepare_semantic_targets()
+            .unwrap();
         phase.visit_semantic_targets(
             |_| true,
             &mut selection,

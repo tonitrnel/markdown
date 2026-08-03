@@ -33,7 +33,7 @@ Link to a page: [[Internal Links|custom display text]]
 此处块部分语法是：`^9b8041`，包含上面的一个段落，`9b8041`是段落ID，一般由 Obsidian 生成，解析时需要考虑
 ^365d428
 
-查看：[Internal Links](https://help.obsidian.md/Linking+notes+and+files/Internal+links) 
+查看：[Internal Links](https://help.obsidian.md/Linking+notes+and+files/Internal+links)
 
 ### 内部嵌入 Embeds
 
@@ -329,13 +329,13 @@ Use two equal signs to ==highlight text==.
 Use three stars ***, hyphens ---, or underscores ___ in a new line to produce an horizontal bar.
 ```
 
-Use three stars ***, hyphens 
+Use three stars ***, hyphens
 
 ---
 
-, or underscores 
+, or underscores
 
-___ 
+___
 
 in a new line to produce an horizontal bar.
 
@@ -429,7 +429,7 @@ multiple lines
 补充：[Github Flavored Markdown(GFM)](https://github.github.com/gfm/)
 
 > `Hammerspoon` 是一个 macos 上的自动化工具"##;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("{:?}", ast)
 }
 
@@ -522,7 +522,7 @@ multiple lines
 补充：[Github Flavored Markdown(GFM)](https://github.github.com/gfm/)
 
 > `Hammerspoon` 是一个 macos 上的自动化工具"##;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("{:?}", ast)
 }
 
@@ -535,7 +535,9 @@ fn parse_ofm_task_list_items() {
 - [?] this is also a complete item (works with every character)
 - [ ] this is an incomplete item
 - [ ] tasks can be clicked in Preview to be checked off"##;
-    let ast = Parser::new_with_options(input, ParserOptions::default().enabled_ofm()).parse();
+    let ast = Parser::new_with_options(input, ParserOptions::default().enabled_ofm())
+        .parse()
+        .unwrap();
     println!("{:?}", ast)
 }
 
@@ -545,7 +547,9 @@ fn parse_ofm_nested_ordered_list() {
 3. Item 3
 	1. Item 3a
 	2. Item 3b"##;
-    let ast = Parser::new_with_options(input, ParserOptions::default().enabled_ofm()).parse();
+    let ast = Parser::new_with_options(input, ParserOptions::default().enabled_ofm())
+        .parse()
+        .unwrap();
     println!("{:?}", ast)
 }
 #[test]
@@ -558,27 +562,31 @@ fn parse_ofm_embed_and_cjk_paragraphs() {
 
 后面使用 Obsidian 记录一些内容，因为其有一些独特的语法和功能，于是产生写一个解析 Markdown 为 AST 的工具。
 
-用 Rust 断断续续写了几个月终于是完成，测试了下，性能没有其他 Rust / Go 写的快，特别是用 Rust 写的 pulldown-cmark 这个库，同样一个文件，这个库能达到 500μs，我的要 10ms...  
+用 Rust 断断续续写了几个月终于是完成，测试了下，性能没有其他 Rust / Go 写的快，特别是用 Rust 写的 pulldown-cmark 这个库，同样一个文件，这个库能达到 500μs，我的要 10ms...
 ![[image_20240517193219.png]]
 
 不过这个速度也将就够用了。
 
 目前本博客支持大部分的 Obsidian 的  Markdown 功能显示，所有的附件文件都是基于相对路径匹配，不再像之前那样易出现找不到文件了。"#;
 
-    let ast = Parser::new_with_options(input, ParserOptions::default().enabled_ofm()).parse();
+    let ast = Parser::new_with_options(input, ParserOptions::default().enabled_ofm())
+        .parse()
+        .unwrap();
     println!("{:?}", ast)
 }
 
 #[test]
 fn parse_ofm_html_iframe_block() {
     let input = r#"喵喵喵
-    
+
 <iframe src="https://codesandbox.io/embed/react-function-component-gets-state-in-timer-vyv6g?autoresize=1&fontsize=14&hidenavigation=1&initialpath=%2Freact-shiyong-hanshu-shi-zujian-he-liangci-xuanran-wenti&module=%2Fsrc%2Fcomponents%2Fcounter.tsx&theme=light&view=preview"
      style="width:100%; height:500px; border:0; border-radius: 4px; overflow:hidden;"
      title="React function component gets state in timer"
      allow="geolocation; microphone; camera; midi; vr; accelerometer; gyroscope; payment; ambient-light-sensor; encrypted-media; usb"
      sandbox="allow-modals allow-forms allow-popups allow-scripts allow-same-origin"
    />"#;
-    let ast = Parser::new_with_options(input, ParserOptions::default().enabled_ofm()).parse();
+    let ast = Parser::new_with_options(input, ParserOptions::default().enabled_ofm())
+        .parse()
+        .unwrap();
     println!("{:?}", ast)
 }

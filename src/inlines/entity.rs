@@ -112,7 +112,7 @@ mod tests {
         let text = r#"&nbsp; &amp; &copy; &AElig; &Dcaron;
 &frac34; &HilbertSpace; &DifferentialD;
 &ClockwiseContourIntegral; &ngE;"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(
             ast.to_html(),
             "<p>\u{a0} &amp; © Æ Ď\n¾ ℋ ⅆ\n∲ ≧\u{338}</p>"
@@ -121,13 +121,13 @@ mod tests {
     #[test]
     fn case_26() {
         let text = r#"&#35; &#1234; &#992; &#0;"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p># Ӓ Ϡ �</p>"#)
     }
     #[test]
     fn case_27() {
         let text = r#"&#X22; &#XD06; &#xcab;"#;
-        let ast = Parser::new(text).parse();
+        let ast = Parser::new(text).parse().unwrap();
         assert_eq!(ast.to_html(), r#"<p>&quot; ആ ಫ</p>"#)
     }
 }

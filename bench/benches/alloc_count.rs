@@ -53,7 +53,7 @@ fn reset_counts() {
 fn parse_once(text: &str) -> u64 {
     let started = Instant::now();
     let parser = Parser::new_with_options(text, ParserOptions::default().enabled_ofm());
-    black_box(parser.parse());
+    black_box(parser.parse().unwrap());
     started.elapsed().as_nanos() as u64
 }
 
@@ -72,7 +72,9 @@ fn session_prepare_once(text: &str) -> u64 {
     let started = Instant::now();
     let phase = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
-        .prepare_semantic_targets();
+        .unwrap()
+        .prepare_semantic_targets()
+        .unwrap();
     black_box(&phase);
     drop(phase);
     started.elapsed().as_nanos() as u64
@@ -123,7 +125,9 @@ fn measure(fixture_label: Option<&str>, text: &str) {
 }
 
 fn measure_render(text: &str) {
-    let document = Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+    let document = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+        .parse()
+        .unwrap();
     let warmup = document.to_html();
     let output_len = warmup.len();
     let output_capacity = warmup.capacity();

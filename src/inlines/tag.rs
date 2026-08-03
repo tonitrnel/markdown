@@ -74,8 +74,9 @@ mod tests {
 
     #[test]
     fn ofm_case_1() {
-        let ast =
-            Parser::new_with_options("#yymm1", ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options("#yymm1", ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(ast.to_html(), r##"<p><a href="#yymm1">#yymm1</a></p>"##)
     }
     #[test]
@@ -95,14 +96,17 @@ mod tests {
             r##"<p><a href="#inbox/to-read">#inbox/to-read</a></p>"##,
         ];
         for (i, text) in texts.iter().enumerate() {
-            let ast =
-                Parser::new_with_options(text, ParserOptions::default().enabled_ofm()).parse();
+            let ast = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
+                .parse()
+                .unwrap();
             assert_eq!(ast.to_html(), results[i])
         }
     }
     #[test]
     fn ofm_case_3() {
-        let ast = Parser::new_with_options("#泥嚎", ParserOptions::default().enabled_ofm()).parse();
+        let ast = Parser::new_with_options("#泥嚎", ParserOptions::default().enabled_ofm())
+            .parse()
+            .unwrap();
         assert_eq!(
             ast.to_html(),
             r##"<p><a href="#%E6%B3%A5%E5%9A%8E">#泥嚎</a></p>"##

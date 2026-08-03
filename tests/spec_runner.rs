@@ -89,7 +89,9 @@ fn run_example_with_comparison(
     options: ParserOptions,
     comparison: Comparison,
 ) -> Result<(), String> {
-    let ast = Parser::new_with_options(&testcase.markdown, options).parse();
+    let ast = Parser::new_with_options(&testcase.markdown, options)
+        .parse()
+        .unwrap();
     let html = ast.to_html();
     let matches = match comparison {
         Comparison::Normalized => html.replace('\n', "") == testcase.html.replace('\n', ""),

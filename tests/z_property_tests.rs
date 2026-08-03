@@ -12,7 +12,7 @@ use proptest::prelude::*;
 
 // Helper function to parse markdown and render to HTML
 fn parse_and_render(input: &str) -> String {
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     ast.to_html()
 }
 

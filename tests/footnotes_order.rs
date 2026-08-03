@@ -13,6 +13,7 @@ fn footnote_numbering_follows_document_order_across_blocks() {
     }
     let html = Parser::new_with_options(&src, ParserOptions::default().enabled_ofm())
         .parse()
+        .unwrap()
         .to_html();
 
     // 每个引用标记按文档顺序取得编号 1..=20
@@ -46,6 +47,7 @@ fn adjacent_footnote_references_render_separately() {
     let src = "A[^x][^y].\n\n[^x]: X\n[^y]: Y\n";
     let html = Parser::new_with_options(src, ParserOptions::default().enabled_ofm())
         .parse()
+        .unwrap()
         .to_html();
     assert!(
         html.contains(
@@ -63,6 +65,7 @@ fn footnote_reference_takes_precedence_over_inline_link_form() {
     let src = "A[^x](not-a-url).\n\n[^x]: X\n";
     let html = Parser::new_with_options(src, ParserOptions::default().enabled_ofm())
         .parse()
+        .unwrap()
         .to_html();
     assert!(
         html.contains(r##">[1]</a>(not-a-url).</p>"##),
@@ -76,6 +79,7 @@ fn footnote_numbering_within_single_block_unchanged() {
     let src = "A[^x] then B[^y].\n\n[^x]: note x\n[^y]: note y\n";
     let html = Parser::new_with_options(src, ParserOptions::default().enabled_ofm())
         .parse()
+        .unwrap()
         .to_html();
     assert!(html.contains(r##"<a href="#cont-fn-x" id="cont-fn-ref-x">[1]</a>"##));
     assert!(html.contains(r##"<a href="#cont-fn-y" id="cont-fn-ref-y">[2]</a>"##));

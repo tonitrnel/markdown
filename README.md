@@ -52,7 +52,7 @@ let parser = Parser::new_with_options(
         .with_max_nodes(5_000_000),
 );
 
-match parser.parse_checked() {
+match parser.parse {
     Ok(doc) => { /* use doc */ }
     Err(ParseError::InputTooLarge { limit, actual }) => { /* handle */ }
     Err(ParseError::NodeLimitExceeded { limit, actual }) => { /* handle */ }

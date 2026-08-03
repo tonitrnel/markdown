@@ -10,7 +10,7 @@ fn case_228() {
 <p>bar
 baz</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -24,7 +24,7 @@ fn case_229() {
 <p>bar
 baz</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -38,7 +38,7 @@ fn case_230() {
 <p>bar
 baz</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -51,7 +51,7 @@ fn case_231() {
 &gt; bar
 &gt; baz
 </code></pre>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -65,7 +65,7 @@ baz"#;
 <p>bar
 baz</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -79,7 +79,7 @@ baz
 baz
 foo</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -91,7 +91,7 @@ fn case_234() {
 <p>foo</p>
 </blockquote>
 <hr />"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -107,7 +107,7 @@ fn case_235() {
 <ul>
 <li>bar</li>
 </ul>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -121,7 +121,7 @@ fn case_236() {
 </blockquote>
 <pre><code>bar
 </code></pre>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -135,7 +135,7 @@ foo
 </blockquote>
 <p>foo</p>
 <pre><code></code></pre>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -147,7 +147,7 @@ fn case_238() {
 <p>foo
 - bar</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -156,18 +156,18 @@ fn case_239() {
     let input = r#">"#;
     let output = r#"<blockquote>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
 #[test]
 fn case_240() {
     let input = r#">
->  
+>
 >"#;
     let output = r#"<blockquote>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -179,7 +179,7 @@ fn case_241() {
     let output = r#"<blockquote>
 <p>foo</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -194,7 +194,7 @@ fn case_242() {
 <blockquote>
 <p>bar</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -206,7 +206,7 @@ fn case_243() {
 <p>foo
 bar</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -219,7 +219,7 @@ fn case_244() {
 <p>foo</p>
 <p>bar</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -231,7 +231,7 @@ fn case_245() {
 <blockquote>
 <p>bar</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -247,7 +247,7 @@ fn case_246() {
 <blockquote>
 <p>bbb</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -259,7 +259,7 @@ baz"#;
 <p>bar
 baz</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -272,7 +272,7 @@ baz"#;
 <p>bar</p>
 </blockquote>
 <p>baz</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -285,7 +285,7 @@ baz"#;
 <p>bar</p>
 </blockquote>
 <p>baz</p>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -301,7 +301,7 @@ bar</p>
 </blockquote>
 </blockquote>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -319,7 +319,7 @@ baz</p>
 </blockquote>
 </blockquote>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
@@ -335,7 +335,7 @@ fn case_252() {
 <blockquote>
 <p>not code</p>
 </blockquote>"#;
-    let ast = Parser::new(input).parse();
+    let ast = Parser::new(input).parse().unwrap();
     println!("AST:\n{ast:?}");
     assert_eq!(ast.to_html(), output);
 }
