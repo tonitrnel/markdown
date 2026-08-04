@@ -71,10 +71,10 @@ jobs:
           node --version
           npm --version
 
-      - name: Ensure Rust 1.93.1 and wasm target
+      - name: Ensure Rust 1.96 and wasm target
         run: |
           set -euo pipefail
-          RUST_VERSION="1.93.1"
+          RUST_VERSION="1.96"
           if ! command -v rustup >/dev/null 2>&1; then
             echo "::error::rustup is missing on runner."
             exit 1
@@ -101,14 +101,15 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: ${{ runner.os }}-wasm-pack-v0.14.0-${{ matrix.package_dir }}
+          key: ${{ runner.os }}-wasm-pack-v0.15.0-${{ matrix.package_dir }}
           restore-keys: |
             ${{ runner.os }}-wasm-pack-
 
       - name: Install wasm-pack
         run: |
-          if ! command -v wasm-pack >/dev/null 2>&1; then
-            cargo install wasm-pack --locked --version 0.14.0
+          WASM_PACK_VERSION="0.15.0"
+          if ! command -v wasm-pack >/dev/null 2>&1 || ! wasm-pack --version | grep -q "wasm-pack ${WASM_PACK_VERSION}"; then
+            cargo install wasm-pack --locked --version "${WASM_PACK_VERSION}" --force
           fi
           wasm-pack --version
 

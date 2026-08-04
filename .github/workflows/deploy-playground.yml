@@ -23,19 +23,18 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.3
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "25.6.1"
           registry-url: "https://registry.npmjs.org"
-          cache: npm
-          cache-dependency-path: playground/package-lock.json
-
-      - name: Ensure npm version
-        run: |
-          npm i -g npm@11.9.0
-          node --version
-          npm --version
+          cache: pnpm
+          cache-dependency-path: playground/pnpm-lock.yaml
 
       - name: Read wasm version from Cargo.toml
         id: wasm_version
@@ -52,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           for i in $(seq 1 30); do
-            if npm view "@ptdgrp/markdown-wasm@${WASM_VERSION}" version >/dev/null 2>&1; then
+            if pnpm view "@ptdgrp/markdown-wasm@${WASM_VERSION}" version >/dev/null 2>&1; then
               echo "Found @ptdgrp/markdown-wasm@${WASM_VERSION}"
               exit 0
             fi
@@ -68,14 +67,14 @@ jobs:
           WASM_VERSION: ${{ steps.wasm_version.outputs.version }}
         run: |
           set -euo pipefail
-          npm pkg set "dependencies[@ptdgrp/markdown-wasm]=${WASM_VERSION}"
+          pnpm pkg set "dependencies[@ptdgrp/markdown-wasm]=${WASM_VERSION}"
           cat package.json
 
       - name: Install and build playground
         working-directory: playground
         run: |
-          npm install
-          npm run build
+          pnpm install --no-frozen-lockfile
+          pnpm build
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
