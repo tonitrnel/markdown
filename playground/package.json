@@ -9,20 +9,20 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@ptdgrp/markdown-wasm": "1.0.4",
+    "@ptdgrp/markdown-wasm": "1.0.5",
     "react-json-view-lite": "^2.5.0",
-    "solid-js": "^1.9.13",
-    "shiki": "^1.29.2"
+    "shiki": "^4.4.1",
+    "solid-js": "^1.9.14"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.2",
-    "@types/node": "^22.19.20",
-    "prettier": "^3.8.4",
-    "prettier-plugin-tailwindcss": "^0.6.14",
-    "tailwindcss": "^4.3.0",
-    "typescript": "~5.7.3",
-    "vite": "^8.1.1",
-    "vite-plugin-solid": "^2.11.12",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.1.2",
+    "prettier": "^3.9.6",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~7.0.2",
+    "vite": "^8.2.0",
+    "vite-plugin-solid": "^2.11.14",
     "vite-plugin-top-level-await": "^1.6.0",
     "vite-plugin-wasm": "^3.6.0"
   }
