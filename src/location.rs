@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::fmt::{Debug, Formatter};
 
-/// Location in the source text (line and column numbers, both starting from 1)
+/// A location in source text, with line and column numbers starting at one.
 #[derive(Serialize, Eq, PartialEq, Clone, Copy)]
 pub struct Location {
     /// Line number, starting from 1
@@ -23,6 +23,7 @@ impl Default for Location {
 }
 
 impl Location {
+    /// Creates a one-based source location.
     pub fn new(line: u64, column: u64) -> Self {
         Self { line, column }
     }

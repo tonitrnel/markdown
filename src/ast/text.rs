@@ -1,30 +1,34 @@
-//! Source-backed Text 表示（P1，接口契约见 map ticket 07）。
+//! Source-backed text storage.
 //!
-//! `TextRef::Source` 保存指向 Document 源码的 byte range，`TextRef::Owned`
-//! 保存转换后/生成的文本。读取一律经 `Document::text`（或在解析器内部经
-//! `TextRef::resolve`）完成；需要原地改写时经 `make_owned` 按需物化
-//! （copy-on-write）。
+//! [`TextRef::Source`] stores a byte range into the owning document's source.
+//! [`TextRef::Owned`] stores transformed or generated text. Prefer
+//! [`crate::Document::text`] when reading text from an AST node.
 
 use serde::Serialize;
 use std::fmt::{Debug, Formatter};
 
-/// 指向 Document 源码的半开 byte 区间 `[start, end)`，必须落在 UTF-8 边界。
+/// A half-open byte range `[start, end)` into a document's UTF-8 source.
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SourceSpan {
+    /// Inclusive starting byte offset.
     pub start: u32,
+    /// Exclusive ending byte offset.
     pub end: u32,
 }
 
 impl SourceSpan {
+    /// Creates a source span from byte offsets.
     #[inline]
     pub fn new(start: u32, end: u32) -> Self {
         debug_assert!(start <= end);
         Self { start, end }
     }
+    /// Returns the span length in bytes.
     #[inline]
     pub fn len(&self) -> usize {
         (self.end - self.start) as usize
     }
+    /// Returns `true` when the span contains no bytes.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.start == self.end
@@ -41,18 +45,20 @@ impl Debug for SourceSpan {
     }
 }
 
-/// Text 载荷：源码区间或转换后的自有文本。
+/// Text stored either as a source range or as an owned string.
 #[derive(Serialize, Clone, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum TextRef {
-    /// 未经转换的连续源码切片
+    /// Unchanged text backed by the document source.
     Source(SourceSpan),
-    /// 转换/生成/合并后的自有文本
+    /// Transformed, generated, or merged text owned by the node.
     Owned(String),
 }
 
 impl TextRef {
-    /// 解析为显示文本。`source` 必须是创建该 `Source` 区间的同一份源码。
+    /// Resolves this value against its original source string.
+    ///
+    /// Prefer [`crate::Document::text`] when a document is available.
     #[inline]
     pub fn resolve<'a>(&'a self, source: &'a str) -> &'a str {
         match self {
@@ -60,7 +66,7 @@ impl TextRef {
             TextRef::Owned(text) => text.as_str(),
         }
     }
-    /// 显示文本的字节长度。
+    /// Returns the resolved text length in bytes.
     #[inline]
     pub fn len(&self, source: &str) -> usize {
         match self {
@@ -71,6 +77,7 @@ impl TextRef {
             TextRef::Owned(text) => text.len(),
         }
     }
+    /// Returns `true` when the resolved text is empty.
     #[inline]
     pub fn is_empty(&self, source: &str) -> bool {
         self.len(source) == 0

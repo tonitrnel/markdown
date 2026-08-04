@@ -3,11 +3,17 @@ use serde::Serialize;
 use std::fmt::{Debug, Formatter};
 
 #[derive(Serialize)]
+/// A node stored in the document's arena-backed syntax tree.
 pub struct Node {
+    /// Markdown syntax represented by this node.
     pub body: MarkdownNode,
-    /// 源码字节区间（主表示，M2）；行列 `Location` 经 `Document::location_at` 按需换算。
+    /// Half-open byte range in [`crate::Document::source`].
+    ///
+    /// Convert either endpoint to line and column coordinates with
+    /// [`crate::Document::location_at`].
     pub span: crate::ast::text::SourceSpan,
     pub(crate) processing: bool,
+    /// Optional OFM block ID without the leading `^`.
     pub id: Option<Box<String>>,
 }
 impl Debug for Node {

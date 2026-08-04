@@ -1,3 +1,5 @@
+//! Markdown AST node kinds and their syntax-specific payload types.
+
 use serde::Serialize;
 
 pub mod block_quote;
@@ -18,69 +20,79 @@ pub mod thematic_break;
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
+/// The syntax kind and payload stored in a [`crate::Node`].
+///
+/// Use [`MarkdownNode::is_block_level`] and [`MarkdownNode::is_inline_level`]
+/// when generic tree processing needs to distinguish structural and inline
+/// nodes.
 pub enum MarkdownNode {
-    // 根节点
+    /// Document root. This is always node ID `0`.
     Document,
-    // 前言，记录 Yaml 内容，仅出现在内容顶部
+    /// Parsed frontmatter at the start of the document.
     FrontMatter(Box<crate::exts::yaml::YamlMap>),
-    // 段落
+    /// Paragraph container.
     Paragraph,
-    // 软换行，指单个 \n
+    /// Soft line break.
     SoftBreak,
-    // 硬换行，末尾跟随空格、'\' 或多个 \n
+    /// Hard line break.
     HardBreak,
-    // 文本
+    /// Source-backed or owned text.
     Text(text::TextRef),
-    // 内部嵌入
+    /// OFM embedded file or note.
     Embed(Box<embed::Embed>),
-    // 标题
+    /// ATX or Setext heading.
     Heading(heading::Heading),
-    // 重要
+    /// Strong emphasis.
     Strong,
-    // 强调
+    /// Emphasis.
     Emphasis,
-    // 列表
+    /// Ordered, bullet, or task list.
     List(Box<list::List>),
-    // 列表项
+    /// List item.
     ListItem(Box<list::ListItem>),
-    // 图像
+    /// Image.
     Image(Box<image::Image>),
-    // 链接
+    /// Link, wikilink, or footnote link.
     Link(Box<link::Link>),
-    // 标签
+    /// OFM tag.
     Tag(String),
-    // 表情
+    /// Emoji shortcode or value.
     Emoji(String),
-    // 块引用
+    /// Block quote container.
     BlockQuote,
-    // 代码
+    /// Inline, fenced, or indented code.
     Code(Box<code::Code>),
-    // 表格
+    /// GFM table container.
     Table(Box<table::Table>),
+    /// Table head section.
     TableHead,
+    /// Table header cell.
     TableHeadCol,
+    /// Table body section.
     TableBody,
+    /// Table row.
     TableRow,
+    /// Table body cell.
     TableDataCol,
-    // 删除线
+    /// GFM strikethrough.
     Strikethrough,
-    // 高亮
+    /// OFM highlighting.
     Highlighting,
-    // 水平线
+    /// Thematic break.
     ThematicBreak,
-    // 脚注
+    /// Footnote definition or inline footnote.
     Footnote(Box<footnote::Footnote>),
-    // 脚注列表（仅在使用某个脚注创建，不由正文生成）
+    /// Generated footnote list.
     FootnoteList,
-    // 数学/公式
+    /// Inline or block math.
     Math(Box<math::Math>),
-    // 标注
+    /// OFM callout.
     Callout(Box<callout::Callout>),
-    // HTML
+    /// Raw HTML block, inline HTML, comment, or JSX-like element.
     Html(Box<html::Html>),
 }
 impl MarkdownNode {
-    /// 是否接受目标节点
+    /// Returns whether this node kind may directly contain `target`.
     pub fn can_contain(&self, target: &MarkdownNode) -> bool {
         match self {
             MarkdownNode::List(..) => matches!(target, MarkdownNode::ListItem(..)),
@@ -102,7 +114,7 @@ impl MarkdownNode {
             _ => false,
         }
     }
-    /// 是否接受纯文本行
+    /// Returns whether this node kind accepts source lines during block parsing.
     pub fn accepts_lines(&self) -> bool {
         matches!(
             self,
@@ -114,12 +126,15 @@ impl MarkdownNode {
                 | MarkdownNode::Heading(..)
         )
     }
+    /// Returns whether this node kind may be reprocessed by the block parser.
     pub fn support_reprocess(&self) -> bool {
         matches!(self, MarkdownNode::Table(..) | MarkdownNode::TableBody)
     }
+    /// Returns `true` for inline-level syntax nodes.
     pub fn is_inline_level(&self) -> bool {
         !self.is_block_level()
     }
+    /// Returns `true` for block-level syntax nodes.
     pub fn is_block_level(&self) -> bool {
         match self {
             MarkdownNode::Document
@@ -147,12 +162,14 @@ impl MarkdownNode {
             _ => false,
         }
     }
+    /// Returns whether text under this node should be XML-escaped when rendered.
     pub fn xml_escape(&self) -> bool {
         match self {
             MarkdownNode::Html(html) => html.is_disallowed_raw_html(),
             _ => true,
         }
     }
+    /// Returns whether backslash escapes apply under this node.
     pub fn backslash_escape(&self) -> bool {
         !matches!(
             self,

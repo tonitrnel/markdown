@@ -1,3 +1,5 @@
+//! Parser construction, configuration, errors, and multi-phase parsing.
+
 use crate::ast::MarkdownNode;
 use crate::ast::text::TextRef;
 use crate::blocks::{BlockMatching, BlockProcessing};
@@ -14,32 +16,52 @@ use smallvec::SmallVec;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 
+/// Opaque state captured after parsing frontmatter.
+///
+/// A snapshot can be resumed with [`Parser::from_phase_snapshot`] or, for an
+/// owned source document, [`Parser::continue_parse_from_snapshot_string`].
 pub struct ParserPhaseSnapshot {
     pub(crate) scanner_snapshot: ScannerSnapshot,
     pub(crate) options: ParserOptions,
     pub(crate) text_len: usize,
 }
 
+/// Errors that can stop parsing before a document is produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
+    /// The input exceeded the configured byte limit.
     InputTooLarge {
+        /// Configured maximum input size in bytes.
         limit: usize,
+        /// Actual input size in bytes.
         actual: usize,
     },
+    /// AST construction exceeded the configured node limit.
     NodeLimitExceeded {
+        /// Configured maximum number of node slots.
         limit: usize,
+        /// Actual number of node slots when parsing stopped.
         actual: usize,
     },
+    /// A two-phase snapshot was resumed with source text of a different length.
     SnapshotInputLengthMismatch {
+        /// Source length recorded in the snapshot.
         expected: usize,
+        /// Length of the source supplied while resuming.
         actual: usize,
     },
-    /// 选择性解析的 `InlineSelection` 含无效或未知的节点 ID
+    /// A selective inline request contained an unknown or released node ID.
     InvalidSelectionNode {
+        /// The invalid node ID.
         node_id: usize,
     },
 }
 
+/// Parser configuration.
+///
+/// Options use a consuming builder style, so they can be chained before being
+/// passed to [`Parser::new_with_options`]. The default configuration parses the
+/// crate's CommonMark-compatible core syntax with the default Cargo features.
 #[derive(Debug, Default, Clone)]
 pub struct ParserOptions {
     /// 当 github_flavored 和 obsidian_flavored 未启用时为 `true`
@@ -60,6 +82,7 @@ pub struct ParserOptions {
 }
 
 impl ParserOptions {
+    /// Enables GitHub Flavored Markdown tables, strikethrough, and task lists.
     pub fn enabled_gfm(self) -> Self {
         Self {
             github_flavored: true,
@@ -67,12 +90,17 @@ impl ParserOptions {
             ..self
         }
     }
+    /// Enables GitHub's extended autolink syntax.
     pub fn enabled_gfm_autolink(self) -> Self {
         Self {
             gfm_extended_autolink: true,
             ..self
         }
     }
+    /// Enables Obsidian Flavored Markdown extensions.
+    ///
+    /// This includes syntax such as wikilinks, embeds, callouts, block IDs,
+    /// tags, math, and Obsidian comments.
     pub fn enabled_ofm(self) -> Self {
         Self {
             obsidian_flavored: true,
@@ -80,36 +108,42 @@ impl ParserOptions {
             ..self
         }
     }
+    /// Enables JSX-like component syntax.
     pub fn enabled_jsx_like_component(self) -> Self {
         Self {
             jsx_like_component: true,
             ..self
         }
     }
+    /// Inserts spacing between adjacent CJK and ASCII text where appropriate.
     pub fn enabled_cjk_autocorrect(self) -> Self {
         Self {
             cjk_autocorrect: true,
             ..self
         }
     }
+    /// Enables typographic punctuation such as smart quotes, dashes, and ellipses.
     pub fn enabled_smart_punctuation(self) -> Self {
         Self {
             smart_punctuation: true,
             ..self
         }
     }
+    /// Normalizes punctuation in Chinese text contexts.
     pub fn enabled_normalize_chinese_punctuation(self) -> Self {
         Self {
             normalize_chinese_punctuation: true,
             ..self
         }
     }
+    /// Adjusts emphasis delimiter handling around CJK punctuation.
     pub fn enabled_cjk_friendly_delimiters(self) -> Self {
         Self {
             cjk_friendly_delimiters: true,
             ..self
         }
     }
+    /// Enables every syntax extension and text-processing option.
     pub fn enabled_all(self) -> Self {
         Self {
             default_flavored: true,
@@ -124,18 +158,21 @@ impl ParserOptions {
             ..self
         }
     }
+    /// Rejects inputs larger than `max_input_bytes`.
     pub fn with_max_input_bytes(self, max_input_bytes: usize) -> Self {
         Self {
             max_input_bytes: Some(max_input_bytes),
             ..self
         }
     }
+    /// Stops parsing when the AST exceeds `max_nodes` node slots.
     pub fn with_max_nodes(self, max_nodes: usize) -> Self {
         Self {
             max_nodes: Some(max_nodes),
             ..self
         }
     }
+    /// Replaces the set of proper nouns excluded from CJK auto-spacing.
     pub fn with_cjk_nouns<I, S>(mut self, nouns: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -145,6 +182,9 @@ impl ParserOptions {
         self.cjk_nouns.extend(nouns.into_iter().map(Into::into));
         self
     }
+    /// Loads additional CJK proper nouns from a frontmatter field.
+    ///
+    /// The field may contain a string or a list of strings.
     pub fn with_cjk_nouns_from_frontmatter(self, field: impl Into<String>) -> Self {
         Self {
             cjk_nouns_from_frontmatter: Some(field.into()),
@@ -153,6 +193,11 @@ impl ParserOptions {
     }
 }
 
+/// A single-use Markdown parser over borrowed source text.
+///
+/// Construct a parser with [`Parser::new`] or [`Parser::new_with_options`], then
+/// consume it with [`Parser::parse`], [`Parser::parse_blocks`], or one of the
+/// multi-phase parsing methods.
 pub struct Parser<'input> {
     pub(crate) scanner: Scanner<'input>,
     pub(crate) tree: Tree<Node>,
@@ -202,12 +247,15 @@ pub struct Parser<'input> {
 }
 
 impl<'input> Parser<'input> {
+    /// Returns the crate version embedded at compile time.
     pub fn version() -> &'static str {
         env!("CARGO_PKG_VERSION")
     }
+    /// Creates a parser with [`ParserOptions::default`].
     pub fn new(text: &'input str) -> Self {
         Self::new_with_options(text, ParserOptions::default())
     }
+    /// Creates a parser with explicit options.
     pub fn new_with_options(text: &'input str, options: ParserOptions) -> Self {
         // 预估节点数量：大约每 10 字节一个节点
         // C4：构造期只按 Block 相位预估（选择性会话不为整棵 Inline 树买单）；
@@ -254,17 +302,18 @@ impl<'input> Parser<'input> {
         }
     }
 
+    /// Parses the complete document, including all block and inline nodes.
+    ///
+    /// The returned [`Document`] borrows `text` from this parser's constructor.
     pub fn parse(mut self) -> Result<Document<'input>, ParseError> {
         self.ensure_limits()?;
         self.parse_frontmatter()?;
         self.continue_parse()
     }
-    /// owned-source 构造：解析完成后源码移交给返回的 `Document`（服务 WASM
-    /// 与需要文档独立于输入缓冲的调用者，map ticket 07 / ADR 0001）。
+    /// Parses a complete document that owns its source string.
     ///
-    /// 内部经临时借用解析，scanner 与 pending 状态在借用结束前全部释放；
-    /// `TextRef::Source` 保存 byte range 而非 `&str`，因此移动 `String`
-    /// 不产生自引用，无 unsafe。
+    /// This is useful for WASM, FFI, caches, and any caller that needs the
+    /// document to outlive the original input binding.
     pub fn parse_string(
         source: String,
         options: ParserOptions,
@@ -286,10 +335,11 @@ impl<'input> Parser<'input> {
             line_starts,
         })
     }
-    /// owned-source 选择性解析（W2，ticket 28）：块相位 + 语义准备后按
-    /// `node_ids` 选择并物化（含后代展开与 footnote 依赖，F3 语义），
-    /// 未选节点保留 Block 结构。`node_id` 契约：与同选项下对逐字节相同
-    /// 源码的其它解析调用一致。无效 id 返回 `InvalidSelectionNode`。
+    /// Parses owned source while materializing inline content only for selected nodes.
+    ///
+    /// The block tree remains complete. Selecting a container also selects
+    /// inline-capable descendants and required footnote definitions. Node IDs
+    /// must come from parsing identical source with identical options.
     pub fn parse_selected_string(
         source: String,
         options: ParserOptions,
@@ -319,7 +369,7 @@ impl<'input> Parser<'input> {
             line_starts,
         })
     }
-    /// owned-source 两阶段：第一阶段仅解析 frontmatter（WASM 延迟解析用）。
+    /// Parses only frontmatter and returns an owned partial document plus a snapshot.
     pub fn parse_frontmatter_phase_string(
         source: String,
         options: ParserOptions,
@@ -345,7 +395,7 @@ impl<'input> Parser<'input> {
             snapshot,
         ))
     }
-    /// owned-source 两阶段：从快照继续第二阶段，源码在文档内部往返。
+    /// Resumes an owned document created by [`Parser::parse_frontmatter_phase_string`].
     pub fn continue_parse_from_snapshot_string(
         document: Document<'static>,
         snapshot: ParserPhaseSnapshot,
@@ -382,6 +432,7 @@ impl<'input> Parser<'input> {
             }
         }
     }
+    /// Continues parsing after frontmatter has already been processed.
     pub fn continue_parse(mut self) -> Result<Document<'input>, ParseError> {
         self.tree.push();
         self.enter_block_parse();
@@ -421,6 +472,9 @@ impl<'input> Parser<'input> {
         self.tree.pop();
         Ok(self.into_ast())
     }
+    /// Parses frontmatter only and returns a borrowed partial document plus a snapshot.
+    ///
+    /// Resume with [`Parser::from_phase_snapshot`] and [`Parser::continue_parse`].
     pub fn parse_frontmatter_phase(
         mut self,
     ) -> Result<(Document<'input>, ParserPhaseSnapshot), ParseError> {
@@ -441,6 +495,11 @@ impl<'input> Parser<'input> {
             snapshot,
         ))
     }
+    /// Reconstructs a parser from a frontmatter-phase snapshot.
+    ///
+    /// `text` must have the same byte length as the source used to create the
+    /// snapshot. The supplied tree and tags normally come from the partial
+    /// [`Document`] returned with that snapshot.
     pub fn from_phase_snapshot(
         text: &'input str,
         snapshot: ParserPhaseSnapshot,
@@ -498,6 +557,10 @@ impl<'input> Parser<'input> {
         }
         self.options.cjk_nouns = merged;
     }
+    /// Parses a leading frontmatter section into the current parser tree.
+    ///
+    /// Most callers should use [`Parser::parse`] or
+    /// [`Parser::parse_frontmatter_phase`] instead.
     pub fn parse_frontmatter(&mut self) -> Result<(), ParseError> {
         if let Some(frontmatter) = exts::frontmatter::parse(self) {
             self.merge_cjk_nouns_from_frontmatter(&frontmatter);

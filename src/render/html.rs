@@ -1095,8 +1095,10 @@ impl<'input> HtmlRender<'input> {
 }
 
 impl Document<'_> {
-    /// 渲染 HTML。`TextRef::Source` 区间在写出时对文档源码解析，
-    /// 因此渲染必须经 Document（而非裸 Tree）。
+    /// Renders the document as HTML.
+    ///
+    /// Rendering is performed through the document rather than a bare tree so
+    /// source-backed text can be resolved against the original input.
     pub fn to_html(&self) -> String {
         if self.tree.is_empty() {
             return String::new();

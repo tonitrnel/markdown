@@ -3,9 +3,7 @@ use std::fs;
 
 fn main() {
     let f_start = std::time::Instant::now();
-    let text = fs::read_to_string("./benches/_data.md")
-        .or_else(|_| fs::read_to_string("../../benches/_data.md"))
-        .unwrap();
+    let text = fs::read_to_string("./bench/fixtures/curated/_data.md").unwrap();
     let a = f_start.elapsed().as_micros() as f64 / 1000.0;
     let start = std::time::Instant::now();
     let parser = Parser::new_with_options(&text, ParserOptions::default().enabled_ofm());

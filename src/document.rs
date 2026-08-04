@@ -5,13 +5,20 @@ use std::{
     ops::Deref,
 };
 
-/// Document 持有或借用唯一一份源码（ADR 0001 / map ticket 07）。
+/// Source storage retained by a parsed [`Document`].
+///
+/// Borrowed documents are produced by [`crate::Parser::parse`]. Owned documents
+/// are produced by [`crate::Parser::parse_string`] and are convenient across
+/// async, FFI, and WASM boundaries.
 pub enum SourceText<'source> {
+    /// Source borrowed from the parser input.
     Borrowed(&'source str),
+    /// Source owned by the document.
     Owned(String),
 }
 
 impl SourceText<'_> {
+    /// Returns the source as a string slice regardless of storage mode.
     #[inline]
     pub fn as_str(&self) -> &str {
         match self {
@@ -36,24 +43,31 @@ impl Debug for SourceText<'_> {
     }
 }
 
+/// A parsed Markdown document.
+///
+/// The document owns the AST [`Tree`] and retains the source needed to resolve
+/// zero-copy [`crate::ast::text::TextRef`] values. Node ID `0` is the document
+/// root.
 #[derive(Default)]
 pub struct Document<'source> {
     pub(crate) source: SourceText<'source>,
+    /// Arena-backed Markdown syntax tree.
     pub tree: Tree<Node>,
+    /// Tags discovered while parsing. Iteration order is unspecified.
     pub tags: FxHashSet<String>,
     pub(crate) line_starts: std::sync::OnceLock<Vec<u32>>,
 }
 impl<'source> Document<'source> {
-    /// 原始源码。`TextRef::Source` 区间对其解析。
+    /// Returns the original Markdown source.
     #[inline]
     pub fn source(&self) -> &str {
         self.source.as_str()
     }
-    /// 位置读取缝：按需把字节偏移换算为 1 基 `Location`。
+    /// Converts a byte offset into a one-based [`Location`].
     ///
-    /// 列按 Unicode 标量计数（tab = 1）；`offset` 超出源码长度时按末尾处理，
-    /// 落在多字节字符中间时按该字符起点计列。行索引在首次调用时惰性构建
-    /// （parse-only 路径零成本）。
+    /// Columns count Unicode scalar values, with a tab counting as one column.
+    /// Offsets past the end are clamped. The line index is built lazily on the
+    /// first call.
     pub fn location_at(&self, offset: usize) -> Location {
         let src = self.source.as_str();
         let starts = self
@@ -67,7 +81,7 @@ impl<'source> Document<'source> {
         let column = 1 + crate::span::count_chars(src.as_bytes(), line_start, offset) as u64;
         Location::new(line_idx as u64 + 1, column)
     }
-    /// 唯一文本读取缝：解析 Text 载荷为显示文本。
+    /// Resolves a source-backed or owned text value to display text.
     #[inline]
     pub fn text<'doc>(&'doc self, text: &'doc crate::ast::text::TextRef) -> &'doc str {
         text.resolve(self.source.as_str())
