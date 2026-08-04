@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [1.1.0]
 
 ### Added
 - Added `Parser::parse_blocks()` and the inspectable `BlockDocument` result for parsing Block structure without eagerly materializing Inline nodes.
