@@ -103,6 +103,8 @@ function App() {
 
   let inputTextarea: HTMLTextAreaElement | undefined;
 
+  const version = markdown.version();
+
   const toggleOption = (key: keyof ParserOptions) => {
     setOptions((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -176,6 +178,7 @@ function App() {
           <div>
             <h1 class="text-2xl font-bold text-gray-900">
               Markdown Parser Playground
+              <span class="text-xs bg-gray-300 rounded-2xl ml-1 px-1 py-0.5 font-normal">dep:v{version}</span>
             </h1>
             <p class="text-sm text-gray-500">
               Test and explore markdown parsing with various options

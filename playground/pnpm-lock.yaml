@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@ptdgrp/markdown-wasm':
-        specifier: 1.0.5
-        version: 1.0.5
+        specifier: 1.1.0
+        version: 1.1.0
       react-json-view-lite:
         specifier: ^2.5.0
         version: 2.5.0(react@19.2.7)
@@ -154,8 +154,8 @@ packages:
   '@oxc-project/types@0.142.0':
     resolution: {integrity: sha512-7W+2q5AKQVU36fkaryontrHn3YDt1RyUYXatw9i5H8ocYe2sPKSFB6eS8WNPeRKiN1qAWWZUPm7gwFzJGrccqQ==}
 
-  '@ptdgrp/markdown-wasm@1.0.5':
-    resolution: {integrity: sha512-b3RIpitn/vHhEcyCqj+s4ACZu/izjjDCUT24/O3TXy0rmPju5uH8FrMdTca9oGulWqUAAYFa7yYAgEMDKp/fnw==}
+  '@ptdgrp/markdown-wasm@1.1.0':
+    resolution: {integrity: sha512-u5aABrUKDNKUjK++95GhRGRCk9zSfFhnYn5Ohe8gg+pTOUZCIpJ8OKVuaHLrvXm1BxgwxNnLMHJX56xBAulPxQ==}
 
   '@rolldown/binding-android-arm64@1.2.2':
     resolution: {integrity: sha512-l7x215OGvo1s52JWmR8U/DAVzEDWBCIbTm28aeJV/WDTSHgcKXaZTuBT0hJMs5NggilfJTW3clZVvd24yfKJxA==}
@@ -1503,7 +1503,7 @@ snapshots:
 
   '@oxc-project/types@0.142.0': {}
 
-  '@ptdgrp/markdown-wasm@1.0.5': {}
+  '@ptdgrp/markdown-wasm@1.1.0': {}
 
   '@rolldown/binding-android-arm64@1.2.2':
     optional: true
