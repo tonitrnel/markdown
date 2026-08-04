@@ -1,6 +1,6 @@
 mod support;
 
-use markdown::{
+use ptdgrp_markdown::{
     BlockScanStatus, InlineSelection, MarkdownNode, ParseError, Parser, ParserOptions,
     SemanticPhase, VisitControl,
 };
@@ -13,7 +13,7 @@ fn ofm() -> ParserOptions {
 const SOURCE: &str = "# Title\n\nAlpha para [link](https://a).\n\n> Beta quote *em*.\n>\n> Gamma inner.\n\nDelta refs[^x].\n\nEpsilon plain.\n\n[^x]: Note body [^y].\n\n[^y]: Nested note.\n\n[^z]: Unused note.\n";
 
 /// `root` 子树内（含自身）的全部 Paragraph 是否都没有子节点（未物化）。
-fn paragraphs_unmaterialized(doc: &markdown::Document, root: usize) -> bool {
+fn paragraphs_unmaterialized(doc: &ptdgrp_markdown::Document, root: usize) -> bool {
     let mut stack = vec![root];
     while let Some(id) = stack.pop() {
         if matches!(doc.tree[id].body, MarkdownNode::Paragraph)
@@ -226,39 +226,42 @@ fn selection_on_stopped_prefix_carries_status() {
 fn parse_selected_string_full_selection_equals_plain_parse() {
     let text = std::fs::read_to_string("bench/fixtures/curated/_data.md").unwrap();
     let opts = || {
-        markdown::parser::ParserOptions::default()
+        ptdgrp_markdown::parser::ParserOptions::default()
             .enabled_gfm()
             .enabled_ofm()
     };
     let selected =
-        markdown::parser::Parser::parse_selected_string(text.clone(), opts(), &[0]).unwrap();
-    let plain = markdown::parser::Parser::parse_string(text, opts()).unwrap();
+        ptdgrp_markdown::parser::Parser::parse_selected_string(text.clone(), opts(), &[0]).unwrap();
+    let plain = ptdgrp_markdown::parser::Parser::parse_string(text, opts()).unwrap();
     assert_eq!(semantic_digest(&selected), semantic_digest(&plain));
 }
 
 #[test]
 fn parse_selected_string_rejects_invalid_node() {
-    let err = markdown::parser::Parser::parse_selected_string(
+    let err = ptdgrp_markdown::parser::Parser::parse_selected_string(
         "# t\n\npara\n".to_string(),
-        markdown::parser::ParserOptions::default().enabled_ofm(),
+        ptdgrp_markdown::parser::ParserOptions::default().enabled_ofm(),
         &[999_999],
     )
     .unwrap_err();
     assert!(matches!(
         err,
-        markdown::parser::ParseError::InvalidSelectionNode { node_id: 999_999 }
+        ptdgrp_markdown::parser::ParseError::InvalidSelectionNode { node_id: 999_999 }
     ));
 }
 
 #[test]
 fn node_ids_stable_across_calls_on_identical_source() {
     let text = "# A\n\npara ^p1\n\n## B ^h\n";
-    let opts = || markdown::parser::ParserOptions::default().enabled_ofm();
+    let opts = || ptdgrp_markdown::parser::ParserOptions::default().enabled_ofm();
     let collect = || {
         let mut ids = Vec::new();
-        let mut selection = markdown::selective::InlineSelection::default();
-        let mut phase = markdown::parser::Parser::new_with_options(text, opts())
-            .parse_blocks_with(|_| true, |_| markdown::selective::VisitControl::Continue)
+        let mut selection = ptdgrp_markdown::selective::InlineSelection::default();
+        let mut phase = ptdgrp_markdown::parser::Parser::new_with_options(text, opts())
+            .parse_blocks_with(
+                |_| true,
+                |_| ptdgrp_markdown::selective::VisitControl::Continue,
+            )
             .unwrap()
             .prepare_semantic_targets()
             .unwrap();
@@ -267,7 +270,7 @@ fn node_ids_stable_across_calls_on_identical_source() {
             &mut selection,
             |t, _| {
                 ids.push((t.node_id(), t.ref_text(), t.block_id().map(str::to_owned)));
-                markdown::selective::VisitControl::Continue
+                ptdgrp_markdown::selective::VisitControl::Continue
             },
         );
         ids

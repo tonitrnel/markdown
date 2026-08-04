@@ -1,6 +1,6 @@
 /// 各优化阶段验收门槛所引用的热点 lane；fixture 生成器与 alloc_count 共用。
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use markdown::{InlineSelection, Parser, ParserOptions, VisitControl};
+use ptdgrp_markdown::{InlineSelection, Parser, ParserOptions, VisitControl};
 
 mod hotspot_cases;
 

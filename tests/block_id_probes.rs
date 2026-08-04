@@ -4,7 +4,7 @@
 //! 该步骤必须保持全部输出逐字节不变（扫描器只写 `node.id`，
 //! 标记剥离仍由 inline 引擎完成）。
 
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 
 fn html(src: &str) -> String {
     Parser::new_with_options(src, ParserOptions::default().enabled_ofm())

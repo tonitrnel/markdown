@@ -1,4 +1,4 @@
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 
 #[test]
 fn test_smart_punctuation_em_dash() {

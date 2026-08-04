@@ -4,7 +4,7 @@
 //! 该重构必须保持这些输出逐字节不变；heading_and_body 一例已随
 //! footnote-adjacent-refs 修复（Obsidian 语义：相邻引用各自独立）更新期望。
 
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 
 fn html(src: &str) -> String {
     Parser::new_with_options(src, ParserOptions::default().enabled_ofm())

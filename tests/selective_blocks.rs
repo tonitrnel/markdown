@@ -1,6 +1,6 @@
 mod support;
 
-use markdown::{BlockScanStatus, MarkdownNode, Parser, ParserOptions, VisitControl};
+use ptdgrp_markdown::{BlockScanStatus, MarkdownNode, Parser, ParserOptions, VisitControl};
 use support::semantic::semantic_digest;
 
 /// 每个元素是一个顶层 Block 的完整源码（含结尾空行分隔）。
@@ -33,7 +33,7 @@ fn kind_name(node: &MarkdownNode) -> &'static str {
 #[test]
 fn parse_blocks_returns_an_inspectable_block_document() {
     let source = source();
-    let blocks: markdown::BlockDocument<'_> = Parser::new(&source)
+    let blocks: ptdgrp_markdown::BlockDocument<'_> = Parser::new(&source)
         .parse_blocks()
         .expect("block parse should succeed");
 

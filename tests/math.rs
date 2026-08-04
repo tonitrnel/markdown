@@ -1,5 +1,5 @@
-use markdown::ParserOptions;
-use markdown::parser::Parser;
+use ptdgrp_markdown::ParserOptions;
+use ptdgrp_markdown::parser::Parser;
 
 #[test]
 fn test_inline_math() {

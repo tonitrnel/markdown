@@ -1,4 +1,4 @@
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -58,7 +58,7 @@ fn parse_once(text: &str) -> u64 {
 }
 
 fn block_only_once(text: &str) -> u64 {
-    use markdown::selective::VisitControl;
+    use ptdgrp_markdown::selective::VisitControl;
     let started = Instant::now();
     let phase = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue);
@@ -68,7 +68,7 @@ fn block_only_once(text: &str) -> u64 {
 }
 
 fn session_prepare_once(text: &str) -> u64 {
-    use markdown::selective::VisitControl;
+    use ptdgrp_markdown::selective::VisitControl;
     let started = Instant::now();
     let phase = Parser::new_with_options(text, ParserOptions::default().enabled_ofm())
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)

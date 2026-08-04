@@ -1,4 +1,4 @@
-use markdown::parser::Parser;
+use ptdgrp_markdown::parser::Parser;
 
 // ========================== indent code =================================
 #[test]

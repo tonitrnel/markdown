@@ -1,8 +1,8 @@
 //! Private AST payload serialization for the JavaScript package wrapper.
-use markdown::ast::link::Link;
-use markdown::ast::text::TextRef;
-use markdown::Document;
-use markdown::MarkdownNode;
+use ptdgrp_markdown::ast::link::Link;
+use ptdgrp_markdown::ast::text::TextRef;
+use ptdgrp_markdown::Document;
+use ptdgrp_markdown::MarkdownNode;
 
 /// Writes node payloads in the same pre-order as the private `AstData`
 /// topology columns. Tree shape and source spans stay in the typed arrays;

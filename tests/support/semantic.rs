@@ -1,4 +1,4 @@
-use markdown::{Document, MarkdownNode};
+use ptdgrp_markdown::{Document, MarkdownNode};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct SemanticDigest {

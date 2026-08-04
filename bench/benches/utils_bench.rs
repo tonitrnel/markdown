@@ -34,7 +34,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             BenchmarkId::new("parse_with_cjk", &label),
             &text,
             |b, text| {
-                use markdown::{Parser, ParserOptions};
+                use ptdgrp_markdown::{Parser, ParserOptions};
                 b.iter(|| {
                     let parser = Parser::new_with_options(
                         text,
@@ -52,7 +52,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             BenchmarkId::new("parse_without_cjk", &label),
             &text,
             |b, text| {
-                use markdown::{Parser, ParserOptions};
+                use ptdgrp_markdown::{Parser, ParserOptions};
                 b.iter(|| {
                     let parser =
                         Parser::new_with_options(text, ParserOptions::default().enabled_ofm());

@@ -1,6 +1,6 @@
 mod spec_runner;
 
-use markdown::parser::ParserOptions;
+use ptdgrp_markdown::parser::ParserOptions;
 use spec_runner::{fail_fast_from_env, spec_suite_exact};
 
 #[test]

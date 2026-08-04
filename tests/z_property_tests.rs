@@ -7,8 +7,8 @@
 // Each property test validates a specific requirement from the design document
 // and runs with at least 100 iterations to ensure robustness.
 
-use markdown::Parser;
 use proptest::prelude::*;
+use ptdgrp_markdown::Parser;
 
 // Helper function to parse markdown and render to HTML
 fn parse_and_render(input: &str) -> String {

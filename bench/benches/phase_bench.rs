@@ -1,5 +1,5 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 use std::fs;
 
 fn bench_parse_only(c: &mut Criterion) {
@@ -36,7 +36,7 @@ fn bench_full(c: &mut Criterion) {
 }
 
 fn bench_selective_session(c: &mut Criterion) {
-    use markdown::selective::VisitControl;
+    use ptdgrp_markdown::selective::VisitControl;
     let data = fs::read_to_string("./bench/fixtures/curated/_data.md").unwrap();
     let corpus = fs::read_to_string("./bench/fixtures/corpora/markdown-it-corpus.md").unwrap();
     c.bench_function("block_only/_data", |b| {

@@ -1,5 +1,5 @@
 use colored::*;
-use markdown::parser::{Parser, ParserOptions};
+use ptdgrp_markdown::parser::{Parser, ParserOptions};
 use regex::Regex;
 use std::fs;
 use std::path::{Path, PathBuf};

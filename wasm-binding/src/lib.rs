@@ -2,8 +2,8 @@ use js_sys::{Object, Reflect, Uint32Array, Uint8Array};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use markdown::ast::link::Link;
-use markdown::{
+use ptdgrp_markdown::ast::link::Link;
+use ptdgrp_markdown::{
     Document as MarkdownDocument, MarkdownNode, Node, ParseError, Parser, ParserOptions,
     ParserPhaseSnapshot,
 };
@@ -553,7 +553,7 @@ struct LinkMatch {
 }
 
 fn query_targets_impl(text: &str, options: ParserOptions) -> Vec<SemanticTargetInfo> {
-    use markdown::selective::{InlineSelection, VisitControl};
+    use ptdgrp_markdown::selective::{InlineSelection, VisitControl};
     let mut out = Vec::new();
     let mut phase = Parser::new_with_options(text, options)
         .parse_blocks_with(|_| true, |_| VisitControl::Continue)
@@ -662,7 +662,8 @@ mod tests {
         let doc = Parser::parse_string(
             src.to_string(),
             ParserOptions::default().enabled_gfm().enabled_ofm(),
-        );
+        )
+        .expect("parse AST payload fixture");
         let wrapped = Document {
             inner: doc,
             snapshot: None,
@@ -683,7 +684,8 @@ mod tests {
         let doc = Parser::parse_string(
             "# Title\n\nA [link](https://example.com).\n".to_string(),
             ParserOptions::default().enabled_gfm(),
-        );
+        )
+        .expect("parse node array fixture");
         let arrays = NodeArrays::from_document(&doc);
 
         assert_eq!(arrays.kind.len(), doc.tree.len());
@@ -734,7 +736,7 @@ This is **bold** and *italic*.
         };
         let (opts_full, _) = build_parser_options(Some(options_full));
         let parser_full = Parser::new_with_options(markdown, opts_full);
-        let doc_full = Document::from(parser_full.parse());
+        let doc_full = Document::from(parser_full.parse().expect("full parse"));
         println!("full ast:\n{:?}", doc_full.inner.tree);
         assert_eq!(doc_full.inner.tree.len(), 14);
 

@@ -1,7 +1,7 @@
-use markdown::ast::{MarkdownNode, math};
-use markdown::parser::{Parser, ParserOptions};
-use markdown::tree::Tree;
-use markdown::{Document, Location};
+use ptdgrp_markdown::ast::{MarkdownNode, math};
+use ptdgrp_markdown::parser::{Parser, ParserOptions};
+use ptdgrp_markdown::tree::Tree;
+use ptdgrp_markdown::{Document, Location};
 
 fn loc_le(a: Location, b: Location) -> bool {
     (a.line, a.column) <= (b.line, b.column)
@@ -60,7 +60,7 @@ fn assert_location_invariants(doc: &Document, idx: usize) {
     }
 }
 
-fn find_first_math_node(tree: &Tree<markdown::Node>) -> Option<usize> {
+fn find_first_math_node(tree: &Tree<ptdgrp_markdown::Node>) -> Option<usize> {
     let mut stack = vec![0usize];
     while let Some(idx) = stack.pop() {
         if matches!(tree[idx].body, MarkdownNode::Math(..)) {
@@ -184,7 +184,7 @@ const MATRIX: &[(&str, &str)] = &[
     ("mixed_eol", "α\r\nβ\nγ\rδ"),
 ];
 
-fn matrix_parse(source: &str) -> markdown::Document<'_> {
+fn matrix_parse(source: &str) -> ptdgrp_markdown::Document<'_> {
     Parser::new_with_options(source, ParserOptions::default().enabled_gfm().enabled_ofm())
         .parse()
         .unwrap()

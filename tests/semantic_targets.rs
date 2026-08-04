@@ -1,6 +1,6 @@
 mod support;
 
-use markdown::{
+use ptdgrp_markdown::{
     BlockScanStatus, InlineSelection, MarkdownNode, Parser, ParserOptions, VisitControl,
 };
 use support::semantic::semantic_digest;
@@ -76,9 +76,11 @@ fn heading_inline_materializes_lazily_on_ref_text() {
                     MarkdownNode::Link(link) => format!("link:{}", {
                         match link.as_ref() {
                             // 引用链接的 URL 来自定义表，恒为 Owned
-                            markdown::ast::link::Link::Default(d) => match &d.url {
-                                markdown::ast::text::TextRef::Owned(url) => url.clone(),
-                                markdown::ast::text::TextRef::Source(_) => "<source>".to_string(),
+                            ptdgrp_markdown::ast::link::Link::Default(d) => match &d.url {
+                                ptdgrp_markdown::ast::text::TextRef::Owned(url) => url.clone(),
+                                ptdgrp_markdown::ast::text::TextRef::Source(_) => {
+                                    "<source>".to_string()
+                                }
                             },
                             _ => "other".to_string(),
                         }
@@ -108,7 +110,7 @@ fn heading_inline_materializes_lazily_on_ref_text() {
 /// 纯文本投影逐字节一致（真实引擎物化，全 curated 语料）。
 #[test]
 fn ref_text_matches_full_parse_projection_on_curated() {
-    fn project(doc: &markdown::Document, root: usize, out: &mut String) {
+    fn project(doc: &ptdgrp_markdown::Document, root: usize, out: &mut String) {
         let mut stack: Vec<usize> = Vec::new();
         let mut node = doc.tree.get_first_child(root);
         while let Some(id) = node {

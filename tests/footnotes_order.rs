@@ -1,4 +1,4 @@
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 
 /// 回归：脚注引用分布在多个 Block 时，编号与脚注列表必须按文档顺序。
 /// 见 .scratch/footnote-numbering-order/issues/01-footnote-numbering-follows-hashmap-order.md

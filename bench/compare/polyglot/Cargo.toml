@@ -5,4 +5,4 @@ edition = "2024"
 publish = false
 
 [dependencies]
-markdown_local = { package = "markdown", path = "../../.." }
+markdown_local = { package = "ptdgrp-markdown", path = "../../.." }

@@ -1,4 +1,4 @@
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 use std::fs;
 
 fn main() {

@@ -1,6 +1,6 @@
 mod support;
 
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 use support::semantic::semantic_digest;
 
 #[test]

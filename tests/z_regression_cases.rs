@@ -1,4 +1,4 @@
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 
 #[test]
 fn parse_obsidian_reference_document() {

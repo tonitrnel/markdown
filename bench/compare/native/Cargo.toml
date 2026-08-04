@@ -9,7 +9,7 @@ publish = false
 # comrak 在 shared_gfm 通道开启 table/strikethrough/tasklist 扩展；均不进 OFM 通道。
 [dependencies]
 comrak = "0.54.0"
-markdown_local = { package = "markdown", path = "../../.." }
+markdown_local = { package = "ptdgrp-markdown", path = "../../.." }
 pulldown-cmark = "0.13"
 rushdown = "0.18.0"
 

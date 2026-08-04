@@ -1,10 +1,10 @@
-# Painted Markdown
+# PTDGRP Markdown
 
-一个使用 Rust 编写的 Markdown AST 解析器。
+一个使用 Rust 编写的高性能 Markdown AST 解析器。
 
 ## Motivation
 
-`Painted Markdown` 是一个 **AST-first** 的 Markdown 解析器：
+`PTDGRP Markdown` 是一个 **AST-first** 的 Markdown 解析器：
 
 - 输入 Markdown，输出结构化 AST（包含节点类型、层级与位置信息）。
 - 目标兼容 CommonMark / GFM / OFM，供上层渲染系统（Web/Node）消费。
@@ -12,13 +12,11 @@
 
 项目重点是作为上层渲染管线的“语法前端”，尤其是通过 WebAssembly 在 JS 生态中复用 Rust 解析能力。
 
-如果你在寻找极致吞吐和低内存占用，优先考虑事件流解析器（如 `pulldown-cmark` / `cmark`）。
-
 ## Installation
 
 ```toml
 [dependencies]
-markdown = { path = ".../markdown" }
+ptdgrp-markdown = "1.1"
 ```
 
 ## API Usage
@@ -26,7 +24,7 @@ markdown = { path = ".../markdown" }
 ### Rust API
 
 ```rust
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 
 let parser = Parser::new_with_options(
     "# Title\n\ncontent",
@@ -35,7 +33,7 @@ let parser = Parser::new_with_options(
         .enabled_ofm()
         .enabled_cjk_autocorrect(),
 );
-let doc = parser.parse();
+let doc = parser.parse().unwrap();
 let node_count = doc.tree.len();
 let html = doc.tree.to_html(); // for debug/testing
 ```
@@ -43,7 +41,7 @@ let html = doc.tree.to_html(); // for debug/testing
 ### 安全护栏（推荐给 WASM/NAPI）
 
 ```rust
-use markdown::{ParseError, Parser, ParserOptions};
+use ptdgrp_markdown::{ParseError, Parser, ParserOptions};
 
 let parser = Parser::new_with_options(
     input,
@@ -52,10 +50,11 @@ let parser = Parser::new_with_options(
         .with_max_nodes(5_000_000),
 );
 
-match parser.parse {
+match parser.parse() {
     Ok(doc) => { /* use doc */ }
     Err(ParseError::InputTooLarge { limit, actual }) => { /* handle */ }
     Err(ParseError::NodeLimitExceeded { limit, actual }) => { /* handle */ }
+    Err(err) => { /* handle other parse errors */ }
 }
 ```
 
@@ -65,7 +64,7 @@ match parser.parse {
 `BlockDocument`。它不是解析会话：Block 扫描已经结束，结果只能继续物化或丢弃。
 
 ```rust
-use markdown::{Parser, ParserOptions};
+use ptdgrp_markdown::{Parser, ParserOptions};
 
 let blocks = Parser::new_with_options(
     input,
@@ -223,7 +222,7 @@ Output(AST Tree)
 
 1. 确保工作区干净，避免把无关改动带入发版。
 2. 修改版本号：
-   - `Cargo.toml` 的 `markdown` 版本
+   - `Cargo.toml` 的 `ptdgrp-markdown` 版本
    - `wasm-binding/Cargo.toml` 的 `markdown-binding` 版本
 3. 更新 `CHANGELOG.md`，新增对应版本与日期条目。
 4. 同步锁文件并做基础检查：
