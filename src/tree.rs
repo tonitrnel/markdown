@@ -99,7 +99,6 @@ impl<T: Debug> Tree<T> {
     pub fn new() -> Tree<T> {
         Tree::default()
     }
-    #[allow(unused)]
     /// 追加预留（v2C C4：inline 相位按 pending 规模一次扩容，减少倍增搬迁）
     pub(crate) fn reserve_nodes(&mut self, additional: usize) {
         self.nodes.reserve(additional);
@@ -114,7 +113,6 @@ impl<T: Debug> Tree<T> {
             free_flags: Vec::new(),
         }
     }
-    #[allow(unused)]
     pub fn cur(&self) -> Option<usize> {
         self.cur
     }

@@ -1,6 +1,6 @@
 use crate::utils::text_encoding::encode_char;
 
-#[allow(unused)]
+#[cfg(test)]
 pub(crate) fn decode(uri: impl AsRef<str>) -> String {
     let chars = uri.as_ref().chars().collect::<Vec<_>>();
     let len = chars.len();
@@ -30,6 +30,7 @@ pub(crate) fn decode(uri: impl AsRef<str>) -> String {
     }
     String::from_utf8_lossy(&bytes[..]).to_string()
 }
+
 /// 恒等快路径：全部字符已在安全集合内（`keep_escaped` 时含 `%`）则零分配借用。
 pub(crate) fn encode_cow(url: &str, keep_escaped: bool) -> std::borrow::Cow<'_, str> {
     let identity = url.bytes().all(|b| {

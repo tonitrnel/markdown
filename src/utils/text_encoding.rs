@@ -25,7 +25,8 @@ pub fn encode_char(char: char, buf: &mut [u8]) -> &[u8] {
         }
     }
 }
-#[allow(unused)]
+
+#[cfg(test)]
 pub fn encode_text(str: &str) -> Vec<u8> {
     let chars = str.chars();
     let mut buffer = Vec::new();
@@ -49,7 +50,7 @@ pub fn encode_text(str: &str) -> Vec<u8> {
     buffer
 }
 
-#[allow(unused)]
+#[cfg(test)]
 pub fn decode_text(input: &[u8]) -> String {
     let mut output = String::new();
     let mut index = 0;
