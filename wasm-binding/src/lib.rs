@@ -115,17 +115,17 @@ fn link_url(link: &Link, document: &MarkdownDocument) -> Option<String> {
 }
 
 impl NodeArrays {
-    fn from_document(document: &MarkdownDocument) -> Self {
+    fn from_document(document: &MarkdownDocument) -> serde_json::Result<Self> {
         let mut arrays = Self {
             kind: Vec::with_capacity(document.tree.len()),
             first_child: Vec::with_capacity(document.tree.len()),
             next_sibling: Vec::with_capacity(document.tree.len()),
             start: Vec::with_capacity(document.tree.len()),
             end: Vec::with_capacity(document.tree.len()),
-            payloads_json: json_tree::node_payloads_to_json(document),
+            payloads_json: json_tree::node_payloads_to_json(document)?,
         };
         arrays.push_subtree(document, 0);
-        arrays
+        Ok(arrays)
     }
 
     fn push_subtree(&mut self, document: &MarkdownDocument, node_id: usize) -> u32 {
@@ -210,7 +210,7 @@ enum ParseMode {
 /// - Uses serde defaults so all fields are optional from JS.
 /// - `parse_mode` controls one-shot vs deferred two-phase parsing.
 #[derive(Debug, Default, Clone, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct WasmParserOptions {
     /// `"full"` or `"frontmatter_only"`.
     parse_mode: ParseMode,
@@ -241,8 +241,7 @@ struct WasmParserOptions {
 }
 
 /// Converts wasm options payload into core parser options and parse mode.
-fn build_parser_options(input: Option<WasmParserOptions>) -> (ParserOptions, ParseMode) {
-    let input = input.unwrap_or_default();
+fn build_parser_options(input: WasmParserOptions) -> (ParserOptions, ParseMode) {
     let parse_mode = input.parse_mode.clone();
     let mut options = ParserOptions::default();
     if input.github_flavored {
@@ -328,28 +327,53 @@ fn parse_error_to_js(err: ParseError) -> JsValue {
     JsValue::from_str(&msg)
 }
 
+fn value_error_to_js(context: &str, err: impl std::fmt::Display) -> JsValue {
+    JsValue::from_str(&format!("{context}: {err}"))
+}
+
+fn serialize_to_js<T: Serialize + ?Sized>(value: &T, context: &str) -> Result<JsValue, JsValue> {
+    serde_wasm_bindgen::to_value(value).map_err(|err| value_error_to_js(context, err))
+}
+
+fn parser_options_from_js(options: TParserOptions) -> Result<(ParserOptions, ParseMode), JsValue> {
+    let raw = options.unchecked_into::<JsValue>();
+    let raw = serde_wasm_bindgen::from_value::<serde_json::Value>(raw)
+        .map_err(|err| value_error_to_js("invalid parser options", err))?;
+    let parsed = serde_json::from_value::<WasmParserOptions>(raw)
+        .map_err(|err| value_error_to_js("invalid parser options", err))?;
+    Ok(build_parser_options(parsed))
+}
+
 #[wasm_bindgen]
 impl Document {
     /// Private transport used by the published JS wrapper to materialize an
     /// AST. Its layout is intentionally not a public compatibility contract.
     #[wasm_bindgen(js_name = astData)]
-    pub fn ast_data(&mut self) -> TAstData {
+    pub fn ast_data(&mut self) -> Result<TAstData, JsValue> {
         if self.ast_data.is_none() {
-            self.ast_data = Some(NodeArrays::from_document(&self.inner));
+            let arrays = NodeArrays::from_document(&self.inner)
+                .map_err(|err| value_error_to_js("failed to serialize AST payloads", err))?;
+            self.ast_data = Some(arrays);
         }
-        let arrays = self.ast_data.as_ref().expect("AST data cache initialized");
-        let object = Object::new();
-        let kind_names = serde_wasm_bindgen::to_value(&NODE_KIND_NAMES)
-            .expect("node kind names are serializable");
-        let set = |name: &str, property_value: &JsValue| {
-            Reflect::set(&object, &JsValue::from_str(name), property_value)
-                .expect("node array property is writable");
+        let Some(arrays) = self.ast_data.as_ref() else {
+            return Err(JsValue::from_str("failed to initialize AST data cache"));
         };
-        set("abi_version", &JsValue::from_f64(1.0));
-        set("root", &JsValue::from_f64(0.0));
-        set("node_count", &JsValue::from_f64(arrays.kind.len() as f64));
-        set("kind_names", &kind_names);
-        set("payloads_json", &JsValue::from_str(&arrays.payloads_json));
+        let object = Object::new();
+        let kind_names = serialize_to_js(&NODE_KIND_NAMES, "failed to serialize node kinds")?;
+        let set = |name: &str, property_value: &JsValue| -> Result<(), JsValue> {
+            let written = Reflect::set(&object, &JsValue::from_str(name), property_value)?;
+            if !written {
+                return Err(JsValue::from_str(&format!(
+                    "failed to set AST data property {name}"
+                )));
+            }
+            Ok(())
+        };
+        set("abi_version", &JsValue::from_f64(1.0))?;
+        set("root", &JsValue::from_f64(0.0))?;
+        set("node_count", &JsValue::from_f64(arrays.kind.len() as f64))?;
+        set("kind_names", &kind_names)?;
+        set("payloads_json", &JsValue::from_str(&arrays.payloads_json))?;
         // SAFETY: the cache owns these immutable vectors for the document lifetime.
         // Callers must reacquire views after WASM memory growth.
         let kind = unsafe { Uint8Array::view(&arrays.kind) };
@@ -357,17 +381,17 @@ impl Document {
         let next_sibling = unsafe { Uint32Array::view(&arrays.next_sibling) };
         let start = unsafe { Uint32Array::view(&arrays.start) };
         let end = unsafe { Uint32Array::view(&arrays.end) };
-        set("kind", &kind);
-        set("first_child", &first_child);
-        set("next_sibling", &next_sibling);
-        set("start", &start);
-        set("end", &end);
-        object.unchecked_into::<TAstData>()
+        set("kind", &kind)?;
+        set("first_child", &first_child)?;
+        set("next_sibling", &next_sibling)?;
+        set("start", &start)?;
+        set("end", &end)?;
+        Ok(object.unchecked_into::<TAstData>())
     }
 
     /// Finds headings without materializing the complete JS AST.
     #[wasm_bindgen]
-    pub fn query_headings(&self) -> THeadingMatches {
+    pub fn query_headings(&self) -> Result<THeadingMatches, JsValue> {
         let mut headings = Vec::new();
         visit_nodes(&self.inner, 0, &mut |node_id, node| {
             if let MarkdownNode::Heading(heading) = &node.body {
@@ -379,15 +403,16 @@ impl Document {
                 });
             }
         });
-        serde_wasm_bindgen::to_value(&headings)
-            .expect("heading matches are serializable")
-            .unchecked_into::<THeadingMatches>()
+        Ok(
+            serialize_to_js(&headings, "failed to serialize heading matches")?
+                .unchecked_into::<THeadingMatches>(),
+        )
     }
 
     /// Finds links without materializing the complete JS AST. URL text is
     /// copied only for matching links.
     #[wasm_bindgen]
-    pub fn query_links(&self) -> TLinkMatches {
+    pub fn query_links(&self) -> Result<TLinkMatches, JsValue> {
         let mut links = Vec::new();
         visit_nodes(&self.inner, 0, &mut |node_id, node| {
             if let MarkdownNode::Link(link) = &node.body {
@@ -399,20 +424,17 @@ impl Document {
                 });
             }
         });
-        serde_wasm_bindgen::to_value(&links)
-            .expect("link matches are serializable")
-            .unchecked_into::<TLinkMatches>()
+        Ok(serialize_to_js(&links, "failed to serialize link matches")?
+            .unchecked_into::<TLinkMatches>())
     }
     /// Returns document tags as an unsorted array.
     /// Ordering is not guaranteed and should not be relied upon.
     /// 返回文档标签的无序数组
     /// 不保证顺序，不应依赖顺序
     #[wasm_bindgen(getter)]
-    pub fn tags(&self) -> Tags {
+    pub fn tags(&self) -> Result<Tags, JsValue> {
         let tags = self.inner.tags.iter().cloned().collect::<Vec<_>>();
-        serde_wasm_bindgen::to_value(&tags)
-            .expect("Failed to serialize tags of document")
-            .unchecked_into::<Tags>()
+        Ok(serialize_to_js(&tags, "failed to serialize document tags")?.unchecked_into::<Tags>())
     }
 
     /// Get total number of nodes in the AST
@@ -432,16 +454,17 @@ impl Document {
     /// Get the frontmatter metadata if present
     /// 获取 frontmatter 元数据（如果存在）
     #[wasm_bindgen(getter)]
-    pub fn frontmatter(&self) -> FrontmatterOrNull {
+    pub fn frontmatter(&self) -> Result<FrontmatterOrNull, JsValue> {
         // Find frontmatter node in AST
         if let Some(first_child_idx) = self.inner.tree.get_first_child(0) {
             if let MarkdownNode::FrontMatter(fm) = &self.inner.tree[first_child_idx].body {
-                return serde_wasm_bindgen::to_value(fm.as_ref())
-                    .unwrap_or(JsValue::NULL)
-                    .unchecked_into::<FrontmatterOrNull>();
+                return Ok(
+                    serialize_to_js(fm.as_ref(), "failed to serialize frontmatter")?
+                        .unchecked_into::<FrontmatterOrNull>(),
+                );
             }
         }
-        JsValue::NULL.unchecked_into::<FrontmatterOrNull>()
+        Ok(JsValue::NULL.unchecked_into::<FrontmatterOrNull>())
     }
 
     /// Completes phase 2 parse when `parse_mode = "frontmatter_only"`.
@@ -472,7 +495,7 @@ impl Document {
 /// # Returns
 /// A `Document` containing the parsed AST and metadata / 包含解析后的 AST 和元数据的 `Document`
 #[wasm_bindgen]
-pub fn parse(text: String) -> Document {
+pub fn parse(text: String) -> Result<Document, JsValue> {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let document = Parser::parse_string(
         text,
@@ -481,8 +504,8 @@ pub fn parse(text: String) -> Document {
             .enabled_ofm()
             .enabled_cjk_autocorrect(),
     )
-    .expect("unexpected error: parsing failed.");
-    Document::from(document)
+    .map_err(parse_error_to_js)?;
+    Ok(Document::from(document))
 }
 
 /// Parses markdown with user-specified options.
@@ -501,19 +524,17 @@ pub fn parse(text: String) -> Document {
 /// # Returns
 /// A `Document` containing the parsed AST and metadata / 包含解析后的 AST 和元数据的 `Document`
 #[wasm_bindgen]
-pub fn parse_with_options(text: String, options: TParserOptions) -> Document {
+pub fn parse_with_options(text: String, options: TParserOptions) -> Result<Document, JsValue> {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    let raw = options.unchecked_into::<JsValue>();
-    let parsed_options = serde_wasm_bindgen::from_value::<WasmParserOptions>(raw).ok();
-    let (options, parse_mode) = build_parser_options(parsed_options);
+    let (options, parse_mode) = parser_options_from_js(options)?;
     match parse_mode {
-        ParseMode::Full => Document::from(
-            Parser::parse_string(text, options).expect("unexpected error: parsing failed."),
-        ),
+        ParseMode::Full => Ok(Document::from(
+            Parser::parse_string(text, options).map_err(parse_error_to_js)?,
+        )),
         ParseMode::FrontmatterOnly => {
-            let (document, snapshot) = Parser::parse_frontmatter_phase_string(text, options)
-                .expect("parse failed: input exceeds parser limits");
-            Document::from_frontmatter_phase(document, snapshot)
+            let (document, snapshot) =
+                Parser::parse_frontmatter_phase_string(text, options).map_err(parse_error_to_js)?;
+            Ok(Document::from_frontmatter_phase(document, snapshot))
         }
     }
 }
@@ -552,14 +573,15 @@ struct LinkMatch {
     end_offset: u32,
 }
 
-fn query_targets_impl(text: &str, options: ParserOptions) -> Vec<SemanticTargetInfo> {
+fn query_targets_impl(
+    text: &str,
+    options: ParserOptions,
+) -> Result<Vec<SemanticTargetInfo>, ParseError> {
     use ptdgrp_markdown::selective::{InlineSelection, VisitControl};
     let mut out = Vec::new();
     let mut phase = Parser::new_with_options(text, options)
-        .parse_blocks_with(|_| true, |_| VisitControl::Continue)
-        .expect("unexpected error: parsing failed.")
-        .prepare_semantic_targets()
-        .expect("unexpected error: parsing failed.");
+        .parse_blocks_with(|_| true, |_| VisitControl::Continue)?
+        .prepare_semantic_targets()?;
     let mut selection = InlineSelection::default();
     phase.visit_semantic_targets(
         |_| true,
@@ -578,7 +600,7 @@ fn query_targets_impl(text: &str, options: ParserOptions) -> Vec<SemanticTargetI
             VisitControl::Continue
         },
     );
-    out
+    Ok(out)
 }
 
 /// Fast target lookup for Obsidian-style addressing: block phase +
@@ -588,7 +610,7 @@ fn query_targets_impl(text: &str, options: ParserOptions) -> Vec<SemanticTargetI
 /// Obsidian 式寻址的快速目标查询：仅块相位 + 语义准备，不做全树跨边界
 /// 序列化。对逐字节相同的文本与相同选项，`node_id` 跨调用稳定。
 #[wasm_bindgen]
-pub fn query_semantic_targets(text: String) -> TSemanticTargets {
+pub fn query_semantic_targets(text: String) -> Result<TSemanticTargets, JsValue> {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     let targets = query_targets_impl(
         &text,
@@ -596,10 +618,12 @@ pub fn query_semantic_targets(text: String) -> TSemanticTargets {
             .enabled_gfm()
             .enabled_ofm()
             .enabled_cjk_autocorrect(),
-    );
-    serde_wasm_bindgen::to_value(&targets)
-        .unwrap_or(JsValue::NULL)
-        .unchecked_into::<TSemanticTargets>()
+    )
+    .map_err(parse_error_to_js)?;
+    Ok(
+        serialize_to_js(&targets, "failed to serialize semantic targets")?
+            .unchecked_into::<TSemanticTargets>(),
+    )
 }
 
 /// `query_semantic_targets` with user-specified options (`parse_mode` ignored).
@@ -608,15 +632,14 @@ pub fn query_semantic_targets(text: String) -> TSemanticTargets {
 pub fn query_semantic_targets_with_options(
     text: String,
     options: TParserOptions,
-) -> TSemanticTargets {
+) -> Result<TSemanticTargets, JsValue> {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    let raw = options.unchecked_into::<JsValue>();
-    let parsed_options = serde_wasm_bindgen::from_value::<WasmParserOptions>(raw).ok();
-    let (options, _) = build_parser_options(parsed_options);
-    let targets = query_targets_impl(&text, options);
-    serde_wasm_bindgen::to_value(&targets)
-        .unwrap_or(JsValue::NULL)
-        .unchecked_into::<TSemanticTargets>()
+    let (options, _) = parser_options_from_js(options)?;
+    let targets = query_targets_impl(&text, options).map_err(parse_error_to_js)?;
+    Ok(
+        serialize_to_js(&targets, "failed to serialize semantic targets")?
+            .unchecked_into::<TSemanticTargets>(),
+    )
 }
 
 /// Selective parse: materialize inlines only for `node_ids` (descendants
@@ -669,7 +692,8 @@ mod tests {
             snapshot: None,
             ast_data: None,
         };
-        let json = json_tree::node_payloads_to_json(&wrapped.inner);
+        let json =
+            json_tree::node_payloads_to_json(&wrapped.inner).expect("serialize AST payloads");
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid json");
         let payloads = value.as_array().expect("payload array");
         assert_eq!(payloads.len(), wrapped.inner.tree.len());
@@ -686,7 +710,7 @@ mod tests {
             ParserOptions::default().enabled_gfm(),
         )
         .expect("parse node array fixture");
-        let arrays = NodeArrays::from_document(&doc);
+        let arrays = NodeArrays::from_document(&doc).expect("serialize node arrays");
 
         assert_eq!(arrays.kind.len(), doc.tree.len());
         assert_eq!(arrays.kind[0], 0, "root is the document kind");
@@ -734,7 +758,7 @@ This is **bold** and *italic*.
             parse_mode: ParseMode::Full,
             ..Default::default()
         };
-        let (opts_full, _) = build_parser_options(Some(options_full));
+        let (opts_full, _) = build_parser_options(options_full);
         let parser_full = Parser::new_with_options(markdown, opts_full);
         let doc_full = Document::from(parser_full.parse().expect("full parse"));
         println!("full ast:\n{:?}", doc_full.inner.tree);
@@ -745,7 +769,7 @@ This is **bold** and *italic*.
             parse_mode: ParseMode::FrontmatterOnly,
             ..Default::default()
         };
-        let (opts_two, _) = build_parser_options(Some(options_two));
+        let (opts_two, _) = build_parser_options(options_two);
         let parser_two = Parser::new_with_options(markdown, opts_two);
         let (doc_phase1, snapshot) = parser_two
             .parse_frontmatter_phase()

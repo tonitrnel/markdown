@@ -4,3 +4,5 @@ target/
 .DS_Store
 .worktrees/
 .scratch/
+.agents/
+skills-lock.json

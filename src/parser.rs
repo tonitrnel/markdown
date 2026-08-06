@@ -93,6 +93,8 @@ impl ParserOptions {
     /// Enables GitHub's extended autolink syntax.
     pub fn enabled_gfm_autolink(self) -> Self {
         Self {
+            default_flavored: false,
+            github_flavored: true,
             gfm_extended_autolink: true,
             ..self
         }
