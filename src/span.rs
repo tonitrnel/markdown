@@ -629,6 +629,7 @@ impl<'input> Span<'input> {
                 | b'|'
                 | b':'
                 | b'['
+                | b'$'
                 | b'0'..=b'9'
         )
     }
@@ -1086,8 +1087,8 @@ impl<'input> MergedSpan<'input> {
     }
 
     /// 获取从当前位置到末尾的字符串（用于调试）
-    #[allow(unused)]
     #[cfg(debug_assertions)]
+    #[allow(dead_code)]
     pub fn as_str(&self) -> String {
         let mut result = String::new();
         for (i, span) in self.spans.iter().enumerate().skip(self.current_span_index) {

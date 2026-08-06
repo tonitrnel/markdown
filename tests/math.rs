@@ -1,4 +1,5 @@
 use ptdgrp_markdown::ParserOptions;
+use ptdgrp_markdown::ast::{MarkdownNode, math};
 use ptdgrp_markdown::parser::Parser;
 
 #[test]
@@ -55,6 +56,46 @@ fn test_multiline_display_math_user_case() {
     assert!(output.contains("c &amp; d"));
     assert!(output.contains(r"\end{vmatrix}=ad-bc"));
     assert!(!output.contains("<p><div class=\"math math-display\">"));
+}
+
+#[test]
+fn test_display_math_contents_do_not_parse_as_markdown_blocks() {
+    let input = r#"$$
+\text{High predictability}
+=
+\text{Target constraint hit rate}
+-
+\text{Prohibited branch occurrence rate}
+-
+\text{Cross-sample structural drift}
+$$"#;
+    let options = ParserOptions::default().enabled_gfm();
+    let ast = Parser::new_with_options(input, options).parse().unwrap();
+
+    let math_id = ast.get_first_child(0).expect("display math block missing");
+    assert!(matches!(
+        ast[math_id].body,
+        MarkdownNode::Math(ref value) if matches!(value.as_ref(), math::Math::Block(_))
+    ));
+    assert!(ast.get_next(math_id).is_none());
+
+    let output = ast.to_html();
+    assert!(output.starts_with("<div class=\"math math-display\">"));
+    assert!(output.contains(r"\text{High predictability}"));
+    assert!(!output.contains("<h1>"));
+    assert!(!output.contains("<h2>"));
+}
+
+#[test]
+fn test_double_dollar_inside_paragraph_is_plain_text() {
+    let input = "Before $$x$$ after";
+    let options = ParserOptions::default().enabled_gfm();
+    let ast = Parser::new_with_options(input, options).parse().unwrap();
+    let output = ast.to_html();
+
+    assert!(output.contains("Before $$x$$ after"));
+    assert!(!output.contains("math-inline"));
+    assert!(!output.contains("math-display"));
 }
 
 #[test]

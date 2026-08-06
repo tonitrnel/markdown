@@ -119,6 +119,7 @@ impl MarkdownNode {
         matches!(
             self,
             MarkdownNode::Code(..)
+                | MarkdownNode::Math(..)
                 | MarkdownNode::Html(..)
                 | MarkdownNode::Paragraph
                 | MarkdownNode::TableHeadCol
@@ -159,6 +160,7 @@ impl MarkdownNode {
                 code::Code::Fenced(..) | code::Code::Indented(..)
             ),
             MarkdownNode::Html(h) => matches!(h.as_ref(), html::Html::Block(..)),
+            MarkdownNode::Math(value) => matches!(value.as_ref(), math::Math::Block(..)),
             _ => false,
         }
     }

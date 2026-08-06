@@ -187,15 +187,8 @@ pub(super) fn process<'input>(
                 link::process_gfm_autolink(&mut ctx)
             }
             b'{' if ctx.parser.options.jsx_like_component => html::process(&mut ctx),
-            // Math ($)
-            0x24 if !ctx.parser.options.default_flavored => {
-                if let Some(current_span) = ctx.line.current_span() {
-                    let is_block = current_span.validate(1, 0x24);
-                    math::process(&mut ctx, is_block)
-                } else {
-                    false
-                }
-            }
+            // Inline math ($)
+            0x24 if !ctx.parser.options.default_flavored => math::process(&mut ctx),
             // Inline footnote / block id (OFM) (^)
             b'^' if ctx.parser.options.obsidian_flavored => {
                 footnote::process_inline(&mut ctx) || link::process_block_id(&mut ctx)
@@ -268,7 +261,7 @@ fn scan_gate(b: u8, next: u8, prev: Option<u8>, f: GateFlags) -> bool {
                 b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'+' | b'-' | 0x80..=0xFF
             )
         }
-        b'$' if f.non_default => next == b'$' || !next.is_ascii_whitespace(),
+        b'$' if f.non_default => prev != Some(b'$') && next != b'$' && !next.is_ascii_whitespace(),
         _ => true,
     }
 }
@@ -331,10 +324,13 @@ fn should_try_special(ctx: &ProcessCtx, byte: u8) -> bool {
                 Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'+' | b'-' | 0x80..=0xFF)
             )
         }
-        // Inline math cannot open before whitespace; block math starts with $$.
+        // Inline math cannot be adjacent to another dollar or open before whitespace.
         b'$' if !ctx.parser.options.default_flavored => {
-            ctx.line.get(1) == Some(b'$')
-                || ctx.line.get(1).is_some_and(|b| !b.is_ascii_whitespace())
+            previous_byte_in_current_span(ctx) != Some(b'$')
+                && ctx
+                    .line
+                    .get(1)
+                    .is_some_and(|b| b != b'$' && !b.is_ascii_whitespace())
         }
         _ => true,
     }
@@ -347,6 +343,13 @@ fn starts_with_ci(ctx: &ProcessCtx, needle: &[u8]) -> bool {
             .get(idx)
             .is_some_and(|actual| actual.eq_ignore_ascii_case(expected))
     })
+}
+
+#[inline]
+fn previous_byte_in_current_span(ctx: &ProcessCtx) -> Option<u8> {
+    let span = ctx.line.current_span()?;
+    let cursor = span.cursor();
+    (cursor > span.start()).then(|| span.source_slice()[cursor - 1])
 }
 
 #[inline]

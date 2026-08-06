@@ -9,6 +9,7 @@ mod footnote;
 mod heading;
 pub(crate) mod html;
 mod list;
+mod math;
 mod table;
 mod thematic_break;
 
@@ -85,6 +86,7 @@ pub fn process<'input>(
         MarkdownNode::Table(..) => ast::table::Table::process(ctx),
         MarkdownNode::Callout(..) => ast::callout::Callout::process(ctx),
         MarkdownNode::Footnote(..) => ast::footnote::Footnote::process(ctx),
+        MarkdownNode::Math(..) => ast::math::BlockMath::process(ctx),
         MarkdownNode::Paragraph => {
             if ctx.line.is_blank_to_end() {
                 BlockProcessing::Unprocessed
@@ -133,6 +135,7 @@ pub fn after(id: usize, parser: &mut Parser, location: u32) {
         MarkdownNode::Table(..) => ast::table::Table::after(id, parser),
         MarkdownNode::Callout(..) => ast::callout::Callout::after(id, parser),
         MarkdownNode::Footnote(..) => ast::footnote::Footnote::after(id, parser),
+        MarkdownNode::Math(..) => ast::math::BlockMath::after(id, parser),
         _ => (),
     }
 }
@@ -160,6 +163,7 @@ static LINE_HEAD: [u16; 256] = {
     t[b'|' as usize] = 1 << 8; // Table
     t[b':' as usize] = 1 << 8;
     t[b'[' as usize] = 1 << 9; // Footnote
+    t[b'$' as usize] = 1 << 11; // BlockMath
     t
 };
 
@@ -204,6 +208,7 @@ pub fn matcher<'input>(
     try_matcher!(8, ast::table::Table::before);
     try_matcher!(9, ast::footnote::Footnote::before);
     try_matcher!(10, ast::code::IndentedCode::before);
+    try_matcher!(11, ast::math::BlockMath::before);
     line.resume(&snapshot);
     BlockMatching::Unmatched
 }

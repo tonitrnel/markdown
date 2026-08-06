@@ -1,4 +1,3 @@
-#![allow(unused)]
 use crate::ast::{MarkdownNode, math};
 use crate::inlines::ProcessCtx;
 
@@ -6,19 +5,18 @@ pub(super) fn process(
     ProcessCtx {
         line, parser, id, ..
     }: &mut ProcessCtx,
-    is_block: bool,
 ) -> bool {
+    if line.get(1) == Some(b'$') {
+        return false;
+    }
+
     let start_location = line.cursor_or_end() as u32;
-    let delimiter_len = if is_block { 2 } else { 1 };
-    line.skip(delimiter_len);
-    // 检查开头是否允许（非 block 时不能以空白开头）
-    let allow_open = if is_block {
-        true
-    } else {
-        line.peek()
-            .map(|b| !b.is_ascii_whitespace())
-            .unwrap_or(false)
-    };
+    line.skip(1);
+    // Inline math cannot open before whitespace.
+    let allow_open = line
+        .peek()
+        .map(|b| !b.is_ascii_whitespace())
+        .unwrap_or(false);
     if !allow_open {
         return false;
     }
@@ -28,12 +26,11 @@ pub(super) fn process(
         let Some(current) = line.peek() else {
             return false;
         };
-        if current == b'$' && (!is_block || line.validate(1, b'$')) {
-            if !is_block
-                && (expression_bytes.is_empty()
-                    || expression_bytes
-                        .last()
-                        .is_some_and(|b| b.is_ascii_whitespace()))
+        if current == b'$' {
+            if expression_bytes.is_empty()
+                || expression_bytes
+                    .last()
+                    .is_some_and(|b| b.is_ascii_whitespace())
             {
                 return false;
             }
@@ -45,21 +42,13 @@ pub(super) fn process(
             return false;
         }
     };
-    line.skip(delimiter_len);
+    line.skip(1);
     let end_location = line.cursor_or_end() as u32;
-    let node = if is_block {
-        parser.append_to(
-            *id,
-            MarkdownNode::Math(Box::new(math::Math::Block(math::BlockMath {}))),
-            (start_location, end_location),
-        )
-    } else {
-        parser.append_to(
-            *id,
-            MarkdownNode::Math(Box::new(math::Math::Inline(math::InlineMath {}))),
-            (start_location, end_location),
-        )
-    };
+    let node = parser.append_to(
+        *id,
+        MarkdownNode::Math(Box::new(math::Math::Inline(math::InlineMath {}))),
+        (start_location, end_location),
+    );
     let expression_str = match std::str::from_utf8(&expression_bytes) {
         Ok(v) => v,
         Err(_) => return false,
@@ -73,16 +62,6 @@ mod tests {
     use crate::ParserOptions;
     use crate::parser::Parser;
 
-    #[test]
-    fn ext_case_1() {
-        let text = r#"$
-\begin{vmatrix}a & b\\
-c & d
-\end{vmatrix}=ad-bc
-$"#;
-        let ast = Parser::new(text).parse();
-        println!("{ast:?}")
-    }
     #[test]
     fn ext_case_2() {
         let text = r#"This is an inline math expression $e^{2i\pi} = 1$."#;
