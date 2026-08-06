@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@ptdgrp/markdown-wasm": "1.1.0",
+    "@ptdgrp/markdown-wasm": "1.1.3",
     "react-json-view-lite": "^2.5.0",
     "shiki": "^4.4.1",
     "solid-js": "^1.9.14"
